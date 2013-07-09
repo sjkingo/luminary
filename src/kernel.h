@@ -5,4 +5,7 @@
 extern int _kernel_start;
 extern int _kernel_end;
 
+/* printf() for the kernel */
+int printk(const char *format, ...);
+
 #endif

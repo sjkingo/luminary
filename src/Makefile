@@ -3,6 +3,7 @@ EMULATOR=qemu-system-i386
 
 OBJS=	boot.o \
 	kernel.o \
+	printk.o \
 	vga.o
 
 CC=gcc
