@@ -10,6 +10,8 @@ static void move_cursor(int x, int y)
     outb(CRT_PORT+1, (i >> 8));
     outb(CRT_PORT, 0xF);
     outb(CRT_PORT+1, (i & 0xFF));
+    vid.cur_x = x;
+    vid.cur_y = y;
 }
 
 void clear_screen(void)
