@@ -2,7 +2,8 @@ KERNEL_BIN=kernel.bin
 EMULATOR=qemu-system-i386
 
 OBJS=	boot.o \
-	kernel.o
+	kernel.o \
+	vga.o
 
 CC=gcc
 AS=as
