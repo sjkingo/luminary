@@ -19,6 +19,8 @@
 .globl multiboot_entry
 multiboot_entry:
     cli
+
+    push %ebx # multiboot struct
     call kernel_main
 
 /* If the kernel returns, bail */
