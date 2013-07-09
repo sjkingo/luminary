@@ -51,4 +51,7 @@ static inline unsigned short vga_tuple(char c, unsigned char color)
 /* Call before any attempts to access VGA memory are made */
 void init_vga(void);
 
+/* Put a character to the screen */
+void putchar(char c);
+
 #endif

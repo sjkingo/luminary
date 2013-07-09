@@ -14,6 +14,13 @@ static void move_cursor(int x, int y)
     vid.cur_y = y;
 }
 
+static void putchar_at(char c, int x, int y)
+{
+    int i = vga_index(x, y);
+    vid.buffer[i] = vga_tuple(c, vid.def_color);
+    move_cursor(x+1, y);
+}
+
 void clear_screen(void)
 {
     for (int y = 0; y < VGA_HEIGHT; y++) {
@@ -24,7 +31,12 @@ void clear_screen(void)
     }
     move_cursor(0, 0);
 }
- 
+
+void putchar(char c)
+{
+    putchar_at(c, vid.cur_x, vid.cur_y);
+}
+
 void init_vga(void)
 {
     vid.buffer = (unsigned short *)0xB8000;
