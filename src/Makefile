@@ -1,6 +1,9 @@
 KERNEL_BIN=kernel.bin
 EMULATOR=qemu-system-i386
 
+OBJS=	boot.o \
+	kernel.o
+
 CC=gcc
 AS=as
 
@@ -12,8 +15,8 @@ ARCH=-m32
 .PHONY: all
 all: $(KERNEL_BIN)
 
-$(KERNEL_BIN): boot.o kernel.o linker.ld
-	$(CC) $(ARCH) $(LDFLAGS) -o $@ $^
+$(KERNEL_BIN): linker.ld $(OBJS)
+	$(CC) $(ARCH) $(LDFLAGS) -o $@ $(OBJS)
 
 .PHONY: qemu
 qemu: $(KERNEL_BIN)
@@ -25,9 +28,16 @@ qemucd: $(KERNEL_BIN) bootiso
 
 .PHONY: clean
 clean:
-	rm -f *.o $(KERNEL_BIN) core.*
+	rm -f *.o $(KERNEL_BIN) core.* *.d
 	make -C ../grub2 clean
 
 .PHONY: bootiso
 bootiso:
 	make -C ../grub2 boot.iso
+
+# pull in existing deps for all our objects
+-include $(OBJS:.o=.d)
+
+%.o: %.c
+	$(CC) $(CFLAGS) -c $*.c -o $*.o
+	$(CC) $(CFLAGS) -MM $*.c > $*.d
