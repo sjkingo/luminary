@@ -21,6 +21,13 @@ static void putchar_at(int c, int x, int y)
     move_cursor(x+1, y);
 }
 
+void put_newline(void)
+{
+    vid.cur_x = 0;
+    vid.cur_y++;
+    move_cursor(vid.cur_x, vid.cur_y);
+}
+
 void clear_screen(void)
 {
     for (int y = 0; y < VGA_HEIGHT; y++) {

@@ -23,7 +23,7 @@
 
 /* both in vga.h but we don't want to include that kludge in here so extern them */
 extern void putchar(int c);
-extern void vga_newline(void);
+extern void put_newline(void);
 
 static void printchar(char **str, int c)
 {
@@ -121,7 +121,10 @@ static int print(char **out, const char *format, va_list args )
 	char scr[2];
 
 	for (; *format != 0; ++format) {
-                if (*format == '%') {
+                if (*format == '\n') {
+                        put_newline();
+                        continue;
+                } else if (*format == '%') {
 			++format;
 			width = pad = 0;
 			if (*format == '\0') break;
