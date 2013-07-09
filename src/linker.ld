@@ -4,7 +4,6 @@ SECTIONS
 {
     /* Load the kernel at 1M of lower memory */
     . = 1M;
-    _kernel_start = .;
 
     /* Multiboot header and code */
     .text ALIGN(4K) :
@@ -34,8 +33,6 @@ SECTIONS
         ebss = .;
     }
 
-    /* Declare the end of the kernel */
-    _kernel_end = .;
 
     /* Throw away some sections */
     /DISCARD/ :
