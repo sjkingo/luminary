@@ -33,6 +33,11 @@ SECTIONS
         ebss = .;
     }
 
+    /* Kernel stack */
+    .kstack :
+    {
+        *(.kstack)
+    }
 
     /* Throw away some sections */
     /DISCARD/ :

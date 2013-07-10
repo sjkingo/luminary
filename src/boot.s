@@ -13,12 +13,21 @@
     .long FLAGS
     .long CHECKSUM
 
+/* Create a 16K stack for the kernel to use (placed at the bottom of kernel image) */
+.globl STACKSIZE
+.set STACKSIZE, 16384
+.section .kstack, "wa"
+    kstack:
+    .skip STACKSIZE
+
 .section .text
 
 /* Call the kernel proper */
 .globl multiboot_entry
 multiboot_entry:
     cli
+
+    movl $kstack + STACKSIZE, %esp
 
     push %ebx # multiboot struct
     call kernel_main
