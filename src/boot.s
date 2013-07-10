@@ -32,9 +32,10 @@ multiboot_entry:
     push %ebx # multiboot struct
     call kernel_main
 
-/* If the kernel returns, bail */
+    jmp cpu_halt
+
+.globl cpu_halt
+cpu_halt:
     cli
-    jmp halt
-halt:
     hlt
-    jmp halt
+    jmp cpu_halt

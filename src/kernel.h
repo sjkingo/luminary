@@ -5,6 +5,8 @@
 
 struct multiboot_info *mb_info;
 
+void panic(char *msg);
+
 /* printf() for the kernel */
 int printk(const char *format, ...);
 

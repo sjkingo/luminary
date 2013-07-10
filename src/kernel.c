@@ -2,6 +2,15 @@
 #include "multiboot.h"
 #include "vga.h"
 
+void panic(char *msg)
+{
+    printk("\n\nKernel panic: %s\n\n", msg);
+
+    /* halt the CPU and spin until reset */
+    extern void cpu_halt(void);
+    cpu_halt();
+}
+
 void kernel_main(struct multiboot_info *mb)
 {
     mb_info = mb;
