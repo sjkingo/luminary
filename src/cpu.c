@@ -1,5 +1,3 @@
-#include <stdbool.h>
-
 #include "kernel.h"
 #include "gdt.h"
 #include "x86.h"
@@ -40,14 +38,11 @@ static void gdt_install(void)
     printk("Installed GDT at address %X\n", (unsigned int)&gptr);
 }
 
-bool init_cpu(void)
+void init_cpu(void)
 {
     if (!in_protected_mode()) {
-        printk("warning: cpu is not in protected mode!\n");
-        return false;
+        panic("cpu is not in protected mode!");
     }
 
     gdt_install();
-
-    return true;
 }
