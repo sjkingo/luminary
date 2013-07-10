@@ -6,6 +6,8 @@ OBJS=	boot.o \
 	kernel.o \
 	printk.o \
 	tables.o \
+	traps.o \
+	vectors.o \
 	vga.o
 
 CC=gcc
@@ -32,7 +34,7 @@ qemucd: $(KERNEL_BIN) bootiso
 
 .PHONY: clean
 clean:
-	rm -f *.o $(KERNEL_BIN) core.* *.d
+	rm -f *.o $(KERNEL_BIN) core.* *.d vectors.s
 	make -C ../grub2 clean
 
 .PHONY: bootiso
@@ -41,6 +43,9 @@ bootiso:
 
 # pull in existing deps for all our objects
 -include $(OBJS:.o=.d)
+
+vectors.s: mkvectors.py
+	python mkvectors.py > $@
 
 %.o: %.c
 	$(CC) $(CFLAGS) -c $*.c -o $*.o

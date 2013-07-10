@@ -2,3 +2,4 @@
 *.d
 kernel.bin
 core.*
+vectors.s
