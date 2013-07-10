@@ -2,8 +2,10 @@ KERNEL_BIN=kernel.bin
 EMULATOR=qemu-system-i386
 
 OBJS=	boot.o \
+	cpu.o \
 	kernel.o \
 	printk.o \
+	tables.o \
 	vga.o
 
 CC=gcc
