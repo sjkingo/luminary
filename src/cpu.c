@@ -2,6 +2,7 @@
 
 #include "kernel.h"
 #include "gdt.h"
+#include "x86.h"
 
 struct gdt_entry gdt[GDT_NUM_ENTRIES];
 struct gdt_ptr gptr;
@@ -41,6 +42,12 @@ static void gdt_install(void)
 
 bool init_cpu(void)
 {
+    if (!in_protected_mode()) {
+        printk("warning: cpu is not in protected mode!\n");
+        return false;
+    }
+
     gdt_install();
+
     return true;
 }
