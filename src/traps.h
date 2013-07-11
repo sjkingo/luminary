@@ -27,35 +27,28 @@ enum cpu_interrupts {
 };
 
 struct trap_frame {
+    /* register state */
+    unsigned int ds;
     unsigned int edi;
     unsigned int esi;
     unsigned int ebp;
-    unsigned int oesp; // not used
+    unsigned int esp;
     unsigned int ebx;
     unsigned int edx;
     unsigned int ecx;
     unsigned int eax;
 
-    unsigned short gs;
-    unsigned short padding1;
-    unsigned short fs;
-    unsigned short padding2;
-    unsigned short es;
-    unsigned short padding3;
-    unsigned short ds;
-    unsigned short padding4;
+    unsigned int magic;
     unsigned int trapno;
-
     unsigned int err;
+
     unsigned int eip;
-    unsigned short cs;
-    unsigned short padding5;
+    unsigned int cs;
     unsigned int eflags;
 
-    // unused
-    unsigned int esp;
-    unsigned short ss;
-    unsigned short padding6;
+    /* unused user-mode registers */
+    unsigned int uesp;
+    unsigned int uss;
 };
 
 #endif

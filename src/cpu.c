@@ -78,7 +78,23 @@ void init_cpu(void)
     idt_install();
 }
 
-void trap_handler(struct trap_frame *frame)
+void trap_handler(struct trap_frame frame)
 {
-    printk("trap_handler(): int %d\n", frame->trapno);
+    printk("trap: int%d at 0x%x\n", frame.trapno, frame.eip);
+    printk("trapno=%d, errcode=%06x, magic=%06x\n", frame.trapno, frame.err, frame.magic);
+
+    printk("register dump for this frame:\n");
+    printk("   ds=%06x, edi=%06x, esi=%06x, ebp=%06x, esp=%06x\n", frame.ds, frame.edi, frame.esi, frame.ebp, frame.esp);
+    printk("  ebx=%06x, edx=%06x, ecx=%06x, eax=%06x, eip=%06x\n", frame.ebx, frame.edx, frame.ecx, frame.eax, frame.eip);
+    printk("  eflags=%06x, (u)esp=%06x, (u)ss=%06x cs=%06x\n", frame.eflags, frame.uesp, frame.uss, frame.cs);
+
+    // frame->cs should be 0x8 (KERNEL_SEG), which means frame->{esp,ss} are undefined
+    if (frame.cs != IDT_KERNEL_SEG) {
+        printk("BUG: trap received from outside KERNEL_SEG (0x%x) or invalid frame\n", frame.cs);
+    }
+
+    // we can't recover from a GPF
+    if (frame.trapno == 13) {
+        panic("general protection fault");
+    }
 }
