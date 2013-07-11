@@ -44,4 +44,7 @@ static inline bool is_paging_enabled(void)
     return cr0 & (1<<16);
 }
 
+#define disable_interrupts() ({ asm volatile("cli\nnop"); })
+#define enable_interrupts() ({ asm volatile("sti\nnop"); })
+
 #endif
