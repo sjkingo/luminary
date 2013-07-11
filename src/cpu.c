@@ -105,13 +105,27 @@ void trap_handler(struct trap_frame frame)
     printk(" ] PE=%d PG=%d\n", in_protected_mode(), is_paging_enabled());
     printk("\n");
 
-    // frame->cs should be 0x8 (KERNEL_SEG), which means frame->{esp,ss} are undefined
+    /* frame.cs should always be == IDT_KERNEL_SEG */
     if (frame.cs != IDT_KERNEL_SEG) {
-        printk("BUG: trap received from outside KERNEL_SEG (0x%x) or invalid frame\n", frame.cs);
+        printk("BUG: trap received from outside kernel code segment (CS=%04x)\n", frame.cs);
+        printk("     (will attempt to continue execution..)\n");
     }
 
-    // we can't recover from a GPF
-    if (frame.trapno == 13) {
-        panic("general protection fault");
+    /* handle the trap - most will be a panic() */
+    switch (frame.trapno) {
+        case INT_DEBUG:
+        case INT_BREAK:
+            printk("STOP: %s detected\n", VECTOR_NAME(frame.trapno));
+            panic("Stopping kernel execution as requested");
+
+        case INT_PAGE_FAULT:
+            printk("TODO: page fault\n");
+            goto out;
+
+        default:
+            panic("CPU exception");
     }
+
+out:
+    return;
 }
