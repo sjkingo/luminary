@@ -8,9 +8,11 @@ void panic(char *msg)
 
     /* halt the CPU and spin until reset */
     extern void cpu_halt(void);
-    cpu_halt();
+    cpu_halt(); // noreturn
+    while (1); // silence compiler warning
 }
 
+extern void kernel_main() __attribute__((noreturn));
 void kernel_main(struct multiboot_info *mb)
 {
     mb_info = mb;
