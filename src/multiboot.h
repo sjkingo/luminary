@@ -1,6 +1,16 @@
 #ifndef MULTIBOOT_H
 #define MULTIBOOT_H
 
+/* Multiboot header definitions used in boot.S. See:
+ * https://www.gnu.org/software/grub/manual/multiboot/multiboot.html#Header-magic-fields
+ */
+#define MULTIBOOT_MAGIC  0x1badb002
+//                      align   mem_*
+#define MULTIBOOT_FLAGS (1<<0 | 1<<1)
+#define MULTIBOOT_CHECKSUM -(MULTIBOOT_MAGIC + MULTIBOOT_FLAGS)
+
+#ifndef __ASSEMBLER__
+
 struct multiboot_aout_table {
     unsigned long tabsize;
     unsigned long strsize;
@@ -40,5 +50,7 @@ static inline int mem_available(void)
      */
     return (mb_info->mem_upper / 1024) + 1;
 }
+
+#endif
 
 #endif

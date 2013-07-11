@@ -1,18 +1,13 @@
-/* Multiboot header definitions
- * https://www.gnu.org/software/grub/manual/multiboot/multiboot.html#Header-magic-fields
- */
-.set MAGIC, 0x1badb002
-.set FLAGS, (1<<0 | 1<<1)
-.set CHECKSUM, -(MAGIC + FLAGS)
-
+#include "multiboot.h"
 
 /* Note the linker script collapses this into .text, but guarantees
  * it will be in the first 8K of the kernel binary.
  */
 .section .mbhdr
-    .long MAGIC
-    .long FLAGS
-    .long CHECKSUM
+    .long MULTIBOOT_MAGIC
+    .long MULTIBOOT_FLAGS
+    .long MULTIBOOT_CHECKSUM
+
 
 /* Create a 16K stack for the kernel to use (placed at the bottom of kernel image) */
 .globl STACKSIZE
