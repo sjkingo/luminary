@@ -4,6 +4,7 @@ EMULATOR=qemu-system-i386
 OBJS=	boot.o \
 	cpu.o \
 	kernel.o \
+	pic.o \
 	printk.o \
 	tables.o \
 	traps.o \

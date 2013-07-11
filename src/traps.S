@@ -6,6 +6,7 @@
 
 .globl alltraps
 alltraps:
+    cli
     # magic constant gets embedded in the trap_frame
     pushl $TRAP_MAGIC
 
@@ -32,4 +33,6 @@ alltraps:
 
     # throw away eax, ds and magic from the stack and return
     addl $12, %esp
+    sti
+
     iret

@@ -1,5 +1,6 @@
 #include "kernel.h"
 #include "dt.h"
+#include "pic.h"
 #include "traps.h"
 #include "x86.h"
 
@@ -76,10 +77,21 @@ void init_cpu(void)
 
     gdt_install();
     idt_install();
+    pic_init();
 }
 
 void trap_handler(struct trap_frame frame)
 {
+    if (frame.trapno >= IRQ_BASE_OFFSET) {
+        /* interrupt from the PIC */
+        irq_handler(frame);
+        goto out;
+    } else {
+        /* CPU exception */
+        goto exc_handler;
+    }
+
+exc_handler:
     /* dump trap frame */
     printk("\n");
     printk("Unhandled exception: %d (%s) at %08x\n", frame.trapno, VECTOR_NAME(frame.trapno), frame.eip);
