@@ -11,4 +11,4 @@ After building, you may run the kernel in QEMU in one of two ways:
 
 `make qemucd` to build a bootable ISO image with Grub 2 and boot that way
 
-Some architecture notes are in `src/NOTES.md`.
+Some architecture notes and *gotchas* are located in `NOTES.md`.
