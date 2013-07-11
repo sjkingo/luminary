@@ -2,4 +2,4 @@
 *.d
 kernel.bin
 core.*
-vectors.s
+vectors.S

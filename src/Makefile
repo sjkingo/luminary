@@ -15,7 +15,7 @@ AS=$(CC)
 
 ARCH=-m32
 CFLAGS=$(ARCH) -Wall -Wextra -ffreestanding -std=gnu99
-ASFLAGS=$(ARCH) -c
+ASFLAGS=$(ARCH)
 LDFLAGS=-T linker.ld -nostdlib -lgcc
 
 .PHONY: all
@@ -34,7 +34,7 @@ qemucd: $(KERNEL_BIN) bootiso
 
 .PHONY: clean
 clean:
-	rm -f *.o $(KERNEL_BIN) core.* *.d vectors.s
+	rm -f *.o $(KERNEL_BIN) core.* *.d vectors.S
 	make -C ../grub2 clean
 
 .PHONY: bootiso
@@ -44,7 +44,7 @@ bootiso:
 # pull in existing deps for all our objects
 -include $(OBJS:.o=.d)
 
-vectors.s: mkvectors.py
+vectors.S: mkvectors.py
 	python mkvectors.py > $@
 
 %.o: %.c
