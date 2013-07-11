@@ -26,7 +26,7 @@ static inline int get_cr0(void)
     return cr0;
 }
 
-static inline char in_protected_mode(void)
+static inline bool in_protected_mode(void)
 {
     /* bit 0 = PE
      * https://en.wikipedia.org/wiki/Control_register#CR0
