@@ -84,7 +84,7 @@ void trap_handler(struct trap_frame frame)
     printk("\n");
     printk("Unhandled exception: %d (%s) at %08x\n", frame.trapno, VECTOR_NAME(frame.trapno), frame.eip);
     printk("ERR=%04x IP=%04x:%08x SP=%04x:%08x GDT=%08x IDT=%08x\n", frame.err, 
-            frame.cs, frame.eip, frame.ds, frame.esp, &gptr, &iptr);
+            frame.cs, frame.eip, frame.ds, frame.esp, (unsigned int)&gptr, (unsigned int)&iptr);
     if (frame.magic != TRAP_MAGIC)
         printk("BUG: magic=0x%x INVALID -- frame may be corrupt.\n", frame.magic);
     printk("EAX=%08x EBX=%08x ECX=%08x EDX=%08x [u]ESP=%08x\n", frame.eax, frame.ebx, frame.ecx, frame.edx, frame.uesp);
