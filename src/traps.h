@@ -25,10 +25,46 @@ enum cpu_interrupts {
     INT_PAGE_FAULT     = 14,   // page fault
     // 15: reserved
     INT_FP_ERR         = 16,   // floating point error
-    INT_ALIGN_CHK      = 17,   // alignment check
-    INT_MACHINE_CHK    = 18,   // machine check
-    INT_SIMD_ERR       = 19    // SIMD floating point error
 };
+
+static inline char *resolve_vector_name(int v)
+{
+    switch (v) {
+        case INT_DIVIDE:
+            return "divide by 0";
+        case INT_DEBUG:
+            return "debug exception";
+        case INT_NMI:
+            return "non-maskable interrupt";
+        case INT_BREAK:
+            return "breakpoint";
+        case INT_OVERFL:
+            return "overflow";
+        case INT_BOUNDS_CHK:
+            return "bounds check";
+        case INT_ILLEGAL:
+            return "illegal opcode";
+        case INT_DEVICE:
+            return "device not available";
+        case INT_DOUBLEF:
+            return "double fault";
+        case INT_TSS:
+            return "invalid TSS";
+        case INT_SEGMENT:
+            return "segment not present";
+        case INT_STACK:
+            return "stack exception";
+        case INT_GPF:
+            return "general protection fault";
+        case INT_PAGE_FAULT:
+            return "page fault";
+        case INT_FP_ERR:
+            return "floating point error";
+        default:
+            return "??";
+    }
+}
+#define VECTOR_NAME(v) resolve_vector_name(v)
 
 struct trap_frame {
     /* register state */

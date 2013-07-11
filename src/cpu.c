@@ -80,13 +80,30 @@ void init_cpu(void)
 
 void trap_handler(struct trap_frame frame)
 {
-    printk("trap: int%d at 0x%x\n", frame.trapno, frame.eip);
-    printk("trapno=%d, errcode=%06x, magic=%06x\n", frame.trapno, frame.err, frame.magic);
-
-    printk("register dump for this frame:\n");
-    printk("   ds=%06x, edi=%06x, esi=%06x, ebp=%06x, esp=%06x\n", frame.ds, frame.edi, frame.esi, frame.ebp, frame.esp);
-    printk("  ebx=%06x, edx=%06x, ecx=%06x, eax=%06x, eip=%06x\n", frame.ebx, frame.edx, frame.ecx, frame.eax, frame.eip);
-    printk("  eflags=%06x, (u)esp=%06x, (u)ss=%06x cs=%06x\n", frame.eflags, frame.uesp, frame.uss, frame.cs);
+    /* dump trap frame */
+    printk("\n");
+    printk("Unhandled exception: %d (%s) at %08x\n", frame.trapno, VECTOR_NAME(frame.trapno), frame.eip);
+    printk("ERR=%04x IP=%04x:%08x SP=%04x:%08x GDT=%08x IDT=%08x\n", frame.err, 
+            frame.cs, frame.eip, frame.ds, frame.esp, &gptr, &iptr);
+    if (frame.magic != TRAP_MAGIC)
+        printk("BUG: magic=0x%x INVALID -- frame may be corrupt.\n", frame.magic);
+    printk("EAX=%08x EBX=%08x ECX=%08x EDX=%08x [u]ESP=%08x\n", frame.eax, frame.ebx, frame.ecx, frame.edx, frame.uesp);
+    printk("ESI=%08x EDI=%08x EBP=%08x ESP=%08x [u]SS =%08x\n", frame.esi, frame.edi, frame.ebp, frame.esp, frame.uss);
+    printk("DS=%04x CS=%04x EFLAGS=[ ", frame.ds, frame.cs);
+    for (int i = 0; i < 22; i++) {
+        if (i == 1 || i == 3 || i == 5 || (i >= 12 && i <= 18)) {
+            // reserved or obseleted
+            printk("-");
+            continue;
+        }
+        if (frame.eflags & (1<<i)) {
+            printk("1");
+        } else {
+            printk("0");
+        }
+    }
+    printk(" ] PE=%d PG=%d\n", in_protected_mode(), is_paging_enabled());
+    printk("\n");
 
     // frame->cs should be 0x8 (KERNEL_SEG), which means frame->{esp,ss} are undefined
     if (frame.cs != IDT_KERNEL_SEG) {

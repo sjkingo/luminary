@@ -1,6 +1,8 @@
 #ifndef X86_H
 #define X86_H
 
+#include <stdbool.h>
+
 /* x86-specific routines for accessing registers and I/O ports.
  */
 
@@ -31,6 +33,15 @@ static inline char in_protected_mode(void)
      */
     int cr0 = get_cr0();
     return cr0 & (1<<0);
+}
+
+static inline bool is_paging_enabled(void)
+{
+    /* bit 16 = PG
+     * https://en.wikipedia.org/wiki/Control_register#CR0
+     */
+    int cr0 = get_cr0();
+    return cr0 & (1<<16);
 }
 
 #endif
