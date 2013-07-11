@@ -11,12 +11,12 @@ OBJS=	boot.o \
 	vga.o
 
 CC=gcc
-AS=as
+AS=$(CC)
 
-CFLAGS=$(ARCH) -Wall -Wextra -ffreestanding -std=gnu99
-ASFLAGS=--32
-LDFLAGS=-T linker.ld -nostdlib -lgcc
 ARCH=-m32
+CFLAGS=$(ARCH) -Wall -Wextra -ffreestanding -std=gnu99
+ASFLAGS=$(ARCH) -c
+LDFLAGS=-T linker.ld -nostdlib -lgcc
 
 .PHONY: all
 all: $(KERNEL_BIN)

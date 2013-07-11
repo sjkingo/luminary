@@ -1,6 +1,10 @@
 #ifndef TRAPS_H
 #define TRAPS_H
 
+#define TRAP_MAGIC 0xc0ffee
+
+#ifndef __ASSEMBLER__
+
 #define NUM_TRAP_VECTORS 256
 
 enum cpu_interrupts {
@@ -38,7 +42,7 @@ struct trap_frame {
     unsigned int ecx;
     unsigned int eax;
 
-    unsigned int magic;
+    unsigned int magic; // == TRAP_MAGIC to be a valid frame
     unsigned int trapno;
     unsigned int err;
 
@@ -50,5 +54,7 @@ struct trap_frame {
     unsigned int uesp;
     unsigned int uss;
 };
+
+#endif
 
 #endif

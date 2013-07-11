@@ -1,6 +1,6 @@
 # vectors.s calls into here
 
-.set TRAP_MAGIC, 0xc0ffee
+#include "traps.h"
 
 .section .text
 
