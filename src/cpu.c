@@ -80,6 +80,33 @@ void init_cpu(void)
     pic_init();
 }
 
+void dump_trap_frame(struct trap_frame *frame)
+{
+    printk("\n");
+    printk("Unhandled exception: %d (%s) at %08x\n", frame->trapno, VECTOR_NAME(frame->trapno), frame->eip);
+    printk("ERR=%04x IP=%04x:%08x SP=%04x:%08x GDT=%08x IDT=%08x\n", frame->err, 
+            frame->cs, frame->eip, frame->ds, frame->esp, (unsigned int)&gptr, (unsigned int)&iptr);
+    if (frame->magic != TRAP_MAGIC)
+        printk("BUG: magic=0x%x INVALID -- frame->>may be corrupt.\n", frame->magic);
+    printk("EAX=%08x EBX=%08x ECX=%08x EDX=%08x [u]ESP=%08x\n", frame->eax, frame->ebx, frame->ecx, frame->edx, frame->uesp);
+    printk("ESI=%08x EDI=%08x EBP=%08x ESP=%08x [u]SS =%08x\n", frame->esi, frame->edi, frame->ebp, frame->esp, frame->uss);
+    printk("DS=%04x CS=%04x EFLAGS=[ ", frame->ds, frame->cs);
+    for (int i = 0; i < 22; i++) {
+        if (i == 1 || i == 3 || i == 5 || (i >= 12 && i <= 18)) {
+            // reserved or obseleted
+            printk("-");
+            continue;
+        }
+        if (frame->eflags & (1<<i)) {
+            printk("1");
+        } else {
+            printk("0");
+        }
+    }
+    printk(" ] PE=%d PG=%d\n", in_protected_mode(), is_paging_enabled());
+    printk("\n");
+}
+
 void trap_handler(struct trap_frame frame)
 {
     if (frame.trapno >= IRQ_BASE_OFFSET) {
@@ -92,30 +119,7 @@ void trap_handler(struct trap_frame frame)
     }
 
 exc_handler:
-    /* dump trap frame */
-    printk("\n");
-    printk("Unhandled exception: %d (%s) at %08x\n", frame.trapno, VECTOR_NAME(frame.trapno), frame.eip);
-    printk("ERR=%04x IP=%04x:%08x SP=%04x:%08x GDT=%08x IDT=%08x\n", frame.err, 
-            frame.cs, frame.eip, frame.ds, frame.esp, (unsigned int)&gptr, (unsigned int)&iptr);
-    if (frame.magic != TRAP_MAGIC)
-        printk("BUG: magic=0x%x INVALID -- frame may be corrupt.\n", frame.magic);
-    printk("EAX=%08x EBX=%08x ECX=%08x EDX=%08x [u]ESP=%08x\n", frame.eax, frame.ebx, frame.ecx, frame.edx, frame.uesp);
-    printk("ESI=%08x EDI=%08x EBP=%08x ESP=%08x [u]SS =%08x\n", frame.esi, frame.edi, frame.ebp, frame.esp, frame.uss);
-    printk("DS=%04x CS=%04x EFLAGS=[ ", frame.ds, frame.cs);
-    for (int i = 0; i < 22; i++) {
-        if (i == 1 || i == 3 || i == 5 || (i >= 12 && i <= 18)) {
-            // reserved or obseleted
-            printk("-");
-            continue;
-        }
-        if (frame.eflags & (1<<i)) {
-            printk("1");
-        } else {
-            printk("0");
-        }
-    }
-    printk(" ] PE=%d PG=%d\n", in_protected_mode(), is_paging_enabled());
-    printk("\n");
+    dump_trap_frame(&frame);
 
     /* frame.cs should always be == IDT_KERNEL_SEG */
     if (frame.cs != IDT_KERNEL_SEG) {
