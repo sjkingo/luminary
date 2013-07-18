@@ -6,6 +6,7 @@ OBJS=	boot.o \
 	kernel.o \
 	pic.o \
 	printk.o \
+	string.o \
 	tables.o \
 	traps.o \
 	vectors.o \
