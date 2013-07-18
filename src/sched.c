@@ -15,10 +15,9 @@
  * ----------
  * If a tie break is entered, the scheduler will take a set of tasks in the
  * highest dynamic priority (the tied priority) and from that set pick the task
- * that ran the closest to the current time slice. This helps minimise
- * thrashing by reducing the number of context switches away from the
- * previously running task. This behaviour is noticed often in the example
- * given below.
+ * that ran most recently. This helps minimise thrashing by reducing the number
+ * of context switches away from the previously running task. This behaviour is
+ * noticed often in the example given below.
  *
  * Resource starvation
  * -------------------
