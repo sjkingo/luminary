@@ -94,9 +94,9 @@ static void dump_queue(void)
     do {
         sprintf(line, "%s[%d:%s ", line, t->pid, t->name);
         if (t->prio_d == SCHED_LEVEL_SUSP) {
-            sprintf(line, "%sS]    ", line);
+            sprintf(line, "%sS]  ", line);
         } else {
-            sprintf(line, "%sp=%d]    ", line, t->prio_d);
+            sprintf(line, "%sp=%-2d]  ", line, t->prio_d);
         }
         t = t->next;
     } while (t != NULL);

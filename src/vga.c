@@ -58,7 +58,7 @@ void write_statusline(char *str)
 {
     /* change the colour of the status line */
     unsigned char def_color = vid.def_color;
-    vid.def_color = make_color(COLOR_WHITE, COLOR_LIGHT_RED);
+    vid.def_color = make_color(COLOR_WHITE, COLOR_BROWN);
 
     /* print the string */
     int x = 0;
