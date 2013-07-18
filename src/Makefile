@@ -6,8 +6,10 @@ OBJS=	boot.o \
 	kernel.o \
 	pic.o \
 	printk.o \
+	sched.o \
 	string.o \
 	tables.o \
+	task.o \
 	traps.o \
 	vectors.o \
 	vga.o
@@ -16,7 +18,7 @@ CC=gcc
 AS=$(CC)
 
 ARCH=-m32
-CFLAGS=$(ARCH) -Wall -Wextra -ffreestanding -std=gnu99
+CFLAGS=$(ARCH) -Wall -Wextra -ffreestanding -std=gnu99 -DDEBUG
 ASFLAGS=$(ARCH)
 LDFLAGS=-T linker.ld -nostdlib -lgcc
 

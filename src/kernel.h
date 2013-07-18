@@ -1,6 +1,9 @@
 #ifndef KERNEL_H
 #define KERNEL_H
 
+#include <stddef.h>
+#include <string.h>
+
 #include "printk.h"
 
 struct multiboot_info *mb_info;

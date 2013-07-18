@@ -1,5 +1,6 @@
 #include "kernel.h"
 #include "multiboot.h"
+#include "task.h"
 #include "vga.h"
 #include "x86.h"
 
@@ -25,6 +26,7 @@ void kernel_main(struct multiboot_info *mb)
     init_vga(); // must be first
     printk("Luminary starting..\n");
     init_cpu();
+    init_task();
     printk("available memory: %d MB\n", mem_available());
 
     enable_interrupts();
