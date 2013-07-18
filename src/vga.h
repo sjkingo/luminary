@@ -54,4 +54,9 @@ void init_vga(void);
 /* Put a character to the screen */
 void putchar(int c);
 
+/* Writes the given string to the status line at the bottom
+ * of the screen. See also printsl() in printk.c.
+ */
+void write_statusline(char *str);
+
 #endif

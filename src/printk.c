@@ -21,9 +21,10 @@
 
 #include <stdarg.h>
 
-/* both in vga.h but we don't want to include that kludge in here so extern them */
-extern void putchar(int c);
+/* in vga.h but we don't want to include that kludge in here so extern them */
+extern void putchar(int);
 extern void put_newline(void);
+extern void write_statusline(char *);
 
 static void printchar(char **str, int c)
 {
@@ -195,4 +196,15 @@ int sprintf(char *out, const char *format, ...)
         
         va_start( args, format );
         return print( &out, format, args );
+}
+
+int printsl(const char *format, ...)
+{
+    va_list args;
+    va_start(args, format);
+    char out[1024];
+    char *ptr = out;
+    int r = print(&ptr, format, args);
+    write_statusline(out);
+    return r;
 }

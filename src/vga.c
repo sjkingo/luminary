@@ -18,7 +18,6 @@ static void putchar_at(int c, int x, int y)
 {
     int i = vga_index(x, y);
     vid.buffer[i] = vga_tuple((char)c, vid.def_color);
-    move_cursor(x+1, y);
 }
 
 void put_newline(void)
@@ -42,6 +41,7 @@ void clear_screen(void)
 void putchar(int c)
 {
     putchar_at(c, vid.cur_x, vid.cur_y);
+    move_cursor(vid.cur_x+1, vid.cur_y);
 }
 
 void init_vga(void)
@@ -51,4 +51,30 @@ void init_vga(void)
     vid.cur_x = 0;
     vid.cur_y = 0;
     clear_screen();
+    write_statusline("");
+}
+
+void write_statusline(char *str)
+{
+    /* change the colour of the status line */
+    unsigned char def_color = vid.def_color;
+    vid.def_color = make_color(COLOR_WHITE, COLOR_LIGHT_RED);
+
+    /* print the string */
+    int x = 0;
+    while (str[x] != '\0' && x < VGA_WIDTH) {
+        putchar_at(str[x], x, VGA_HEIGHT);
+        x++;
+    }
+
+    /* pad the rest of the line */
+    if (x < VGA_WIDTH) {
+        while (x < VGA_WIDTH) {
+            putchar_at(' ', x, VGA_HEIGHT);
+            x++;
+        }
+    }
+
+    /* restore the default colour */
+    vid.def_color = def_color;
 }
