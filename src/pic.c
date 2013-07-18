@@ -1,5 +1,6 @@
 #include "kernel.h"
 #include "pic.h"
+#include "task.h"
 #include "traps.h"
 #include "x86.h"
 
@@ -20,14 +21,20 @@ static void timer_init(void)
     outb(PIT_CH0_DATA, (unsigned char)((div >> 8) & 0xFF));
     timekeeper.uptime_ms = 0;
     printk("PIT set at %d Hz (every %d ms)\n", TIMER_FREQ, TIMER_INTERVAL);
+#ifdef TURTLE
+    printk("Build with TURTLE: will only schedule every second\n");
+#endif
 }
 
 static void timer_tick(void)
 {
     timekeeper.uptime_ms += TIMER_INTERVAL;
-#ifdef DEBUG
-    if ((timekeeper.uptime_ms % 1000) == 0)
-        printk("tick=%d\n", timekeeper.uptime_ms);
+#ifdef TURTLE
+    /* Only run scheduler every second */
+    if ((timekeeper.uptime_ms % TIMER_FREQ) == 0)
+        sched();
+#else
+    sched();
 #endif
 }
 

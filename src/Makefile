@@ -1,5 +1,6 @@
 KERNEL_BIN=kernel.bin
 EMULATOR=qemu-system-i386
+DEFINES=-DDEBUG -DTURTLE
 
 OBJS=	boot.o \
 	cpu.o \
@@ -18,7 +19,7 @@ CC=gcc
 AS=$(CC)
 
 ARCH=-m32
-CFLAGS=$(ARCH) -Wall -Wextra -ffreestanding -std=gnu99 -DDEBUG
+CFLAGS=$(ARCH) -Wall -Wextra -ffreestanding -std=gnu99 $(DEFINES)
 ASFLAGS=$(ARCH)
 LDFLAGS=-T linker.ld -nostdlib -lgcc
 
