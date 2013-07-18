@@ -3,6 +3,8 @@
 #include "vga.h"
 #include "x86.h"
 
+struct kernel_time timekeeper;
+
 void panic(char *msg)
 {
     printk("\n\nKernel panic: %s\n\n", msg);

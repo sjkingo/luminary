@@ -18,6 +18,17 @@ static void timer_init(void)
     outb(PIT_CMD_PORT, 0x36); /* command byte */
     outb(PIT_CH0_DATA, (unsigned char)(div & 0xFF));
     outb(PIT_CH0_DATA, (unsigned char)((div >> 8) & 0xFF));
+    timekeeper.uptime_ms = 0;
+    printk("PIT set at %d Hz (every %d ms)\n", TIMER_FREQ, TIMER_INTERVAL);
+}
+
+static void timer_tick(void)
+{
+    timekeeper.uptime_ms += TIMER_INTERVAL;
+#ifdef DEBUG
+    if ((timekeeper.uptime_ms % 1000) == 0)
+        printk("tick=%d\n", timekeeper.uptime_ms);
+#endif
 }
 
 void pic_init(void)
@@ -47,7 +58,7 @@ void irq_handler(struct trap_frame frame)
 {
     switch (frame.trapno) {
         case IRQ_TIMER:
-            // TODO
+            timer_tick();
             goto out;
 
         default:

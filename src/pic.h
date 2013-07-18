@@ -41,7 +41,9 @@ enum pic_interrupts {
 #define PIT_CH2_DATA    (PIT_CH0_DATA + 2)
 #define PIT_CMD_PORT    0x43
 #define PIT_CLOCK       1193180
-#define TIMER_FREQ      50      // ms
+
+#define TIMER_FREQ      1000
+#define TIMER_INTERVAL  (1000/TIMER_FREQ)       // ms
 
 /* init the PIC */
 void pic_init(void);
