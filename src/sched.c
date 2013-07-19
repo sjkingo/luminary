@@ -93,14 +93,12 @@ static void update_queue_statusline(void)
     struct task *t = sched_queue;
     do {
         char r = ' ';
-        if (t == running_task)
+        if (t == running_task) {
             r = '*';
-        sprintf(line, "%s[%c%d:%s ", line, r, t->pid, t->name);
-        if (t->prio_d == SCHED_LEVEL_SUSP) {
-            sprintf(line, "%sS]  ", line);
-        } else {
-            sprintf(line, "%sp=%-2d]  ", line, t->prio_d);
+        } else if (t->prio_d == SCHED_LEVEL_SUSP) {
+            r = 'S';
         }
+        sprintf(line, "%s%c%d:%s (p=%d)  ", line, r, t->pid, t->name, t->prio_d);
         t = t->next;
     } while (t != NULL);
 
