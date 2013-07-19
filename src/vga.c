@@ -20,8 +20,26 @@ static void putchar_at(int c, int x, int y)
     vid.buffer[i] = vga_tuple((char)c, vid.def_color);
 }
 
+static void scroll_screen(void)
+{
+    /* move each cell up one row */
+    for (unsigned short i = 0; i < (VGA_HEIGHT * VGA_WIDTH); i++) {
+        unsigned short this = vid.buffer[i];
+        vid.buffer[i-VGA_WIDTH] = this;
+    }
+
+    /* clear the bottom row */
+    for (unsigned short x = 0; x < VGA_WIDTH; x++) {
+        putchar_at(' ', x, VGA_HEIGHT-1);
+    }
+
+    move_cursor(vid.cur_x, VGA_HEIGHT-2);
+}
+
 void put_newline(void)
 {
+    if (vid.cur_y + 1 >= VGA_HEIGHT)
+        scroll_screen();
     vid.cur_x = 0;
     vid.cur_y++;
     move_cursor(vid.cur_x, vid.cur_y);
