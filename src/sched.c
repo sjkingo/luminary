@@ -84,7 +84,7 @@
  * priority. This creates a predictability of running times in the system.
  */
 
-static void dump_queue(void)
+static void update_queue_statusline(void)
 {
     char line[1024];
     line[0] = '\0';
@@ -92,7 +92,10 @@ static void dump_queue(void)
     /* build up the queue line */
     struct task *t = sched_queue;
     do {
-        sprintf(line, "%s[%d:%s ", line, t->pid, t->name);
+        char r = ' ';
+        if (t == running_task)
+            r = '*';
+        sprintf(line, "%s[%c%d:%s ", line, r, t->pid, t->name);
         if (t->prio_d == SCHED_LEVEL_SUSP) {
             sprintf(line, "%sS]  ", line);
         } else {
@@ -104,15 +107,31 @@ static void dump_queue(void)
     printsl(line);
 }
 
+/* Resets all task's dynamic priorities to their static priorities. */
+static unsigned int reset_all_priorities(void)
+{
+    unsigned int r = 0;
+    struct task *t = sched_queue;
+    while (t != NULL) {
+        if (t->pid == PID_IDLE)
+            break;
+        t->prio_d = t->prio_s;
+        r++;
+        t = t->next;
+    }
+    return r;
+}
+
 void sched(void)
 {
+    struct task *picked, *t;
+
     if (sched_queue == NULL)
         panic("sched: head of queue missing?");
 
-    dump_queue();
-
-    struct task *picked = NULL;
-    struct task *t = sched_queue;
+pick:
+    picked = NULL;
+    t = sched_queue;
     while (t != NULL) {
         /* skip over suspended tasks */
         if (t->prio_d == SCHED_LEVEL_SUSP) {
@@ -125,7 +144,6 @@ void sched(void)
             break;
         } else if (t->prio_d == t->next->prio_d) {
             /* tie break as there are >1 tasks at this priority level */
-            printk("sched: TODO: tie break between %s and %s\n", t->name, t->next->name);
             if (running_task == t) {
                 picked = t;
                 break;
@@ -142,19 +160,24 @@ next:
 
     if (picked == NULL)
         panic("sched: no tasks to schedule!");
-#ifdef DEBUG
-    printk("sched: picked %d:%s (p=%d) to run\n", picked->pid, picked->name, picked->prio_d);
-#endif
 
-    /* age this task */
-    if (picked->prio_d > 0) {
-        picked->prio_d--;
-#ifdef DEBUG
-    } else if (picked->prio_d == SCHED_LEVEL_SUSP) {
-        printk("sched: suspending task %d:%s after this slice\n", picked->pid, picked->name);
-#endif
+    /* if we picked the idle task, attempt to run other tasks instead */
+    if (t->pid == PID_IDLE) {
+        unsigned int r = reset_all_priorities();
+        if (r > 0)
+            goto pick;
+        /* else run the idle task */
+    } else {
+        /* age this task */
+        if (picked->prio_d > 0) {
+            picked->prio_d--;
+        } else if (picked->prio_d == SCHED_LEVEL_SUSP) {
+            /* do nothing */
+        }
     }
 
     /* TODO: run this task */
     running_task = picked;
+    update_queue_statusline();
+
 }
