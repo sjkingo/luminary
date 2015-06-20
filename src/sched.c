@@ -1,6 +1,3 @@
-#include "kernel.h"
-#include "task.h"
-
 /* Scheduling algorithm
  * ====================
  * The scheduler implements a basic hard priority-based preemptive algorithm.
@@ -84,6 +81,21 @@
  * priority. This creates a predictability of running times in the system.
  */
 
+#include "kernel.h"
+#include "sched.h"
+#include "task.h"
+
+static struct task *queues[SCHED_QUEUE_HIGHEST][SCHED_QUEUE_MAX_TASKS_PER];
+static struct task *sched_queue;
+
+/* Helper macro to return queue from queue level */
+#define Q(x) (queues[(SCHED_QUEUE_HIGHEST-x)])
+
+static void clear_queues(void)
+{
+    memset(queues, 0, sizeof(queues));
+}
+
 static void update_queue_statusline(void)
 {
     char line[1024];
@@ -136,8 +148,8 @@ pick:
             goto next;
         }
 
-        /* if the next task has a lower priority than this one, stop looking */
         if ((t->next == NULL) || (t->prio_d > t->next->prio_d)) {
+            /* if the next task has a lower priority than this one, stop looking */
             picked = t;
             break;
         } else if (t->prio_d == t->next->prio_d) {
@@ -177,5 +189,10 @@ next:
     /* TODO: run this task */
     running_task = picked;
     update_queue_statusline();
+    printk("%s ", picked->name);
+}
 
+void init_sched(void)
+{
+    clear_queues();
 }

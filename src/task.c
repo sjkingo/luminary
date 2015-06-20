@@ -1,4 +1,5 @@
 #include "kernel.h"
+#include "sched.h"
 #include "task.h"
 
 /* last PID allocated to a task */
