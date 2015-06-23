@@ -19,3 +19,13 @@ Some architecture notes and *gotchas* are located in `NOTES.md`.
 * `glibc-devel.i686`
 
 Tested as working under `gcc` 5.1.1 and GNU `as` 2.25-5
+
+## Build configuration
+
+You may configure the build by editing the `$DEFINES` variable at the top of `[src/Makefile](https://github.com/sjkingo/luminary/blob/master/src/Makefile)`.
+
+Available options are:
+
+* `-DDEBUG`: produce debugging output to the console. You probably want this with `-DTURTLE`
+* `-DTURTLE`: scale the scheduler down to 1 task per second
+* `-DUSE_SERIAL`: enable the serial subsystem, which writes console output to COM1. This may be used with `qemu -nographic`.
