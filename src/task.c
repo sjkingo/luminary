@@ -57,7 +57,7 @@ out:
     if (sched_queue == NULL)
         panic("create_task: bug here - head of sched_queue is empty");
 #ifdef DEBUG
-    printk("new_task: \"%s\", pid=%d, created=%d, prio=%d\n", name, t->pid, t->created, prio);
+    printk("new_task: %s, pid=%d, created=%d, prio=%d\n", name, t->pid, t->created, prio);
 #endif
 }
 

@@ -145,7 +145,7 @@ void sched(void)
     struct task *picked, *t;
 
     if (sched_queue == NULL)
-        panic("sched: head of queue missing?");
+        panic("sched: no tasks to run: head of sched_queue is missing");
 
 pick:
     picked = NULL;
@@ -177,7 +177,7 @@ next:
     }
 
     if (picked == NULL)
-        panic("sched: no tasks to schedule!");
+        panic("sched: pick: no tasks to schedule");
 
     /* if we picked the idle task, attempt to run other tasks instead */
     if (t->pid == PID_IDLE) {

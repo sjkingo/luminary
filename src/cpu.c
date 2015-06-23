@@ -72,7 +72,7 @@ static void idt_install(void)
 void init_cpu(void)
 {
     if (!in_protected_mode()) {
-        panic("cpu is not in protected mode!");
+        panic("cpu is not in protected mode");
     }
 
     gdt_install();
