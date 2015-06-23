@@ -25,6 +25,9 @@
 extern void putchar(int);
 extern void put_newline(void);
 extern void write_statusline(char *);
+#ifdef USE_SERIAL
+extern void write_serial(char);
+#endif
 
 static void printchar(char **str, int c)
 {
@@ -32,8 +35,12 @@ static void printchar(char **str, int c)
     if (str) {
         **str = c;
         ++(*str);
+    } else {
+        putchar(c);
+#ifdef USE_SERIAL
+        write_serial(c);
+#endif
     }
-    else putchar(c);
 }
 
 #define PAD_RIGHT 1
@@ -124,6 +131,9 @@ static int print(char **out, const char *format, va_list args )
 	for (; *format != 0; ++format) {
                 if (*format == '\n') {
                         put_newline();
+#ifdef USE_SERIAL
+                        write_serial(*format);
+#endif
                         continue;
                 } else if (*format == '%') {
 			++format;

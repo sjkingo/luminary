@@ -1,6 +1,6 @@
 KERNEL_BIN=kernel.bin
 EMULATOR=qemu-system-i386
-DEFINES=-DDEBUG -DTURTLE
+DEFINES=-DDEBUG -DTURTLE -DUSE_SERIAL
 
 OBJS=	boot.o \
 	cpu.o \
@@ -8,6 +8,7 @@ OBJS=	boot.o \
 	pic.o \
 	printk.o \
 	sched.o \
+	serial.o \
 	string.o \
 	tables.o \
 	task.o \

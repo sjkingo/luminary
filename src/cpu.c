@@ -4,6 +4,10 @@
 #include "traps.h"
 #include "x86.h"
 
+#ifdef USE_SERIAL
+#include "serial.h"
+#endif
+
 /* The GDT */
 struct gdt_entry gdt[GDT_NUM_ENTRIES];
 struct gdt_ptr gptr;
@@ -78,6 +82,9 @@ void init_cpu(void)
     gdt_install();
     idt_install();
     pic_init();
+#ifdef USE_SERIAL
+    serial_init();
+#endif
 }
 
 void dump_trap_frame(struct trap_frame *frame)
