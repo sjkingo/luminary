@@ -1,5 +1,4 @@
-Luminary, a small x86 RTOS operating system
-===========================================
+# Luminary, a small x86 real-time operating system
 
 To build, enter into the `src` subdirectory and type `make`. You will need to
 have a working `gcc` and GNU `as` compiler that is capable of producing 32-bit
@@ -12,3 +11,11 @@ After building, you may run the kernel in QEMU in one of two ways:
 `make qemucd` to build a bootable ISO image with Grub 2 and boot that way
 
 Some architecture notes and *gotchas* are located in `NOTES.md`.
+
+## Build requirements
+
+* `gcc` and GNU `as` compilers that are capable of producing 32-bit executables
+* `qemu`
+* `glibc-devel.i686`
+
+Tested as working under `gcc` 5.1.1 and GNU `as` 2.25-5
