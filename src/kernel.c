@@ -6,9 +6,11 @@
 
 struct kernel_time timekeeper;
 
-void panic(char *msg)
+void real_panic(char *msg, char const *file, int line, char const *func)
 {
-    printk("\n\nKernel panic: %s\n\n", msg);
+    set_color(COLOR_RED, COLOR_BLACK);
+    printk("\n\nKernel panic at %s:%d(%s): %s\n\n", file, line, func, msg);
+    reset_color();
 
     /* halt the CPU and spin until reset */
     extern void cpu_halt(void);

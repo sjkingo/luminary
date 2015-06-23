@@ -13,8 +13,10 @@ struct kernel_time {
 };
 extern struct kernel_time timekeeper;
 
+#define panic(msg) (real_panic(msg, __FILE__, __LINE__, __func__))
+
 /* Kernel panic: print given message and halt the CPU */
-void panic(char *msg)
+void real_panic(char *msg, char const *file, int line, char const *func)
     __attribute__((noreturn));
 
 /* in cpu.c */
