@@ -30,7 +30,7 @@ static void insert_task_before(struct task *new_task, struct task *new_next)
 void create_task(struct task *t, char *name, int prio)
 {
     if (prio < SCHED_LEVEL_MIN || prio > SCHED_LEVEL_MAX)
-        panic("create_task: requested priority out of range");
+        panic("requested priority out of range");
 
     t->name = name;
     t->pid = ++last_pid;
@@ -51,11 +51,11 @@ void create_task(struct task *t, char *name, int prio)
         }
         before = before->next;
     } while (before != NULL);
-    panic("create_task: could not find a place in the queue for this task");
+    panic("BUG: could not find a place in the queue for this task");
 
 out:
     if (sched_queue == NULL)
-        panic("create_task: bug here - head of sched_queue is empty");
+        panic("BUG: head of sched_queue is empty");
 #ifdef DEBUG
     printk("new_task: %s, pid=%d, created=%d, prio=%d\n", name, t->pid, t->created, prio);
 #endif
