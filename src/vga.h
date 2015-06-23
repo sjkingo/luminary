@@ -59,4 +59,12 @@ void putchar(int c);
  */
 void write_statusline(char *str);
 
+/* Set the color of future putchar() calls to the given color.
+ * Reset by calling reset_color()
+ */
+void set_color(enum vga_color fg, enum vga_color bg);
+
+/* Resets any future putchar() calls to use the default colors. */
+void reset_color(void);
+
 #endif

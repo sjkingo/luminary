@@ -1,6 +1,8 @@
 #include "vga.h"
 #include "x86.h"
 
+#define DEFAULT_COLOR (make_color(COLOR_LIGHT_GREY, COLOR_BLACK))
+
 static struct vga_state vid;
 
 static void move_cursor(int x, int y)
@@ -65,7 +67,7 @@ void putchar(int c)
 void init_vga(void)
 {
     vid.buffer = (unsigned short *)0xB8000;
-    vid.def_color = make_color(COLOR_LIGHT_GREY, COLOR_BLACK);
+    reset_color();
     vid.cur_x = 0;
     vid.cur_y = 0;
     clear_screen();
@@ -95,4 +97,14 @@ void write_statusline(char *str)
 
     /* restore the default colour */
     vid.def_color = def_color;
+}
+
+void set_color(enum vga_color fg, enum vga_color bg)
+{
+    vid.def_color = make_color(fg, bg);
+}
+
+void reset_color(void)
+{
+    vid.def_color = DEFAULT_COLOR;
 }
