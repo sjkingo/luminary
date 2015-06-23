@@ -17,6 +17,7 @@ Some architecture notes and *gotchas* are located in `NOTES.md`.
 * `gcc` and GNU `as` compilers that are capable of producing 32-bit executables
 * `qemu`
 * `glibc-devel.i686`
+* `xorriso` for making a boot ISO (optional)
 
 Tested as working under `gcc` 5.1.1 and GNU `as` 2.25-5
 
