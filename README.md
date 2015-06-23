@@ -22,7 +22,7 @@ Tested as working under `gcc` 5.1.1 and GNU `as` 2.25-5
 
 ## Build configuration
 
-You may configure the build by editing the `$DEFINES` variable at the top of [`src/Makefile`](https://github.com/sjkingo/luminary/blob/master/src/Makefile).
+You may configure the build by editing the `$DEFINES` variable at the top of [`src/Makefile`](https://github.com/sjkingo/luminary/blob/master/src/Makefile#L3).
 
 Available options are:
 
