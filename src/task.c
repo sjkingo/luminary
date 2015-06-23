@@ -8,12 +8,6 @@ static unsigned int last_pid = PID_IDLE;
 /* The first task */
 static struct task idle_task;
 
-/* Scheduling queue head */
-struct task *sched_queue = NULL;
-
-/* The currently running task, updated by the scheduler */
-struct task *running_task = NULL;
-
 static void insert_task_before(struct task *new_task, struct task *new_next)
 {
     struct task *new_prev = new_next->prev;
@@ -60,6 +54,8 @@ void create_task(struct task *t, char *name, int prio)
     panic("create_task: could not find a place in the queue for this task");
 
 out:
+    if (sched_queue == NULL)
+        panic("create_task: bug here - head of sched_queue is empty");
 #ifdef DEBUG
     printk("new_task: \"%s\", pid=%d, created=%d, prio=%d\n", name, t->pid, t->created, prio);
 #endif

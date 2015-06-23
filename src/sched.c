@@ -85,14 +85,22 @@
 #include "sched.h"
 #include "task.h"
 
+/* XXX: future */
 static struct task *queues[SCHED_QUEUE_HIGHEST][SCHED_QUEUE_MAX_TASKS_PER];
-static struct task *sched_queue;
+
+/* The currently running task, updated by the scheduler */
+struct task *running_task;
+
+/* The scheduling queue */
+struct task *sched_queue;
 
 /* Helper macro to return queue from queue level */
 #define Q(x) (queues[(SCHED_QUEUE_HIGHEST-x)])
 
 static void clear_queues(void)
 {
+    sched_queue = NULL;
+    running_task = NULL;
     memset(queues, 0, sizeof(queues));
 }
 

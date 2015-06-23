@@ -8,6 +8,9 @@
 /* The currently running task */
 extern struct task *running_task;
 
+/* Scheduling queue head */
+extern struct task *sched_queue;
+
 /* Scheduling levels. See the comment in sched.c for more info. */
 #define SCHED_LEVEL_SUSP        0
 #define SCHED_LEVEL_IDLE        (-1)
