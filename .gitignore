@@ -3,3 +3,4 @@
 kernel.bin
 core.*
 vectors.S
+src/version.h

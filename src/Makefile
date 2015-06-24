@@ -25,7 +25,11 @@ ASFLAGS=$(ARCH)
 LDFLAGS=-T linker.ld -nostdlib -lgcc
 
 .PHONY: all
-all: $(KERNEL_BIN)
+all: pre_build $(KERNEL_BIN)
+
+.PHONY: pre_build
+pre_build:
+	../scripts/make_version_h.py > version.h
 
 $(KERNEL_BIN): linker.ld $(OBJS)
 	$(CC) $(ARCH) $(LDFLAGS) -o $@ $(OBJS)
@@ -40,7 +44,7 @@ qemucd: $(KERNEL_BIN) bootiso
 
 .PHONY: clean
 clean:
-	rm -f *.o $(KERNEL_BIN) core.* *.d vectors.S
+	rm -f *.o $(KERNEL_BIN) core.* *.d vectors.S version.h
 	make -C ../grub2 clean
 
 .PHONY: bootiso
@@ -53,6 +57,6 @@ bootiso:
 vectors.S: mkvectors.py
 	python mkvectors.py > $@
 
-%.o: %.c
+%.o: pre_build %.c
 	$(CC) $(CFLAGS) -c $*.c -o $*.o
 	$(CC) $(CFLAGS) -MM $*.c > $*.d

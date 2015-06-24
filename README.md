@@ -1,5 +1,7 @@
 # Luminary, a small x86 real-time operating system
 
+**Latest version: 0.10.0**
+
 ## Features
 
 * Small codebase
