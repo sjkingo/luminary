@@ -197,7 +197,9 @@ next:
     /* TODO: run this task */
     running_task = picked;
     update_queue_statusline();
+#ifdef DEBUG
     printk("%s ", picked->name);
+#endif
 }
 
 void init_sched(void)

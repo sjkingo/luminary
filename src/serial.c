@@ -25,7 +25,9 @@ void serial_init(void)
     outb(SERIAL_COM1_PORT + 3, 0x03); // 8 bits, no parity, one stop bit
     outb(SERIAL_COM1_PORT + 2, 0xC7); // Enable FIFO, clear them, with 14-byte threshold
     outb(SERIAL_COM1_PORT + 4, 0x0B); // IRQs enabled, RTS/DSR set
+#ifdef DEBUG
     printk("Built with serial support: console output will go to COM1\n");
+#endif
 }
 
 #endif

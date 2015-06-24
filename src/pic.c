@@ -6,10 +6,8 @@
 
 static inline void ack_irq(int irq)
 {
-    if (irq >= IRQ_SLAVE_OFFSET) {
-        printk("ACK'ing slave as irq=%d and IRQ_SLAVE_OFFSET=%d\n", irq, IRQ_SLAVE_OFFSET);
+    if (irq >= IRQ_SLAVE_OFFSET)
         outb(PIC_SLAVE_CMD, PIC_EOI);
-    }
     outb(PIC_MASTER_CMD, PIC_EOI);
 }
 
@@ -21,7 +19,7 @@ static void timer_init(void)
     outb(PIT_CH0_DATA, (unsigned char)((div >> 8) & 0xFF));
     timekeeper.uptime_ms = 0;
 #ifdef TURTLE
-    printk("Build with TURTLE: will only schedule every second\n");
+    printk("Built with -DTURTLE: will only schedule every second\n");
 #endif
 }
 

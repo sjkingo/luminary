@@ -46,7 +46,9 @@ static void gdt_install(void)
     extern void gdt_flush(void);
     gdt_flush();
 
+#ifdef DEBUG
     printk("Installed GDT at %08x\n", (unsigned int)&gptr);
+#endif
 }
 
 static inline void idt_set_gate(int index, int vector, int selector, char flags)
@@ -70,7 +72,9 @@ static void idt_install(void)
     }
 
     asm volatile("lidt (%0)" : : "r" (&iptr));
+#ifdef DEBUG
     printk("Installed IDT at %08x\n", (unsigned int)&iptr);
+#endif
 }
 
 void init_cpu(void)
