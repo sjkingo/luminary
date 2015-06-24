@@ -1,8 +1,10 @@
 #include "kernel.h"
 #include "multiboot.h"
+#include "pic.h"
 #include "task.h"
 #include "vga.h"
 #include "x86.h"
+#include "version.h"
 
 struct kernel_time timekeeper;
 
@@ -18,6 +20,28 @@ void real_panic(char *msg, char const *file, int line, char const *func)
     while (1); // silence compiler warning
 }
 
+/* Print a fancy startup banner */
+static void print_startup_banner(void)
+{
+    printk("  ..---..   \n");
+    printk(" /       \\   ");
+    set_color(COLOR_LIGHT_BLUE, COLOR_BLACK);
+    printk("Luminary OS\n");
+    reset_color();
+    printk("|         |  Version %s\n", KERNEL_VERSION);
+    printk("|         |  \n");
+    printk(" \\  \\~/  /   ");
+    printk("Built at: %s %s\n", __DATE__, __TIME__);
+    printk("  `, Y ,'    ");
+    printk("Last commit: %s\n", _GIT_LAST_COMMIT);
+    printk("   |_|_|     \n");
+    printk("   |===|     ");
+    printk("%d MB memory available\n", mem_available());
+    printk("    \\_/      ");
+    printk("Timer set at %d Hz (every %d ms)\n", TIMER_FREQ, TIMER_INTERVAL);
+    printk("\n");
+}
+
 extern void kernel_main() __attribute__((noreturn));
 void kernel_main(struct multiboot_info *mb)
 {
@@ -26,10 +50,9 @@ void kernel_main(struct multiboot_info *mb)
     mb_info = mb;
 
     init_vga(); // must be first
-    printk("Luminary starting..\n");
+    print_startup_banner();
     init_cpu();
     init_task();
-    printk("available memory: %d MB\n", mem_available());
 
     enable_interrupts();
 

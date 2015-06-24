@@ -20,7 +20,6 @@ static void timer_init(void)
     outb(PIT_CH0_DATA, (unsigned char)(div & 0xFF));
     outb(PIT_CH0_DATA, (unsigned char)((div >> 8) & 0xFF));
     timekeeper.uptime_ms = 0;
-    printk("PIT set at %d Hz (every %d ms)\n", TIMER_FREQ, TIMER_INTERVAL);
 #ifdef TURTLE
     printk("Build with TURTLE: will only schedule every second\n");
 #endif
