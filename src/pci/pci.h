@@ -8,7 +8,12 @@ struct pci_device {
     uint8_t class_code;
     uint8_t subclass;
     uint8_t prog_intf;
-    uint8_t type_id;
+};
+
+struct pci_device_location {
+    uint32_t bus;
+    uint32_t dev;
+    uint32_t func;
 };
 
 void init_pci(void);

@@ -4,6 +4,8 @@ DEFINES=-DDEBUG -DTURTLE -DUSE_SERIAL
 
 OBJS=	boot/boot.o \
 	cpu/cpu.o \
+	pci/register.o \
+	drivers/rtl8139.o \
 	kernel/kernel.o \
 	pci/pci.o \
 	cpu/pic.o \
