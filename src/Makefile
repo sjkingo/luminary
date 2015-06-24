@@ -56,7 +56,7 @@ bootiso:
 
 # version.h is auto-generated
 version.h: ../README.md
-	../scripts/make_version_h.py > version.h
+	../tools/make_version_h.py > version.h
 
 kernel/kernel.o: version.h kernel/kernel.c
 
