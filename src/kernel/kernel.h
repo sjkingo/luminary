@@ -1,5 +1,4 @@
-#ifndef KERNEL_H
-#define KERNEL_H
+#pragma once
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -24,5 +23,3 @@ void real_panic(char *msg, char const *file, int line, char const *func)
 
 /* in cpu.c */
 void init_cpu(void);
-
-#endif

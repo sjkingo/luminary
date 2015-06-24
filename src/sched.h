@@ -1,5 +1,4 @@
-#ifndef SCHED_H
-#define SCHED_H
+#pragma once
 
 #define SCHED_QUEUE_LOWEST 0
 #define SCHED_QUEUE_HIGHEST 10
@@ -21,5 +20,3 @@ extern struct task *sched_queue;
 void sched(void);
 
 void init_sched(void);
-
-#endif

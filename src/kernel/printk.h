@@ -1,5 +1,4 @@
-#ifndef PRINTK_H
-#define PRINTK_H
+#pragma once
 
 /* printf() for the kernel */
 int printk(const char *format, ...)
@@ -10,5 +9,3 @@ int sprintf(char *out, const char *format, ...)
 
 int printsl(const char *format, ...)
     __attribute__((format (printf, 1, 2)));
-
-#endif

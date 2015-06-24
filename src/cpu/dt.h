@@ -1,5 +1,4 @@
-#ifndef DT_H
-#define DT_H
+#pragma once
 
 /* Descriptor table structures (GDT, IDT) and associated definitions. */
 
@@ -41,5 +40,3 @@ struct idt_ptr {
     unsigned short limit;
     unsigned int base;
 } __attribute__((packed));
-
-#endif

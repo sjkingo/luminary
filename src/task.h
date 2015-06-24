@@ -1,5 +1,4 @@
-#ifndef TASK_H
-#define TASK_H
+#pragma once
 
 /* A task to be scheduled in the system */
 struct task {
@@ -20,5 +19,3 @@ void init_task(void);
 
 /* Create a new task and insert it into the queue */
 void create_task(struct task *t, char *name, int prio);
-
-#endif

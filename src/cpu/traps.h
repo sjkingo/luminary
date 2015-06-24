@@ -1,5 +1,4 @@
-#ifndef TRAPS_H
-#define TRAPS_H
+#pragma once
 
 #define TRAP_MAGIC 0xc0ffee
 
@@ -90,7 +89,5 @@ struct trap_frame {
     unsigned int uesp;
     unsigned int uss;
 };
-
-#endif
 
 #endif

@@ -1,5 +1,4 @@
-#ifndef X86_H
-#define X86_H
+#pragma once
 
 #include <stdbool.h>
 
@@ -58,5 +57,3 @@ static inline bool is_paging_enabled(void)
 
 #define disable_interrupts() ({ asm volatile("cli\nnop"); })
 #define enable_interrupts() ({ asm volatile("sti\nnop"); })
-
-#endif

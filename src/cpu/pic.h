@@ -1,5 +1,4 @@
-#ifndef PIC_H
-#define PIC_H
+#pragma once
 
 /* pic.h - the Intel 8259 Programmable Interrupt Controller.
  * Also contains definitions for the PIT (8253/8254) timer chip.
@@ -50,5 +49,3 @@ void pic_init(void);
 
 /* Called from trap_handler() when an IRQ is received */
 void irq_handler(struct trap_frame);
-
-#endif

@@ -1,5 +1,4 @@
-#ifndef MULTIBOOT_H
-#define MULTIBOOT_H
+#pragma once
 
 /* Multiboot header definitions used in boot.S. See:
  * https://www.gnu.org/software/grub/manual/multiboot/multiboot.html#Header-magic-fields
@@ -50,7 +49,5 @@ static inline int mem_available(void)
      */
     return (mb_info->mem_upper / 1024) + 1;
 }
-
-#endif
 
 #endif

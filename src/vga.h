@@ -1,5 +1,4 @@
-#ifndef VGA_H
-#define VGA_H
+#pragma once
 
 /* Color codes for the VGA memory */
 enum vga_color {
@@ -66,5 +65,3 @@ void set_color(enum vga_color fg, enum vga_color bg);
 
 /* Resets any future putchar() calls to use the default colors. */
 void reset_color(void);
-
-#endif
