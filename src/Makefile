@@ -57,6 +57,8 @@ bootiso:
 vectors.S: mkvectors.py
 	python mkvectors.py > $@
 
-%.o: pre_build %.c
+kernel.o: pre_build kernel.c
+
+%.o: %.c
 	$(CC) $(CFLAGS) -c $*.c -o $*.o
 	$(CC) $(CFLAGS) -MM $*.c > $*.d
