@@ -1,4 +1,4 @@
-# Luminary
+# Luminary OS
 
 Luminary is a small x86 real-time operating system written in C and assembly.
 Its goal is to implement a kernel that includes a hard real-time scheduler that
