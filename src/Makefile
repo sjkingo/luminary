@@ -42,6 +42,10 @@ qemu: $(KERNEL_BIN)
 qemucd: $(KERNEL_BIN) bootiso
 	$(EMULATOR) -cdrom ../grub2/boot.iso
 
+.PHONY: console
+console: $(KERNEL_BIN)
+	$(EMULATOR) -kernel $(KERNEL_BIN) -nographic
+
 .PHONY: clean
 clean:
 	rm -f *.o $(KERNEL_BIN) core.* *.d vectors.S version.h
