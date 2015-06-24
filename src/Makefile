@@ -1,24 +1,24 @@
-KERNEL_BIN=kernel.bin
-EMULATOR=qemu-system-i386
-QEMU_ARGS=-net nic,model=rtl8139 -net user
-DEFINES=-DDEBUG -DTURTLE -DUSE_SERIAL
+# Set configuration variables for the build
+KERNEL_BIN=	kernel.bin
+EMULATOR=	qemu-system-i386
+QEMU_ARGS=	-net nic,model=rtl8139 -net user
+DEFINES=	-DDEBUG -DTURTLE -DUSE_SERIAL
 
+CC=		gcc
+AS=		$(CC)
+ARCH=		-m32
+CFLAGS=		$(ARCH) -Wall -Wextra -ffreestanding -std=gnu99 -g -I . $(DEFINES)
+ASFLAGS=	$(ARCH)
+LDFLAGS=	-T linker.ld -nostdlib -lgcc
+
+# Include our submodules that contain all the object files
 # Order must be: 1. boot, 2. kernel, ...
 include boot/Makefile.mk
 include kernel/Makefile.mk
-include drivers/Makefile.mk
 include cpu/Makefile.mk
-include pci/Makefile.mk
-
+include drivers/Makefile.mk
 include lib/Makefile.mk
-
-CC=gcc
-AS=$(CC)
-
-ARCH=-m32
-CFLAGS=$(ARCH) -Wall -Wextra -ffreestanding -std=gnu99 -g -I . $(DEFINES)
-ASFLAGS=$(ARCH)
-LDFLAGS=-T linker.ld -nostdlib -lgcc
+include pci/Makefile.mk
 
 .PHONY: all
 all: $(KERNEL_BIN)
