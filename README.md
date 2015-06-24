@@ -17,17 +17,9 @@ Written by Sam Kingston.
 * Small codebase
 * Hard priority-based [preemptive scheduler](https://github.com/sjkingo/luminary/blob/master/src/sched.c#L1-L82)
 * Serial console support
+* Flat memory model (no virtual addresses)
 
-Some architecture notes and *gotchas* are located in `NOTES.md`.
-
-## Build requirements
-
-* `gcc` and GNU `as` compilers that are capable of producing 32-bit executables
-* `qemu`
-* `glibc-devel.i686`
-* `xorriso` for making a boot ISO (optional)
-
-Tested as working under `gcc` 5.1.1 and GNU `as` 2.25-5
+Some architecture notes and *gotchas* are located in [NOTES.md](https://github.com/sjkingo/luminary/blob/master/NOTES.md).
 
 ## Build configuration
 
@@ -41,27 +33,38 @@ Available options are:
 
 ## How to build
 
-Building the kernel is as simple as running the included `Makefile`:
+First, ensure all build requirements are met:
+
+* `gcc` and GNU `as` compilers that are capable of producing 32-bit executables
+* `glibc-devel.i686`
+
+Then, building the kernel is as simple as running the included `Makefile`:
 
 ```bash
 $ make -C src
 ```
 
-You will need to have a working `gcc` and GNU `as` compiler that is capable of
-producing 32-bit executables.
-
 ## Running
 
-After building, you may run the kernel in QEMU in one of two ways:
+After building, you may run the kernel in QEMU with some shortcuts:
 
-To have QEMU load the kernel image directly (fastest):
+To have QEMU load the kernel image directly, opening an SDL window (fastest):
 
 ```bash
-$ make qemu
+$ make -C src qemu
 ```
 
 Or to build a bootable ISO image with Grub2 Multiboot and boot that way (requires `xorriso`):
 
 ```bash
-$ make qemucd
+$ make -C src qemucd
 ```
+
+You may also redirect output to the terminal by using:
+
+```bash
+$ make -C src console
+```
+
+Note that the kernel must be built with the `-DUSE_SERIAL` option for this to work or you will
+get no output from the kernel.

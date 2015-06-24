@@ -1,3 +1,5 @@
+# Notes
+
 When linking the kernel you may receive the following linker warning:
 
     /bin/ld: warning: .note.gnu.build-id section discarded, --build-id ignored.
@@ -18,7 +20,9 @@ the stack setup code in `boot.s`.
 
 ---
 
-The kernel uses a flat memory model addressable up to 4 GB physical. At the
-present time there is no virtual memory system (TODO). The physical memory
-is divided into two segments: kernel code (ro) and kernel data (rw). This is
-enforced by the CPU through the GDT.
+The kernel uses a flat memory model addressable up to 4 GB physical. There is
+no concept of a virtual memory system, and all memory is directly accessible by
+its physical address.
+
+Physical memory is divided into two segments: kernel code (ro) and kernel data
+(rw). This is enforced by the CPU through the GDT.
