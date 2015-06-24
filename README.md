@@ -16,7 +16,7 @@ Written by Sam Kingston.
 
 * Small codebase
 * Hard priority-based [preemptive scheduler](https://github.com/sjkingo/luminary/blob/master/src/sched.c#L1-L82)
-* Serial console support
+* Input and output via serial ports
 * Flat memory model (no virtual addresses)
 
 Some architecture notes and *gotchas* are located in [NOTES.md](https://github.com/sjkingo/luminary/blob/master/NOTES.md).
