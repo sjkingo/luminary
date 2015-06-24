@@ -1,7 +1,7 @@
 #include "kernel.h"
-#include "dt.h"
-#include "pic.h"
-#include "traps.h"
+#include "cpu/dt.h"
+#include "cpu/pic.h"
+#include "cpu/traps.h"
 #include "x86.h"
 
 #ifdef USE_SERIAL

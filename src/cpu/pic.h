@@ -5,7 +5,7 @@
  * Also contains definitions for the PIT (8253/8254) timer chip.
  */
 
-#include "traps.h"
+#include "cpu/traps.h"
 
 #define IRQ_BASE_OFFSET 32
 #define IRQ_SLAVE_OFFSET (IRQ_BASE_OFFSET + 8)

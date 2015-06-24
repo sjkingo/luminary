@@ -2,5 +2,5 @@
 *.d
 core.*
 src/kernel.bin
-src/vectors.S
 src/version.h
+src/cpu/vectors.S

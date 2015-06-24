@@ -1,7 +1,7 @@
 #include "kernel.h"
-#include "pic.h"
+#include "cpu/pic.h"
 #include "task.h"
-#include "traps.h"
+#include "cpu/traps.h"
 #include "x86.h"
 
 static inline void ack_irq(int irq)

@@ -3,7 +3,7 @@
 #include "kernel.h"
 #include "multiboot.h"
 #include "pci/pci.h"
-#include "pic.h"
+#include "cpu/pic.h"
 #include "task.h"
 #include "vga.h"
 #include "x86.h"

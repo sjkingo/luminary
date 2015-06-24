@@ -3,18 +3,18 @@ EMULATOR=qemu-system-i386
 DEFINES=-DDEBUG -DTURTLE -DUSE_SERIAL
 
 OBJS=	boot.o \
-	cpu.o \
+	cpu/cpu.o \
 	kernel.o \
 	pci/pci.o \
-	pic.o \
+	cpu/pic.o \
 	printk.o \
 	sched.o \
 	serial.o \
 	string.o \
-	tables.o \
+	cpu/tables.o \
 	task.o \
-	traps.o \
-	vectors.o \
+	cpu/traps.o \
+	cpu/vectors.o \
 	vga.o
 
 CC=gcc
@@ -53,7 +53,7 @@ debug: $(KERNEL_BIN)
 
 .PHONY: clean
 clean:
-	rm -f $(OBJS) $(OBJS:.o=.d) $(KERNEL_BIN) core.* vectors.S version.h
+	rm -f $(OBJS) $(OBJS:.o=.d) $(KERNEL_BIN) core.* cpu/vectors.S version.h
 	make -C ../grub2 clean
 
 .PHONY: bootiso
@@ -63,8 +63,8 @@ bootiso:
 # pull in existing deps for all our objects
 -include $(OBJS:.o=.d)
 
-vectors.S: mkvectors.py
-	python mkvectors.py > $@
+cpu/vectors.S: cpu/mkvectors.py
+	python cpu/mkvectors.py > $@
 
 kernel.o: pre_build kernel.c
 
