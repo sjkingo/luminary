@@ -1,5 +1,6 @@
 KERNEL_BIN=kernel.bin
 EMULATOR=qemu-system-i386
+QEMU_ARGS=-net nic,model=rtl8139 -net user
 DEFINES=-DDEBUG -DTURTLE -DUSE_SERIAL
 
 OBJS=	boot/boot.o \
@@ -39,19 +40,19 @@ $(KERNEL_BIN): linker.ld $(OBJS)
 
 .PHONY: qemu
 qemu: $(KERNEL_BIN)
-	$(EMULATOR) -kernel $(KERNEL_BIN)
+	$(EMULATOR) -kernel $(KERNEL_BIN) $(QEMU_ARGS)
 
 .PHONY: qemucd
 qemucd: $(KERNEL_BIN) bootiso
-	$(EMULATOR) -cdrom ../grub2/boot.iso
+	$(EMULATOR) -cdrom ../grub2/boot.iso $(QEMU_ARGS)
 
 .PHONY: console
 console: $(KERNEL_BIN)
-	$(EMULATOR) -kernel $(KERNEL_BIN) -nographic
+	$(EMULATOR) -kernel $(KERNEL_BIN) -nographic $(QEMU_ARGS)
 
 .PHONY: debug
 debug: $(KERNEL_BIN)
-	$(EMULATOR) -kernel $(KERNEL_BIN) -s -S
+	$(EMULATOR) -kernel $(KERNEL_BIN) -s -S $(QEMU_ARGS)
 
 .PHONY: clean
 clean:
