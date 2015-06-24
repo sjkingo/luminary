@@ -1,6 +1,6 @@
 *.o
 *.d
-kernel.bin
 core.*
-vectors.S
+src/kernel.bin
+src/vectors.S
 src/version.h
