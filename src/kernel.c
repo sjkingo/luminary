@@ -2,6 +2,7 @@
 
 #include "kernel.h"
 #include "multiboot.h"
+#include "pci/pci.h"
 #include "pic.h"
 #include "task.h"
 #include "vga.h"
@@ -69,17 +70,20 @@ void kernel_main(struct multiboot_info *mb)
     init_vga(); // must be first
     print_startup_banner();
     init_cpu();
+    init_pci();
     init_task();
 
     startup_complete = true;
     enable_interrupts();
 
+    /*
     struct task a;
     create_task(&a, "A", 10);
     struct task b;
     create_task(&b, "B", 7);
     struct task c;
     create_task(&c, "C", 4);
+    */
 
     while(1);
 }

@@ -5,6 +5,7 @@ DEFINES=-DDEBUG -DTURTLE -DUSE_SERIAL
 OBJS=	boot.o \
 	cpu.o \
 	kernel.o \
+	pci/pci.o \
 	pic.o \
 	printk.o \
 	sched.o \
@@ -20,7 +21,7 @@ CC=gcc
 AS=$(CC)
 
 ARCH=-m32
-CFLAGS=$(ARCH) -Wall -Wextra -ffreestanding -std=gnu99 -g $(DEFINES)
+CFLAGS=$(ARCH) -Wall -Wextra -ffreestanding -std=gnu99 -g -I . $(DEFINES)
 ASFLAGS=$(ARCH)
 LDFLAGS=-T linker.ld -nostdlib -lgcc
 
@@ -52,7 +53,7 @@ debug: $(KERNEL_BIN)
 
 .PHONY: clean
 clean:
-	rm -f *.o $(KERNEL_BIN) core.* *.d vectors.S version.h
+	rm -f $(OBJS) $(OBJS:.o=.d) $(KERNEL_BIN) core.* vectors.S version.h
 	make -C ../grub2 clean
 
 .PHONY: bootiso
