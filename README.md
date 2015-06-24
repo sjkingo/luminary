@@ -2,6 +2,8 @@
 
 **Latest version: 0.10.0**
 
+![Luminary, version 0.10.0](https://raw.githubusercontent.com/sjkingo/luminary/master/screenshots/startup-0.10.0.png "Luminary, version 0.10.0")
+
 ## Features
 
 * Small codebase
