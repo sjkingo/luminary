@@ -21,11 +21,7 @@ ASFLAGS=$(ARCH)
 LDFLAGS=-T linker.ld -nostdlib -lgcc
 
 .PHONY: all
-all: pre_build $(KERNEL_BIN)
-
-.PHONY: pre_build
-pre_build:
-	../scripts/make_version_h.py > version.h
+all: $(KERNEL_BIN)
 
 $(KERNEL_BIN): linker.ld $(KERNEL_OBJS)
 	$(CC) $(ARCH) $(LDFLAGS) -o $@ $(KERNEL_OBJS)
@@ -58,10 +54,14 @@ bootiso:
 # pull in existing deps for all our objects
 -include $(KERNEL_OBJS:.o=.d)
 
+# version.h is auto-generated
+version.h: ../README.md
+	../scripts/make_version_h.py > version.h
+
+kernel/kernel.o: version.h kernel/kernel.c
+
 cpu/vectors.S: cpu/mkvectors.py
 	python cpu/mkvectors.py > $@
-
-kernel.o: pre_build kernel.c
 
 %.o: %.c
 	$(CC) $(CFLAGS) -c $*.c -o $*.o
