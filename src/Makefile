@@ -3,10 +3,8 @@ EMULATOR=qemu-system-i386
 QEMU_ARGS=-net nic,model=rtl8139 -net user
 DEFINES=-DDEBUG -DTURTLE -DUSE_SERIAL
 
-KERNEL_OBJS=	boot/boot.o
-
 # Order must be: 1. boot, 2. kernel, ...
-#include boot/Makefile.mk
+include boot/Makefile.mk
 include kernel/Makefile.mk
 include drivers/Makefile.mk
 include cpu/Makefile.mk
