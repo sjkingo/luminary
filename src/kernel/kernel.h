@@ -5,7 +5,7 @@
 #include <stddef.h>
 #include <string.h>
 
-#include "printk.h"
+#include "kernel/printk.h"
 
 struct multiboot_info *mb_info;
 

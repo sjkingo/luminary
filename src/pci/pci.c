@@ -2,7 +2,7 @@
 
 #include "pci/pci.h"
 #include "pci/io.h"
-#include "kernel.h"
+#include "kernel/kernel.h"
 
 static void scan_device(uint32_t bus, uint32_t dev, uint32_t func)
 {

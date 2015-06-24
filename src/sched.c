@@ -81,7 +81,7 @@
  * priority. This creates a predictability of running times in the system.
  */
 
-#include "kernel.h"
+#include "kernel/kernel.h"
 #include "sched.h"
 #include "task.h"
 

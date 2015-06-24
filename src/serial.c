@@ -1,6 +1,6 @@
 #ifdef USE_SERIAL
 
-#include "printk.h"
+#include "kernel/printk.h"
 #include "serial.h"
 #include "x86.h"
 

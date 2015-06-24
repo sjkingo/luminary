@@ -2,7 +2,7 @@
 
 #include "boot/multiboot.h"
 #include "cpu/pic.h"
-#include "kernel.h"
+#include "kernel/kernel.h"
 #include "pci/pci.h"
 #include "task.h"
 #include "version.h"

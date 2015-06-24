@@ -4,10 +4,10 @@ DEFINES=-DDEBUG -DTURTLE -DUSE_SERIAL
 
 OBJS=	boot/boot.o \
 	cpu/cpu.o \
-	kernel.o \
+	kernel/kernel.o \
 	pci/pci.o \
 	cpu/pic.o \
-	printk.o \
+	kernel/printk.o \
 	sched.o \
 	serial.o \
 	string.o \

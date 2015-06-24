@@ -1,4 +1,4 @@
-#include "kernel.h"
+#include "kernel/kernel.h"
 #include "sched.h"
 #include "task.h"
 

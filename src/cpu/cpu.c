@@ -1,4 +1,4 @@
-#include "kernel.h"
+#include "kernel/kernel.h"
 #include "cpu/dt.h"
 #include "cpu/pic.h"
 #include "cpu/traps.h"
