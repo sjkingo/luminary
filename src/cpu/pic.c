@@ -1,9 +1,9 @@
-#include "kernel/kernel.h"
-#include "kernel/sched.h"
 #include "cpu/pic.h"
-#include "kernel/task.h"
 #include "cpu/traps.h"
 #include "cpu/x86.h"
+#include "kernel/kernel.h"
+#include "kernel/sched.h"
+#include "kernel/task.h"
 
 static inline void ack_irq(int irq)
 {

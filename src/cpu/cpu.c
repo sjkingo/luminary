@@ -1,8 +1,8 @@
-#include "kernel/kernel.h"
 #include "cpu/dt.h"
 #include "cpu/pic.h"
 #include "cpu/traps.h"
 #include "cpu/x86.h"
+#include "kernel/kernel.h"
 
 #ifdef USE_SERIAL
 #include "drivers/serial.h"

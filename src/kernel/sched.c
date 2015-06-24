@@ -83,7 +83,7 @@
 
 #include "kernel/kernel.h"
 #include "kernel/sched.h"
-#include "task.h"
+#include "kernel/task.h"
 
 /* XXX: future */
 static struct task *queues[SCHED_QUEUE_HIGHEST][SCHED_QUEUE_MAX_TASKS_PER];

@@ -2,12 +2,12 @@
 
 #include "boot/multiboot.h"
 #include "cpu/pic.h"
-#include "kernel/kernel.h"
-#include "pci/pci.h"
-#include "task.h"
-#include "version.h"
-#include "drivers/vga.h"
 #include "cpu/x86.h"
+#include "drivers/vga.h"
+#include "kernel/kernel.h"
+#include "kernel/task.h"
+#include "pci/pci.h"
+#include "version.h"
 
 struct kernel_time timekeeper;
 

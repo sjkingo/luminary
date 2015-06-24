@@ -1,8 +1,8 @@
 #include <stdint.h>
 #include <stdlib.h>
 
-#include "pci/register.h"
 #include "pci/pci.h"
+#include "pci/register.h"
 
 /* in drivers/rtl8139.c */
 extern void rtl8139_init(struct pci_device_location *);

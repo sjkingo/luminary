@@ -1,10 +1,10 @@
 #include <stdint.h>
 #include <stdlib.h>
 
-#include "pci/register.h"
-#include "pci/pci.h"
-#include "pci/io.h"
 #include "kernel/kernel.h"
+#include "pci/io.h"
+#include "pci/pci.h"
+#include "pci/register.h"
 
 static void scan_device(struct pci_device_location *location)
 {

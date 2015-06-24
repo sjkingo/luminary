@@ -1,6 +1,6 @@
 #include "kernel/kernel.h"
 #include "kernel/sched.h"
-#include "task.h"
+#include "kernel/task.h"
 
 /* last PID allocated to a task */
 static unsigned int last_pid = PID_IDLE;
