@@ -1,8 +1,8 @@
 #ifdef USE_SERIAL
 
 #include "kernel/printk.h"
-#include "serial.h"
-#include "x86.h"
+#include "drivers/serial.h"
+#include "cpu/x86.h"
 
 static int is_transmit_empty(void)
 {

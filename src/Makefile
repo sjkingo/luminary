@@ -3,22 +3,16 @@ EMULATOR=qemu-system-i386
 QEMU_ARGS=-net nic,model=rtl8139 -net user
 DEFINES=-DDEBUG -DTURTLE -DUSE_SERIAL
 
-OBJS=	boot/boot.o \
-	cpu/cpu.o \
-	pci/register.o \
-	drivers/rtl8139.o \
-	kernel/kernel.o \
-	pci/pci.o \
-	cpu/pic.o \
-	kernel/printk.o \
-	sched.o \
-	serial.o \
-	string.o \
-	cpu/tables.o \
-	task.o \
-	cpu/traps.o \
-	cpu/vectors.o \
-	vga.o
+KERNEL_OBJS=	boot/boot.o
+
+# Order must be: 1. boot, 2. kernel, ...
+#include boot/Makefile.mk
+include kernel/Makefile.mk
+include drivers/Makefile.mk
+include cpu/Makefile.mk
+include pci/Makefile.mk
+
+include lib/Makefile.mk
 
 CC=gcc
 AS=$(CC)
@@ -35,8 +29,8 @@ all: pre_build $(KERNEL_BIN)
 pre_build:
 	../scripts/make_version_h.py > version.h
 
-$(KERNEL_BIN): linker.ld $(OBJS)
-	$(CC) $(ARCH) $(LDFLAGS) -o $@ $(OBJS)
+$(KERNEL_BIN): linker.ld $(KERNEL_OBJS)
+	$(CC) $(ARCH) $(LDFLAGS) -o $@ $(KERNEL_OBJS)
 
 .PHONY: qemu
 qemu: $(KERNEL_BIN)
@@ -56,7 +50,7 @@ debug: $(KERNEL_BIN)
 
 .PHONY: clean
 clean:
-	rm -f $(OBJS) $(OBJS:.o=.d) $(KERNEL_BIN) core.* cpu/vectors.S version.h
+	rm -f $(KERNEL_OBJS) $(KERNEL_OBJS:.o=.d) $(KERNEL_BIN) core.* cpu/vectors.S version.h
 	make -C ../grub2 clean
 
 .PHONY: bootiso
@@ -64,7 +58,7 @@ bootiso:
 	make -C ../grub2 boot.iso
 
 # pull in existing deps for all our objects
--include $(OBJS:.o=.d)
+-include $(KERNEL_OBJS:.o=.d)
 
 cpu/vectors.S: cpu/mkvectors.py
 	python cpu/mkvectors.py > $@

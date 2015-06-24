@@ -1,5 +1,5 @@
-#include "vga.h"
-#include "x86.h"
+#include "drivers/vga.h"
+#include "cpu/x86.h"
 
 #define DEFAULT_COLOR (make_color(COLOR_LIGHT_GREY, COLOR_BLACK))
 

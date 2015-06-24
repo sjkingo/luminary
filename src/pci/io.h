@@ -1,6 +1,6 @@
 #pragma once
 
-#include "x86.h"
+#include "cpu/x86.h"
 
 /* PCI I/O ports */
 #define PCI_CONFIG_ADDR                 0xcf8

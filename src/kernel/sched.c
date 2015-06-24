@@ -82,7 +82,7 @@
  */
 
 #include "kernel/kernel.h"
-#include "sched.h"
+#include "kernel/sched.h"
 #include "task.h"
 
 /* XXX: future */

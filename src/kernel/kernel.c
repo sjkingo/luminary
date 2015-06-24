@@ -6,8 +6,8 @@
 #include "pci/pci.h"
 #include "task.h"
 #include "version.h"
-#include "vga.h"
-#include "x86.h"
+#include "drivers/vga.h"
+#include "cpu/x86.h"
 
 struct kernel_time timekeeper;
 

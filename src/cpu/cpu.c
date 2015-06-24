@@ -2,10 +2,10 @@
 #include "cpu/dt.h"
 #include "cpu/pic.h"
 #include "cpu/traps.h"
-#include "x86.h"
+#include "cpu/x86.h"
 
 #ifdef USE_SERIAL
-#include "serial.h"
+#include "drivers/serial.h"
 #endif
 
 /* The GDT */
