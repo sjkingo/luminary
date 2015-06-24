@@ -2,7 +2,7 @@ KERNEL_BIN=kernel.bin
 EMULATOR=qemu-system-i386
 DEFINES=-DDEBUG -DTURTLE -DUSE_SERIAL
 
-OBJS=	boot.o \
+OBJS=	boot/boot.o \
 	cpu/cpu.o \
 	kernel.o \
 	pci/pci.o \

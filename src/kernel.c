@@ -1,13 +1,13 @@
 #include <stdbool.h>
 
-#include "kernel.h"
-#include "multiboot.h"
-#include "pci/pci.h"
+#include "boot/multiboot.h"
 #include "cpu/pic.h"
+#include "kernel.h"
+#include "pci/pci.h"
 #include "task.h"
+#include "version.h"
 #include "vga.h"
 #include "x86.h"
-#include "version.h"
 
 struct kernel_time timekeeper;
 
