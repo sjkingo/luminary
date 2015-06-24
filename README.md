@@ -1,4 +1,12 @@
-# Luminary, a small x86 real-time operating system
+# Luminary
+
+Luminary is a small x86 real-time operating system written in C and assembly.
+Its goal is to implement a kernel that includes a hard real-time scheduler that
+can run time-sensitive tasks.
+
+It takes concepts from an existing operating system by the same author called [Ulysses](https://github.com/sjkingo/ulysses).
+
+Written by Sam Kingston.
 
 **Latest version: 0.10.0**
 
