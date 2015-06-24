@@ -1,3 +1,5 @@
+#include <stdbool.h>
+
 #include "kernel.h"
 #include "multiboot.h"
 #include "pic.h"
@@ -7,6 +9,8 @@
 #include "version.h"
 
 struct kernel_time timekeeper;
+
+bool startup_complete = false;
 
 void real_panic(char *msg, char const *file, int line, char const *func)
 {
@@ -67,6 +71,7 @@ void kernel_main(struct multiboot_info *mb)
     init_cpu();
     init_task();
 
+    startup_complete = true;
     enable_interrupts();
 
     struct task a;

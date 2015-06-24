@@ -1,6 +1,7 @@
 #ifndef KERNEL_H
 #define KERNEL_H
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <string.h>
 
@@ -12,6 +13,8 @@ struct kernel_time {
     unsigned long uptime_ms;
 };
 extern struct kernel_time timekeeper;
+
+extern bool startup_complete;
 
 #define panic(msg) (real_panic(msg, __FILE__, __LINE__, __func__))
 
