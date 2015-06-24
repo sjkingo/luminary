@@ -20,7 +20,7 @@ CC=gcc
 AS=$(CC)
 
 ARCH=-m32
-CFLAGS=$(ARCH) -Wall -Wextra -ffreestanding -std=gnu99 $(DEFINES)
+CFLAGS=$(ARCH) -Wall -Wextra -ffreestanding -std=gnu99 -g $(DEFINES)
 ASFLAGS=$(ARCH)
 LDFLAGS=-T linker.ld -nostdlib -lgcc
 
@@ -45,6 +45,10 @@ qemucd: $(KERNEL_BIN) bootiso
 .PHONY: console
 console: $(KERNEL_BIN)
 	$(EMULATOR) -kernel $(KERNEL_BIN) -nographic
+
+.PHONY: debug
+debug: $(KERNEL_BIN)
+	$(EMULATOR) -kernel $(KERNEL_BIN) -s -S
 
 .PHONY: clean
 clean:
