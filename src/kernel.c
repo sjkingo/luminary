@@ -20,20 +20,33 @@ void real_panic(char *msg, char const *file, int line, char const *func)
     while (1); // silence compiler warning
 }
 
+static void print_defines(void)
+{
+#ifdef DEBUG
+    printk("-DDEBUG ");
+#endif
+#ifdef TURTLE
+    printk("-DTURTLE ");
+#endif
+#ifdef USE_SERIAL
+    printk("-DUSE_SERIAL ");
+#endif
+}
+
 /* Print a fancy startup banner */
 static void print_startup_banner(void)
 {
-    printk("  ..---..   \n");
-    printk(" /       \\   ");
+    printk("  ..---..    ");
     set_color(COLOR_LIGHT_BLUE, COLOR_BLACK);
     printk("Luminary OS\n");
     reset_color();
-    printk("|         |  Version %s\n", KERNEL_VERSION);
+    printk(" /       \\   Version %s\n", KERNEL_VERSION);
     printk("|         |  \n");
-    printk(" \\  \\~/  /   ");
-    printk("Built at: %s %s\n", __DATE__, __TIME__);
-    printk("  `, Y ,'    ");
-    printk("Last commit: %s\n", _GIT_LAST_COMMIT);
+    printk("|         |  Built with: ");
+    print_defines();
+    printk("\n");
+    printk(" \\  \\~/  /   Built at: %s %s\n", __DATE__, __TIME__);
+    printk("  `, Y ,'    Last commit: %s\n", _GIT_LAST_COMMIT);
     printk("   |_|_|     \n");
     printk("   |===|     ");
     printk("%d MB memory available\n", mem_available());
