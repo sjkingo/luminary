@@ -57,8 +57,8 @@ bootiso:
 -include $(KERNEL_OBJS:.o=.d)
 
 # version.h is auto-generated
-version.h: ../README.md
-	../tools/make_version_h.py > version.h
+version.h:
+	../tools/make_version_h.sh > version.h
 
 kernel/kernel.o: version.h kernel/kernel.c
 
