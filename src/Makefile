@@ -36,7 +36,9 @@ qemucd: $(KERNEL_BIN) bootiso
 
 .PHONY: console
 console: $(KERNEL_BIN)
-	$(EMULATOR) -kernel $(KERNEL_BIN) -nographic $(QEMU_ARGS)
+	$(EMULATOR) -kernel $(KERNEL_BIN) -nographic $(QEMU_ARGS) &
+	sleep 2
+	pkill qemu-system-*
 
 .PHONY: debug
 debug: $(KERNEL_BIN)
