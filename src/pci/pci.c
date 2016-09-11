@@ -8,16 +8,16 @@
 
 static void scan_device(struct pci_device_location *location)
 {
-    uint32_t id = PCI_MAKE_ID(location->bus, location->dev, location->func);
+    uint32_t id = pci_device(location->bus, location->dev, location->func);
     struct pci_device device;
 
-    device.vendor_id = pci_inb_16(id, PCI_CONFIG_VENDOR_ID);
+    device.vendor_id = pci_read_field(id, PCI_CONFIG_VENDOR_ID, 2);
     if (device.vendor_id == 0xffff)
         return;
-    device.device_id = pci_inb_16(id, PCI_CONFIG_DEVICE_ID);
-    device.class_code = pci_inb_8(id, PCI_CONFIG_CLASS_CODE);
-    device.subclass = pci_inb_8(id, PCI_CONFIG_SUBCLASS);
-    device.prog_intf = pci_inb_8(id, PCI_CONFIG_PROG_INTF);
+    device.device_id = pci_read_field(id, PCI_CONFIG_DEVICE_ID, 2);
+    device.class_code = pci_read_field(id, PCI_CONFIG_CLASS_CODE, 1);
+    device.subclass = pci_read_field(id, PCI_CONFIG_SUBCLASS, 1);
+    device.prog_intf = pci_read_field(id, PCI_CONFIG_PROG_INTF, 1);
 
     struct device_driver *driver = lookup_driver(device.vendor_id, device.device_id);
 
@@ -28,8 +28,8 @@ static void scan_device(struct pci_device_location *location)
     } else {
         name = "unknown device";
     }
-    printk("  %02x:%02x:%d: 0x%04x/0x%04x (%s)\n", 
-            location->bus, location->dev, location->func, 
+    printk("  %02x:%02x:%d (0x%08x): %04x/%04x (%s)\n", 
+            location->bus, location->dev, location->func, id, 
             device.vendor_id, device.device_id, name);
 #endif
 
