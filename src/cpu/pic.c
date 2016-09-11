@@ -27,13 +27,14 @@ static void timer_init(void)
 static void timer_tick(void)
 {
     timekeeper.uptime_ms += TIMER_INTERVAL;
+
 #ifdef TURTLE
     /* Only run scheduler every second */
-    if ((timekeeper.uptime_ms % TIMER_FREQ) == 0)
-        sched();
-#else
-    sched();
+    if ((timekeeper.uptime_ms % TIMER_FREQ) != 0)
+        return;
 #endif
+
+    sched();
 }
 
 void pic_init(void)
