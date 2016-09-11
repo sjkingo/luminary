@@ -29,6 +29,12 @@ static inline unsigned short inb_16(unsigned short port)
     return data;
 }
 
+static inline unsigned int inb_32(unsigned short port) {
+    unsigned int data;
+    asm volatile ("inl %%dx, %%eax" : "=a" (data) : "dN" (port));
+    return data;
+}
+
 static inline int get_cr0(void)
 {
     int cr0;
