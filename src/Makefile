@@ -56,11 +56,12 @@ bootiso:
 # pull in existing deps for all our objects
 -include $(KERNEL_OBJS:.o=.d)
 
-# version.h is auto-generated
-version.h:
+# this is a PHONY so it is regenerated every time
+.PHONY: version_header
+version_header:
 	../tools/make_version_h.sh > version.h
 
-kernel/kernel.o: version.h kernel/kernel.c
+kernel/kernel.o: version_header kernel/kernel.c
 
 cpu/vectors.S: cpu/mkvectors.py
 	python cpu/mkvectors.py > $@
