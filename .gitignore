@@ -5,3 +5,4 @@ core.*
 src/kernel.bin
 src/version.h
 src/cpu/vectors.S
+grub2/boot.iso
