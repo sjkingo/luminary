@@ -7,6 +7,7 @@
 #include "drivers/vga.h"
 #include "kernel/kernel.h"
 #include "kernel/task.h"
+#include "kernel/heap.h"
 #include "pci/pci.h"
 #include "version.h"
 
@@ -70,6 +71,7 @@ void kernel_main(struct multiboot_info *mb)
 
     init_vga(); // must be first
     init_vbe(mb);
+    init_kernel_heap(0x40000000); // TODO: move to start; 1 MB
     print_startup_banner();
     init_cpu();
     init_pci();
