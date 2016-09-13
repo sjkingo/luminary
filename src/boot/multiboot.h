@@ -12,6 +12,10 @@
 
 #ifndef __ASSEMBLER__
 
+/* External definitions in vbe.h */
+struct vbe_control_struct;
+struct vbe_mode_struct;
+
 struct multiboot_aout_table {
     unsigned long tabsize;
     unsigned long strsize;
@@ -40,6 +44,22 @@ struct multiboot_info {
     };
     unsigned long mmap_length;
     unsigned long mmap_addr;
+
+    unsigned long drives_length;
+    unsigned long drives_addr;
+
+    unsigned long config_table;
+
+    unsigned long boot_loader_name;
+
+    unsigned long apm_table;
+
+    struct vbe_control_struct *vbe_control_info;
+    struct vbe_mode_info_struct *vbe_mode_info;
+    unsigned long vbe_mode;
+    unsigned long vbe_interface_seg;
+    unsigned long vbe_interface_off;
+    unsigned long vbe_interface_len;
 };
 
 extern struct multiboot_info *mb_info;

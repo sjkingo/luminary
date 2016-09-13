@@ -70,6 +70,7 @@ void kernel_main(struct multiboot_info *mb)
     init_vga(); // must be first
     print_startup_banner();
     init_cpu();
+    init_vbe(mb);
     init_pci();
     init_task();
 

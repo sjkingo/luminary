@@ -7,6 +7,9 @@
     .long MULTIBOOT_MAGIC
     .long MULTIBOOT_FLAGS
     .long MULTIBOOT_CHECKSUM
+    .long 0, 0, 0, 0, 0
+    .long 0
+    .long 800, 600, 32
 
 
 /* Create a 16K stack for the kernel to use (placed at the bottom of kernel image) */
