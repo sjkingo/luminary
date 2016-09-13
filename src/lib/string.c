@@ -1,3 +1,4 @@
+#include <sys/types.h>
 
 void memset(void *dest, int c, int len)
 {
@@ -13,4 +14,11 @@ void *memcpy(void *dest, const void *src, int n)
     while (n--)
         *d++ = *s++;
     return dest;
+}
+
+size_t strlen(const char *s)
+{
+    size_t len = 0;
+    while (*s++) len++;
+    return len;
 }
