@@ -7,9 +7,10 @@
     .long MULTIBOOT_MAGIC
     .long MULTIBOOT_FLAGS
     .long MULTIBOOT_CHECKSUM
+    /* tell multiboot we want VBE initialised and hardcode the resolution */
     .long 0, 0, 0, 0, 0
     .long 0
-    .long 800, 600, 32
+    .long 1024, 768, 32
 
 
 /* Create a 16K stack for the kernel to use (placed at the bottom of kernel image) */

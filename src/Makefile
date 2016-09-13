@@ -1,7 +1,7 @@
 # Set configuration variables for the build
 KERNEL_BIN=	kernel.bin
 EMULATOR=	qemu-system-i386
-QEMU_ARGS=	-net nic,model=rtl8139 -net user
+QEMU_ARGS=	-net nic,model=rtl8139 -net user -vga std
 DEFINES=	-DDEBUG -DTURTLE -DUSE_SERIAL
 
 CC=		gcc
