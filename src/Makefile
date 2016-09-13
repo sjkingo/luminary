@@ -32,7 +32,7 @@ qemu: $(KERNEL_BIN)
 
 .PHONY: qemucd
 qemucd: $(KERNEL_BIN) bootiso
-	$(EMULATOR) -cdrom ../grub2/boot.iso $(QEMU_ARGS)
+	$(EMULATOR) -cdrom ../grub2/boot.iso $(QEMU_ARGS) -serial stdio
 
 .PHONY: console
 console: $(KERNEL_BIN)
