@@ -6,7 +6,7 @@ boot.iso: grub.cfg $(KERNEL_BIN)
 	mkdir -p $(TEMPDIR)/boot/grub
 	cp -p $(KERNEL_BIN) $(TEMPDIR)/boot
 	cp -p grub.cfg $(TEMPDIR)/boot/grub
-	grub2-mkrescue -o $@ $(TEMPDIR)
+	grub2-mkrescue -o $@ $(TEMPDIR) 2>/dev/null
 	rm -rf $(TEMPDIR)
 
 .PHONY: clean
