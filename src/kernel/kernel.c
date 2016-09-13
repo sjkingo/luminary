@@ -3,6 +3,7 @@
 #include "boot/multiboot.h"
 #include "cpu/pic.h"
 #include "cpu/x86.h"
+#include "drivers/vbe.h"
 #include "drivers/vga.h"
 #include "kernel/kernel.h"
 #include "kernel/task.h"
@@ -68,9 +69,9 @@ void kernel_main(struct multiboot_info *mb)
     mb_info = mb;
 
     init_vga(); // must be first
+    init_vbe(mb);
     print_startup_banner();
     init_cpu();
-    init_vbe(mb);
     init_pci();
     init_task();
 

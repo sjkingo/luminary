@@ -56,3 +56,10 @@ struct vbe_mode_info_struct {
 	uint16_t off_screen_mem_size;	// size of memory in the framebuffer but not being displayed on the screen
 	uint8_t reserved1[206];
 };
+
+struct multiboot_info; // in multiboot.h
+
+uint32_t display_width(void);
+uint32_t display_height(void);
+
+void init_vbe(struct multiboot_info *mb);

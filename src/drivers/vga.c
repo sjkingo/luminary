@@ -60,6 +60,10 @@ void clear_screen(void)
 
 void putchar(int c)
 {
+    if (c == '\n') {
+        put_newline();
+        return;
+    }
     putchar_at(c, vid.cur_x, vid.cur_y);
     move_cursor(vid.cur_x+1, vid.cur_y);
 }
@@ -72,6 +76,18 @@ void init_vga(void)
     vid.cur_y = 0;
     clear_screen();
     write_statusline("");
+}
+
+void write_top_right(char *str)
+{
+    int x = VGA_WIDTH - strlen(str);
+    int y = 0;
+    unsigned char def_color = vid.def_color;
+    vid.def_color = make_color(COLOR_WHITE, COLOR_BLUE);
+    for (int i = 0; i < strlen(str); i++) {
+        putchar_at(str[i], x++, y);
+    }
+    vid.def_color = def_color;
 }
 
 void write_statusline(char *str)

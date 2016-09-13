@@ -37,6 +37,7 @@ static void printchar(char **str, int c)
         ++(*str);
     } else {
         putchar(c);
+        writechar_fb(c);
 #ifdef USE_SERIAL
         write_serial(c);
 #endif
@@ -129,13 +130,7 @@ static int print(char **out, const char *format, va_list args )
 	char scr[2];
 
 	for (; *format != 0; ++format) {
-                if (*format == '\n') {
-                        put_newline();
-#ifdef USE_SERIAL
-                        write_serial(*format);
-#endif
-                        continue;
-                } else if (*format == '%') {
+        if (*format == '%') {
 			++format;
 			width = pad = 0;
 			if (*format == '\0') break;
