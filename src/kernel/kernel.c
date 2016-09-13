@@ -62,6 +62,34 @@ static void print_startup_banner(void)
     printk("\n");
 }
 
+static void print_memory_map(void)
+{
+    printk("BIOS memory map:\n");
+    struct multiboot_memory_map *mmap = (struct multiboot_memory_map *)mb_info->mmap_addr;
+    while((unsigned long)mmap < mb_info->mmap_addr + mb_info->mmap_length) {
+        switch (mmap->type) {
+            case MEMORY_TYPE_RAM:
+                printk("  usable RAM\t");
+                break;
+            case MEMORY_TYPE_RESERVED:
+                printk("  reserved\t");
+                break;
+            case MEMORY_TYPE_ACPI:
+            case MEMORY_TYPE_NVS:
+                printk("  ACPI-mapped\t");
+                break;
+            case MEMORY_TYPE_UNUSABLE:
+                printk("  unusable\t");
+                break;
+            default:
+                printk("  ?????\t");
+        }
+        printk("0x%x -> 0x%x (%d KB)\n", mmap->base_addr_low,
+                (mmap->base_addr_low + mmap->length_low), mmap->length_low / 1024);
+		mmap = (struct multiboot_memory_map *)((unsigned long)mmap + mmap->size + sizeof(mmap->size));
+	}
+}
+
 extern void kernel_main() __attribute__((noreturn));
 void kernel_main(struct multiboot_info *mb)
 {
@@ -74,6 +102,7 @@ void kernel_main(struct multiboot_info *mb)
     init_kernel_heap(0x40000000); // TODO: move to start; 1 MB
     print_startup_banner();
     init_cpu();
+    print_memory_map();
     init_pci();
     init_task();
 

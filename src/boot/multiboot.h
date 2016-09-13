@@ -16,6 +16,15 @@
 struct vbe_control_struct;
 struct vbe_mode_struct;
 
+struct multiboot_memory_map {
+    unsigned long size;
+    unsigned long base_addr_low;
+    unsigned long base_addr_high;
+    unsigned long length_low;
+    unsigned long length_high;
+    unsigned long type;
+};
+
 struct multiboot_aout_table {
     unsigned long tabsize;
     unsigned long strsize;
@@ -60,6 +69,14 @@ struct multiboot_info {
     unsigned long vbe_interface_seg;
     unsigned long vbe_interface_off;
     unsigned long vbe_interface_len;
+};
+
+enum mmap_memory_types {
+    MEMORY_TYPE_RAM=1,
+    MEMORY_TYPE_RESERVED=2,
+    MEMORY_TYPE_ACPI=3,
+    MEMORY_TYPE_NVS=4,
+    MEMORY_TYPE_UNUSABLE=5,
 };
 
 extern struct multiboot_info *mb_info;
