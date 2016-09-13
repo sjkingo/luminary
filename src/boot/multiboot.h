@@ -4,9 +4,11 @@
  * https://www.gnu.org/software/grub/manual/multiboot/multiboot.html#Header-magic-fields
  */
 #define MULTIBOOT_MAGIC  0x1badb002
-//                      align   mem_*
-#define MULTIBOOT_FLAGS (1<<0 | 1<<1)
-#define MULTIBOOT_CHECKSUM -(MULTIBOOT_MAGIC + MULTIBOOT_FLAGS)
+#define MULTIBOOT_FLAG_ALIGN    (1<<0)
+#define MULTIBOOT_FLAG_MEM      (1<<1)
+#define MULTIBOOT_FLAG_GFX      (1<<2)
+#define MULTIBOOT_FLAGS         MULTIBOOT_FLAG_ALIGN | MULTIBOOT_FLAG_MEM | MULTIBOOT_FLAG_GFX
+#define MULTIBOOT_CHECKSUM      -(MULTIBOOT_MAGIC + MULTIBOOT_FLAGS)
 
 #ifndef __ASSEMBLER__
 
