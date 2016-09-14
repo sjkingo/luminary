@@ -125,14 +125,5 @@ void kernel_main(struct multiboot_info *mb, uint32_t start, uint32_t stack, uint
     startup_complete = true;
     enable_interrupts();
 
-    /*
-    struct task a;
-    create_task(&a, "A", 10);
-    struct task b;
-    create_task(&b, "B", 7);
-    struct task c;
-    create_task(&c, "C", 4);
-    */
-
     while(1);
 }
