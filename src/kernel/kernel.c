@@ -15,9 +15,10 @@ struct kernel_time timekeeper;
 
 bool startup_complete = false;
 
-uint32_t kernel_start;
-uint32_t kernel_stack;
-uint32_t kernel_end;
+// kernel segment addresses
+static uint32_t kernel_start;
+static uint32_t kernel_stack;
+static uint32_t kernel_end;
 
 void real_panic(char *msg, char const *file, int line, char const *func)
 {
