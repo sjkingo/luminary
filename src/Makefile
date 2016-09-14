@@ -44,6 +44,10 @@ console: $(KERNEL_BIN)
 debug: $(KERNEL_BIN)
 	$(EMULATOR) -kernel $(KERNEL_BIN) -s -S $(QEMU_ARGS)
 
+.PHONY: gdb
+gdb:
+	gdb -x ../tools/gdbinitrc
+
 .PHONY: clean
 clean:
 	rm -f $(KERNEL_OBJS) $(KERNEL_OBJS:.o=.d) $(KERNEL_BIN) core.* cpu/vectors.S version.h
