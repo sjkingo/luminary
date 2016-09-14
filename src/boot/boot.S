@@ -4,6 +4,7 @@
  * it will be in the first 8K of the kernel binary.
  */
 .section .mbhdr
+    mbhdr:
     .long MULTIBOOT_MAGIC
     .long MULTIBOOT_FLAGS
     .long MULTIBOOT_CHECKSUM
@@ -28,8 +29,13 @@
 multiboot_entry:
     cli
 
+    movl $mbhdr, %eax
+    movl $kernel_end, %ecx
     movl $kstack + STACKSIZE, %esp
 
+    push %ecx
+    push %esp # kernel stack pointer
+    push %eax # kernel start addr
     push %ebx # multiboot struct
     call kernel_main
 
@@ -56,3 +62,4 @@ halting:
     .asciz "\n\nCPU halt\n"
 kernel_returned:
     .asciz "\n\nBUG: kernel_main() returned?\n"
+kernel_end:

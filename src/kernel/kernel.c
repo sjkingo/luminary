@@ -15,6 +15,10 @@ struct kernel_time timekeeper;
 
 bool startup_complete = false;
 
+uint32_t kernel_start;
+uint32_t kernel_stack;
+uint32_t kernel_end;
+
 void real_panic(char *msg, char const *file, int line, char const *func)
 {
     set_color(COLOR_RED, COLOR_BLACK);
@@ -53,7 +57,7 @@ static void print_startup_banner(void)
     print_defines();
     printk("\n");
     printk(" \\  \\~/  /   Built at: %s %s\n", __DATE__, __TIME__);
-    printk("  `, Y ,'    Last commit: %s\n", _GIT_LAST_COMMIT);
+    printk("  `, Y ,'    Kernel loaded at 0x%x -> 0x%x (%d KB)\n", kernel_start, kernel_end, (kernel_end-kernel_start)/1024);
     printk("   |_|_|     \n");
     printk("   |===|     ");
     printk("%d MB memory available\n", mem_available());
@@ -91,19 +95,31 @@ static void print_memory_map(void)
 }
 
 extern void kernel_main() __attribute__((noreturn));
-void kernel_main(struct multiboot_info *mb)
+void kernel_main(struct multiboot_info *mb, uint32_t start, uint32_t stack, uint32_t end)
 {
     disable_interrupts();
 
     mb_info = mb;
+    kernel_start = start;
+    kernel_stack = stack;
+    kernel_end = end;
 
+    // init early graphics
     init_vga(); // must be first
-    init_vbe(mb);
-    init_kernel_heap(0x40000000); // TODO: move to start; 1 MB
-    print_startup_banner();
-    init_cpu();
+    init_vbe(mb); // 2nd
+
+    // set up kernel heap 1M above the end of the kernel
     print_memory_map();
+    init_kernel_heap((void *)(kernel_end + INT_1M));
+    printk("kernel stack at 0x%x\n", kernel_stack);
+
+    print_startup_banner();
+
+    /* devices */
+    init_cpu();
     init_pci();
+
+    // higher level startup
     init_task();
 
     startup_complete = true;

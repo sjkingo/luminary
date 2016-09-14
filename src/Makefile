@@ -7,7 +7,7 @@ DEFINES=	-DDEBUG -DDEBUG_HEAP -DTURTLE -DUSE_SERIAL
 CC=		gcc
 AS=		$(CC)
 ARCH=		-m32
-CFLAGS=		$(ARCH) -Wall -Wextra -ffreestanding -std=gnu99 -g -I . $(DEFINES)
+CFLAGS=		$(ARCH) -Wall -Wextra -Wno-unused-variable -Wno-unused-function -ffreestanding -std=gnu99 -g -I . $(DEFINES)
 ASFLAGS=	$(ARCH)
 LDFLAGS=	-T linker.ld -nostdlib -lgcc
 
