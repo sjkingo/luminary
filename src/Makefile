@@ -68,7 +68,7 @@ version_header:
 kernel/kernel.o: version_header kernel/kernel.c
 
 cpu/vectors.S: cpu/mkvectors.py
-	python cpu/mkvectors.py > $@
+	python3 cpu/mkvectors.py > $@
 
 %.o: %.c
 	$(CC) $(CFLAGS) -c $*.c -o $*.o
