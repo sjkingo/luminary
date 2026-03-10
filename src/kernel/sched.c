@@ -108,28 +108,6 @@ static void clear_queues(void)
     memset(queues, 0, sizeof(queues));
 }
 
-static void update_queue_statusline(void)
-{
-    char line[1024];
-    int pos = 0;
-
-    /* build up the queue line */
-    struct task *t = sched_queue;
-    do {
-        char r = ' ';
-        if (t == running_task) {
-            r = '*';
-        } else if (t->prio_d == SCHED_LEVEL_SUSP) {
-            r = 'S';
-        }
-        if (pos < (int)sizeof(line) - 32)
-            pos += sprintf(line + pos, "%c%d:%s (p=%d)  ", r, t->pid, t->name, t->prio_d);
-        t = t->next;
-    } while (t != NULL);
-
-    printsl(line);
-}
-
 /* Resets all task's dynamic priorities to their static priorities. */
 static unsigned int reset_all_priorities(void)
 {
@@ -219,7 +197,6 @@ next:
             picked->pid, picked->name);
     }
 #endif
-    update_queue_statusline();
 }
 
 void init_sched(void)

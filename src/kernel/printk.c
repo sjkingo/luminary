@@ -211,19 +211,4 @@ int sprintf(char *out, const char *format, ...)
         return print( &out, format, args );
 }
 
-int printsl(const char *format, ...)
-{
-    va_list args;
-    va_start(args, format);
-    char out[1024];
-    char *ptr = out;
-    int r = print(&ptr, format, args);
 
-    if (fbdev_is_ready())
-        writestr_fb(out);
-    else {
-        extern void write_statusline(char *);
-        write_statusline(out);
-    }
-    return r;
-}

@@ -1,4 +1,3 @@
-#include <string.h>
 #include "cpu/x86.h"
 #include "drivers/vga.h"
 
@@ -35,7 +34,7 @@ static void scroll_screen(void)
         putchar_at(' ', x, VGA_HEIGHT-1);
     }
 
-    move_cursor(vid.cur_x, VGA_HEIGHT-2);
+    move_cursor(vid.cur_x, VGA_HEIGHT-1);
 }
 
 void put_newline(void)
@@ -64,6 +63,12 @@ void putchar(int c)
         put_newline();
         return;
     }
+    if (c == '\b') {
+        if (vid.cur_x > 0) {
+            move_cursor(vid.cur_x - 1, vid.cur_y);
+        }
+        return;
+    }
     putchar_at(c, vid.cur_x, vid.cur_y);
     move_cursor(vid.cur_x+1, vid.cur_y);
 }
@@ -75,44 +80,6 @@ void init_vga(void)
     vid.cur_x = 0;
     vid.cur_y = 0;
     clear_screen();
-    write_statusline("");
-}
-
-void write_top_right(char *str)
-{
-    int x = VGA_WIDTH - strlen(str);
-    int y = 0;
-    unsigned char def_color = vid.def_color;
-    vid.def_color = make_color(COLOR_WHITE, COLOR_BLUE);
-    for (size_t i = 0; i < strlen(str); i++) {
-        putchar_at(str[i], x++, y);
-    }
-    vid.def_color = def_color;
-}
-
-void write_statusline(char *str)
-{
-    /* change the colour of the status line */
-    unsigned char def_color = vid.def_color;
-    vid.def_color = make_color(COLOR_WHITE, COLOR_BROWN);
-
-    /* print the string */
-    int x = 0;
-    while (str[x] != '\0' && x < VGA_WIDTH) {
-        putchar_at(str[x], x, VGA_HEIGHT);
-        x++;
-    }
-
-    /* pad the rest of the line */
-    if (x < VGA_WIDTH) {
-        while (x < VGA_WIDTH) {
-            putchar_at(' ', x, VGA_HEIGHT);
-            x++;
-        }
-    }
-
-    /* restore the default colour */
-    vid.def_color = def_color;
 }
 
 void set_color(enum vga_color fg, enum vga_color bg)

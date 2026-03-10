@@ -30,7 +30,7 @@ struct vga_state {
 
 /* Basic VGA console */
 static const int VGA_WIDTH = 80;
-static const int VGA_HEIGHT = 24;
+static const int VGA_HEIGHT = 25;
 
 /* Some helpful routines that we use a lot */
 #define vga_index(x, y) ((y * VGA_WIDTH) + x)
@@ -52,11 +52,6 @@ void init_vga(void);
 
 /* Put a character to the screen */
 void putchar(int c);
-
-/* Writes the given string to the status line at the bottom
- * of the screen. See also printsl() in printk.c.
- */
-void write_statusline(char *str);
 
 /* Set the color of future putchar() calls to the given color.
  * Reset by calling reset_color()
