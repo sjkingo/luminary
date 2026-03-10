@@ -26,9 +26,8 @@ static void putchar_at(int c, int x, int y)
 static void scroll_screen(void)
 {
     /* move each cell up one row */
-    for (unsigned short i = 0; i < (VGA_HEIGHT * VGA_WIDTH); i++) {
-        unsigned short this = vid.buffer[i];
-        vid.buffer[i-VGA_WIDTH] = this;
+    for (unsigned short i = VGA_WIDTH; i < (VGA_HEIGHT * VGA_WIDTH); i++) {
+        vid.buffer[i - VGA_WIDTH] = vid.buffer[i];
     }
 
     /* clear the bottom row */
