@@ -204,7 +204,7 @@ next:
     if (picked != running_task) {
         prev_task = running_task;
         running_task = picked;
-#ifdef DEBUG_SCHED
+#ifdef DEBUG
         unsigned int now = (unsigned int)timekeeper.uptime_ms;
         unsigned int ran = now - (unsigned int)prev_task->switched_in_ms;
         printk("sched: pid %d (%s, %u ms) -> pid %d (%s)\n",

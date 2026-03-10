@@ -2,7 +2,7 @@
 KERNEL_BIN=	kernel.bin
 EMULATOR=	qemu-system-i386
 QEMU_ARGS=	-net nic,model=rtl8139 -net user -nographic
-DEFINES=	-DDEBUG -DDEBUG_HEAP -DDEBUG_SCHED -DTURTLE -DUSE_SERIAL
+DEFINES=	-DDEBUG -DTURTLE -DUSE_SERIAL
 
 CROSS=		i686-elf-
 CC=		$(CROSS)gcc
