@@ -322,6 +322,7 @@ void spawn_init(const void *elf_data, unsigned int elf_size)
     init_elf_data = elf_data;
     init_elf_size = elf_size;
     create_elf_task(&task_init, "init", 5, elf_data, elf_size);
+    task_init.pid = PID_INIT;
 }
 
 static void respawn_init(void)
@@ -329,6 +330,7 @@ static void respawn_init(void)
     printk("init: respawning\n");
     memset(&task_init, 0, sizeof(task_init));
     create_elf_task(&task_init, "init", 5, init_elf_data, init_elf_size);
+    task_init.pid = PID_INIT;
 }
 
 void task_kill(struct task *t)

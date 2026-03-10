@@ -19,8 +19,8 @@ struct task {
     struct task *prev, *next;
 };
 
-#define PID_IDLE                1
-#define PID_INIT                2
+#define PID_IDLE                0
+#define PID_INIT                1
 #define TASK_STACK_SIZE         4096
 #define TASK_ESP_OFFSET         24  /* byte offset of esp in struct task */
 #define TASK_PAGE_DIR_OFFSET    28  /* byte offset of page_dir_phys in struct task */
