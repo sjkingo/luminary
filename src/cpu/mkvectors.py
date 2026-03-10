@@ -28,7 +28,7 @@ for i in all_vectors:
         print('    pushl $0')
         print('    pushl $%d' % i)
     else:
-        if i in with_error_code:
+        if i not in with_error_code:
             print('    pushl $0')
         print('    pushl $%d' % i)
     print('    jmp alltraps')
