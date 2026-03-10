@@ -1,7 +1,7 @@
 CROSS=		i686-elf-
 CC=		$(CROSS)gcc
 CFLAGS=		-m32 -ffreestanding -nostdlib -std=gnu99 -Wall -Wextra -g -I .
-LDFLAGS=	-m32 -T user.ld -nostdlib -lgcc
+LDFLAGS=	-m32 -T init.ld -nostdlib -lgcc
 
 TARGET=		init.elf
 
