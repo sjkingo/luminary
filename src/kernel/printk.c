@@ -21,24 +21,25 @@
 
 #include <stdarg.h>
 
-/* in vga.h but we don't want to include that kludge in here so extern them */
+#include "drivers/fbdev.h"
+
+/* VGA fallback */
 extern void putchar(int);
-extern void put_newline(void);
-extern void write_statusline(char *);
-extern void writechar_fb(char);
 #ifdef USE_SERIAL
 extern void write_serial(char);
 #endif
 
 static void printchar(char **str, int c)
 {
-	
+
     if (str) {
         **str = c;
         ++(*str);
     } else {
-        putchar(c);
-        writechar_fb(c);
+        if (fbdev_is_ready())
+            writechar_fb(c);
+        else
+            putchar(c);
 #ifdef USE_SERIAL
         write_serial(c);
 #endif
@@ -191,7 +192,7 @@ static int print(char **out, const char *format, va_list args )
 int printk(const char *format, ...)
 {
         va_list args;
-        
+
         va_start( args, format );
         return print( 0, format, args );
 }
@@ -199,7 +200,7 @@ int printk(const char *format, ...)
 int sprintf(char *out, const char *format, ...)
 {
         va_list args;
-        
+
         va_start( args, format );
         return print( &out, format, args );
 }
@@ -211,6 +212,12 @@ int printsl(const char *format, ...)
     char out[1024];
     char *ptr = out;
     int r = print(&ptr, format, args);
-    write_statusline(out);
+
+    if (fbdev_is_ready())
+        writestr_fb(out);
+    else {
+        extern void write_statusline(char *);
+        write_statusline(out);
+    }
     return r;
 }

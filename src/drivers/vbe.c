@@ -1,12 +1,10 @@
 #include "boot/multiboot.h"
 #include "drivers/vbe.h"
 #include "kernel/kernel.h"
-#include "fonts/console.h"
 #include "drivers/fbdev.h"
 
 #define MODULE "vbe: "
 
-static uint8_t *font = (uint8_t*)fontdata;
 static struct vbe_control_struct *control = NULL;
 static struct vbe_mode_info_struct *mode = NULL;
 

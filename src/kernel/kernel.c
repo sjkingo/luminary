@@ -3,6 +3,7 @@
 #include "boot/multiboot.h"
 #include "cpu/pic.h"
 #include "cpu/x86.h"
+#include "drivers/fbdev.h"
 #include "drivers/vbe.h"
 #include "drivers/vga.h"
 #include "kernel/kernel.h"
@@ -23,9 +24,11 @@ static uint32_t kernel_end;
 
 void real_panic(char *msg, char const *file, int line, char const *func)
 {
-    set_color(COLOR_RED, COLOR_BLACK);
+    if (!fbdev_is_ready())
+        set_color(COLOR_RED, COLOR_BLACK);
     printk("\n\nKernel panic at %s:%d(%s): %s\n\n", file, line, func, msg);
-    reset_color();
+    if (!fbdev_is_ready())
+        reset_color();
 
     /* halt the CPU and spin until reset */
     extern void cpu_halt(void);
@@ -50,9 +53,11 @@ static void print_defines(void)
 static void print_startup_banner(void)
 {
     printk("  ..---..    ");
-    set_color(COLOR_LIGHT_BLUE, COLOR_BLACK);
+    if (!fbdev_is_ready())
+        set_color(COLOR_LIGHT_BLUE, COLOR_BLACK);
     printk("Luminary OS\n");
-    reset_color();
+    if (!fbdev_is_ready())
+        reset_color();
     printk(" /       \\   Version %s\n", KERNEL_VERSION);
     printk("|         |  \n");
     printk("|         |  Built with: ");
