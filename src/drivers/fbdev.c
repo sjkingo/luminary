@@ -117,8 +117,13 @@ void writechar_fb(char c)
     } else if (c == '\r') {
         console.cur_col = 0;
     } else if (c == '\b') {
-        if (console.cur_col > 0)
+        if (console.cur_col > 0) {
             console.cur_col--;
+            console.cells[console.cur_row * console.cols + console.cur_col] = ' ';
+            clear_rect(console.cur_col * CONSOLE_FONT_WIDTH,
+                        console.cur_row * CONSOLE_FONT_HEIGHT,
+                        CONSOLE_FONT_WIDTH, CONSOLE_FONT_HEIGHT);
+        }
     } else if (c == '\t') {
         console.cur_col = (console.cur_col + 4) & ~3;
         if (console.cur_col >= console.cols) {
