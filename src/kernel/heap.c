@@ -24,14 +24,14 @@
 
 struct kernel_heap_block {
     bool allocated;
-    int32_t blocks_spanned;
-    void *ptr;
+    int32_t blocks_spanned; // only valid on the first block of an allocation
+    void *ptr;              // only valid on the first block of an allocation
 };
 
 // This is a struct for future use so it's possible to add new elements
 struct kernel_heap {
     struct kernel_heap_block blocks[KERNEL_HEAP_MAX_BLOCKS];
-    int32_t free_blocks; // may be negative
+    int32_t free_blocks;
     void *data_area; // memory that heap will allocate in
 };
 static struct kernel_heap heap;
@@ -68,57 +68,91 @@ void *kmalloc(uint32_t size)
         required_blocks++;
 
     // Shortcut to avoid looping if the allocation requires too many blocks
-    if (required_blocks > KERNEL_HEAP_MAX_BLOCKS)
+    if (required_blocks > heap.free_blocks)
         goto fail;
 
-    // Iterate over the heap and find a big enough gap to allocate
-    struct kernel_heap_block *picked_block = NULL;
-    uint32_t i;
-    for (i = 0; i < KERNEL_HEAP_MAX_BLOCKS; i++) {
-        struct kernel_heap_block *this_block = &heap.blocks[i];
-        if (this_block->allocated)
+    // Iterate over the heap and find a contiguous run of free blocks
+    int32_t run_start = -1;
+    int32_t run_length = 0;
+    for (int32_t i = 0; i < KERNEL_HEAP_MAX_BLOCKS; i++) {
+        if (heap.blocks[i].allocated) {
+            // Reset the run, this block breaks contiguity
+            run_start = -1;
+            run_length = 0;
             continue;
-
-        if (picked_block == NULL)
-            picked_block = this_block;
-        picked_block->blocks_spanned++;
-
-        // if we have found a suitable free space, mark it and all spanned
-        // blocks as allocated and exit. We need to do this backwards since the
-        // picked_block is the *last* block in the chain that fits
-        if (picked_block != NULL && picked_block->blocks_spanned == required_blocks) {
-            for (int32_t offset = 0; offset < required_blocks; offset++) {
-                heap.blocks[i - offset].allocated = true;
-            }
-            break;
         }
-    }
 
-    if (picked_block == NULL || !picked_block->allocated)
-        goto fail;
+        if (run_start == -1)
+            run_start = i;
+        run_length++;
 
-    picked_block->ptr = heap.data_area + (i * KERNEL_HEAP_BLOCK_SIZE);
-    heap.free_blocks -= required_blocks;
-    if (heap.free_blocks < 0)
-        panic("free_blocks < 0: bug in allocator?");
+        if (run_length == required_blocks) {
+            // Found enough contiguous blocks, mark them allocated
+            for (int32_t j = run_start; j <= i; j++) {
+                heap.blocks[j].allocated = true;
+                heap.blocks[j].blocks_spanned = 0;
+                heap.blocks[j].ptr = NULL;
+            }
+
+            // Store metadata on the first block of the allocation
+            void *ptr = heap.data_area + (run_start * KERNEL_HEAP_BLOCK_SIZE);
+            heap.blocks[run_start].blocks_spanned = required_blocks;
+            heap.blocks[run_start].ptr = ptr;
+
+            heap.free_blocks -= required_blocks;
 
 #ifdef DEBUG_HEAP
-    printk(MODULE "%s:%d(%s) kmalloc found %d blocks (for %d bytes) to allocate at 0x%x\n",
-            calling_file, calling_line, calling_func, picked_block->blocks_spanned,
-            size, (uint32_t)picked_block->ptr);
+            printk(MODULE "%s:%d(%s) kmalloc found %d blocks (for %d bytes) at 0x%x\n",
+                    calling_file, calling_line, calling_func, required_blocks,
+                    size, (uint32_t)ptr);
 #endif
-
-    return picked_block->ptr;
+            return ptr;
+        }
+    }
 
 fail:
 #ifdef DEBUG_HEAP
     printk(MODULE "%s:%d(%s) kmalloc failed to allocate %d bytes in %d blocks\n",
             calling_file, calling_line, calling_func, size, required_blocks);
 #endif
-    // if we are failing, make sure there isn't a bug in this allocator
-    if (required_blocks <= heap.free_blocks)
-        panic("bug in allocator?");
     return NULL;
+}
+
+#ifdef DEBUG_HEAP
+void kfree_real(void *ptr, char const *calling_file, int calling_line,
+        char const *calling_func)
+#else
+void kfree(void *ptr)
+#endif
+{
+    if (ptr == NULL)
+        return;
+
+    // Find the block that owns this pointer
+    for (int32_t i = 0; i < KERNEL_HEAP_MAX_BLOCKS; i++) {
+        struct kernel_heap_block *block = &heap.blocks[i];
+        if (!block->allocated || block->ptr != ptr || block->blocks_spanned == 0)
+            continue;
+
+        // Found it, free this block and all blocks it spans
+        int32_t count = block->blocks_spanned;
+
+#ifdef DEBUG_HEAP
+        printk(MODULE "%s:%d(%s) kfree freeing %d blocks at 0x%x\n",
+                calling_file, calling_line, calling_func, count, (uint32_t)ptr);
+#endif
+
+        for (int32_t j = i; j < i + count; j++) {
+            heap.blocks[j].allocated = false;
+            heap.blocks[j].blocks_spanned = 0;
+            heap.blocks[j].ptr = NULL;
+        }
+
+        heap.free_blocks += count;
+        return;
+    }
+
+    panic("kfree: pointer not found in heap");
 }
 
 void init_kernel_heap(void *start_addr)
