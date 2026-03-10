@@ -1,12 +1,13 @@
 KERNEL_BIN=../src/kernel.bin
 TEMPDIR=./.temp
+GRUB_MKRESCUE=$(shell command -v grub2-mkrescue || command -v i686-elf-grub-mkrescue || command -v grub-mkrescue)
 
 boot.iso: grub.cfg $(KERNEL_BIN)
 	rm -rf $(TEMPDIR)
 	mkdir -p $(TEMPDIR)/boot/grub
 	cp -p $(KERNEL_BIN) $(TEMPDIR)/boot
 	cp -p grub.cfg $(TEMPDIR)/boot/grub
-	grub2-mkrescue -o $@ $(TEMPDIR) 2>/dev/null
+	$(GRUB_MKRESCUE) -o $@ $(TEMPDIR) 2>/dev/null
 	rm -rf $(TEMPDIR)
 
 .PHONY: clean
