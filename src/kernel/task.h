@@ -12,6 +12,7 @@ struct task {
     unsigned long switched_in_ms; /* uptime_ms when this task was last switched in */
 
     unsigned int esp;           /* saved stack pointer */
+    unsigned int page_dir_phys; /* physical address of task's page directory */
     unsigned int stack_base;    /* base of allocated stack (for kfree) */
     void (*entry)(void);        /* entry point for new tasks */
 
@@ -21,6 +22,7 @@ struct task {
 #define PID_IDLE                1
 #define TASK_STACK_SIZE         4096
 #define TASK_ESP_OFFSET         24  /* byte offset of esp in struct task */
+#define TASK_PAGE_DIR_OFFSET    28  /* byte offset of page_dir_phys in struct task */
 
 /* Initialise the task subsystem */
 void init_task(void);

@@ -7,7 +7,22 @@
 #define PTE_WRITE     0x002
 #define PTE_USER      0x004
 
+/* Address space layout */
+#define USER_SPACE_START    0x01000000
+#define USER_SPACE_END      0xC0000000
+#define USER_STACK_TOP      0xBFFFF000
+
 void init_vmm(void);
 void vmm_map_page(uint32_t virt, uint32_t phys, uint32_t flags);
 void vmm_unmap_page(uint32_t virt);
 uint32_t vmm_get_phys(uint32_t virt);   /* translate virtual to physical */
+
+/* Page directory management */
+uint32_t vmm_get_kernel_page_dir(void);
+uint32_t vmm_create_page_dir(void);
+void vmm_destroy_page_dir(uint32_t dir_phys);
+void vmm_switch_page_dir(uint32_t dir_phys);
+
+/* Map/unmap pages in a specific page directory */
+void vmm_map_page_in(uint32_t dir_phys, uint32_t virt, uint32_t phys, uint32_t flags);
+void vmm_unmap_page_in(uint32_t dir_phys, uint32_t virt);

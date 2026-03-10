@@ -3,6 +3,7 @@
 #include "traps.h"
 
 #define TASK_ESP_OFFSET 24
+#define TASK_PAGE_DIR_OFFSET 28
 
 .section .text
 
@@ -35,8 +36,12 @@ alltraps:
     # save current ESP to prev_task->esp
     movl %esp, TASK_ESP_OFFSET(%eax)
 
-    # load new task's ESP
+    # switch to new task's page directory
     movl running_task, %eax
+    movl TASK_PAGE_DIR_OFFSET(%eax), %ecx
+    movl %ecx, %cr3
+
+    # load new task's ESP
     movl TASK_ESP_OFFSET(%eax), %esp
 
     # clear prev_task

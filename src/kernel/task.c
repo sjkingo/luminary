@@ -1,9 +1,17 @@
+#include <stddef.h>
+
 #include "kernel/kernel.h"
 #include "kernel/heap.h"
 #include "kernel/sched.h"
 #include "kernel/task.h"
+#include "kernel/vmm.h"
 #include "cpu/traps.h"
 #include "cpu/x86.h"
+
+_Static_assert(offsetof(struct task, esp) == TASK_ESP_OFFSET,
+               "TASK_ESP_OFFSET does not match struct layout");
+_Static_assert(offsetof(struct task, page_dir_phys) == TASK_PAGE_DIR_OFFSET,
+               "TASK_PAGE_DIR_OFFSET does not match struct layout");
 
 /* last PID allocated to a task */
 static unsigned int last_pid = PID_IDLE;
@@ -104,6 +112,7 @@ void create_task(struct task *t, char *name, int prio, void (*entry)(void))
     t->prio_d = prio;
 
     t->entry = entry;
+    t->page_dir_phys = vmm_create_page_dir();
     t->prev = NULL;
     t->next = NULL;
 
@@ -143,8 +152,9 @@ void init_task(void)
     idle_task.name = "idle";
     idle_task.pid = PID_IDLE;
     idle_task.prio_s = idle_task.prio_d = SCHED_LEVEL_IDLE;
-    idle_task.esp = 0;          /* filled when first switched out */
-    idle_task.stack_base = 0;   /* boot stack, not from heap */
+    idle_task.esp = 0;              /* filled when first switched out */
+    idle_task.page_dir_phys = vmm_get_kernel_page_dir();
+    idle_task.stack_base = 0;       /* boot stack, not from heap */
     idle_task.entry = NULL;     /* already running */
     sched_queue = &idle_task;
     running_task = &idle_task;
