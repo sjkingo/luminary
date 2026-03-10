@@ -23,6 +23,7 @@ struct task {
 #define TASK_STACK_SIZE         4096
 #define TASK_ESP_OFFSET         24  /* byte offset of esp in struct task */
 #define TASK_PAGE_DIR_OFFSET    28  /* byte offset of page_dir_phys in struct task */
+#define TASK_STACK_BASE_OFFSET  32  /* byte offset of stack_base in struct task */
 
 /* Initialise the task subsystem */
 void init_task(void);

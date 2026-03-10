@@ -1,3 +1,5 @@
+#include <string.h>
+
 #include "cpu/dt.h"
 #include "cpu/pic.h"
 #include "cpu/traps.h"
@@ -16,6 +18,9 @@ struct gdt_ptr gptr;
 struct idt_entry idt[256];
 struct idt_ptr iptr;
 
+/* The TSS */
+static struct tss_entry tss;
+
 static inline void gdt_set_gate(int index, unsigned int base, unsigned int limit,
         unsigned char access, unsigned char granularity)
 {
@@ -23,8 +28,39 @@ static inline void gdt_set_gate(int index, unsigned int base, unsigned int limit
     gdt[index].base_middle = (base >> 16) & 0xFF;
     gdt[index].base_high = (base >> 24) & 0xFF;
     gdt[index].limit_low = (limit & 0xFFFF);
-    gdt[index].access = access;
+    gdt[index].granularity = (limit >> 16) & 0x0F;
     gdt[index].granularity |= (granularity & 0xF0);
+    gdt[index].access = access;
+}
+
+static void write_tss(int index, uint32_t ss0, uint32_t esp0)
+{
+    uint32_t base = (uint32_t)&tss;
+    uint32_t limit = base + sizeof(tss) - 1;
+
+    /* TSS descriptor: present, ring 3, type 0x9 (available 32-bit TSS) */
+    gdt_set_gate(index, base, limit, 0xE9, 0x00);
+
+    memset(&tss, 0, sizeof(tss));
+    tss.ss0 = ss0;
+    tss.esp0 = esp0;
+
+    /* Segment selectors the CPU loads when returning to ring 3.
+     * These are kernel selectors with RPL=3 set in the low 2 bits. */
+    tss.cs = SEG_KERNEL_CODE | 0x3;
+    tss.ss = SEG_KERNEL_DATA | 0x3;
+    tss.ds = SEG_KERNEL_DATA | 0x3;
+    tss.es = SEG_KERNEL_DATA | 0x3;
+    tss.fs = SEG_KERNEL_DATA | 0x3;
+    tss.gs = SEG_KERNEL_DATA | 0x3;
+
+    /* I/O map base points past the TSS to deny all port access from ring 3 */
+    tss.iomap_base = sizeof(tss);
+}
+
+void tss_set_kernel_stack(uint32_t esp0)
+{
+    tss.esp0 = esp0;
 }
 
 static void gdt_install(void)
@@ -34,20 +70,25 @@ static void gdt_install(void)
 
     /* Access and granularity bitmasks are described at http://www.osdever.net/bkerndev/Docs/gdt.htm
      *
-     * access definitions are in x86.h
-     * granularity of 0xCF = 32 bit, 4KB->4GB
+     * Granularity of 0xCF = 32 bit, 4KB granularity, 0-4GB
      *
      *              32 bits   32 bits     8 bits                8 bits
      *           i  base      limit       access                granularity     */
     gdt_set_gate(0, 0x0,      0x0,        0,                    0);
     gdt_set_gate(1, 0x0,      0xFFFFFFFF, GDT_GATE_KERNEL_CODE, 0xCF);
     gdt_set_gate(2, 0x0,      0xFFFFFFFF, GDT_GATE_KERNEL_DATA, 0xCF);
+    gdt_set_gate(3, 0x0,      0xFFFFFFFF, GDT_GATE_USER_CODE,   0xCF);
+    gdt_set_gate(4, 0x0,      0xFFFFFFFF, GDT_GATE_USER_DATA,   0xCF);
+    write_tss(5, SEG_KERNEL_DATA, 0x0);
 
     extern void gdt_flush(void);
+    extern void tss_flush(void);
     gdt_flush();
+    tss_flush();
 
 #ifdef DEBUG
-    printk("Installed GDT at %08x\n", (unsigned int)&gptr);
+    printk("Installed GDT at %08x (%d entries, TSS at %08lx)\n",
+           (unsigned int)&gptr, GDT_NUM_ENTRIES, (uint32_t)&tss);
 #endif
 }
 

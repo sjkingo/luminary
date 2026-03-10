@@ -4,6 +4,8 @@
 
 #define TASK_ESP_OFFSET 24
 #define TASK_PAGE_DIR_OFFSET 28
+#define TASK_STACK_BASE_OFFSET 32
+#define TASK_STACK_SIZE 4096
 
 .section .text
 
@@ -43,6 +45,13 @@ alltraps:
 
     # load new task's ESP
     movl TASK_ESP_OFFSET(%eax), %esp
+
+    # update TSS kernel stack for ring transitions
+    movl TASK_STACK_BASE_OFFSET(%eax), %ecx
+    addl $TASK_STACK_SIZE, %ecx
+    pushl %ecx
+    call tss_set_kernel_stack
+    addl $4, %esp
 
     # clear prev_task
     movl $0, prev_task

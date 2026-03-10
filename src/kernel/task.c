@@ -12,6 +12,8 @@ _Static_assert(offsetof(struct task, esp) == TASK_ESP_OFFSET,
                "TASK_ESP_OFFSET does not match struct layout");
 _Static_assert(offsetof(struct task, page_dir_phys) == TASK_PAGE_DIR_OFFSET,
                "TASK_PAGE_DIR_OFFSET does not match struct layout");
+_Static_assert(offsetof(struct task, stack_base) == TASK_STACK_BASE_OFFSET,
+               "TASK_STACK_BASE_OFFSET does not match struct layout");
 
 /* last PID allocated to a task */
 static unsigned int last_pid = PID_IDLE;

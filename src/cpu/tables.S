@@ -13,3 +13,10 @@ gdt_flush:
     ljmp $0x08, $_gdt_flush_ret
 _gdt_flush_ret:
     ret
+
+/* Load the TSS selector into the task register */
+.globl tss_flush
+tss_flush:
+    mov $0x2B, %ax      /* SEG_TSS (0x28) | RPL 3 */
+    ltr %ax
+    ret
