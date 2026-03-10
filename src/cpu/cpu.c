@@ -5,7 +5,9 @@
 #include "cpu/traps.h"
 #include "cpu/x86.h"
 #include "kernel/kernel.h"
+#include "kernel/sched.h"
 #include "kernel/syscall.h"
+#include "kernel/task.h"
 
 #ifdef USE_SERIAL
 #include "drivers/serial.h"
@@ -151,7 +153,13 @@ void dump_trap_frame(struct trap_frame *frame)
         printk("BUG: magic=0x%x INVALID -- trap frame may be corrupt.\n", frame->magic);
         return;
     }
-    printk("Unhandled exception: %d (%s) at %08x\n", frame->trapno, VECTOR_NAME(frame->trapno), frame->eip);
+    if ((frame->cs & 0x3) == 3)
+        printk("User exception in '%s' (pid %d): %d (%s) at %08x\n",
+               running_task->name, running_task->pid,
+               frame->trapno, VECTOR_NAME(frame->trapno), frame->eip);
+    else
+        printk("Unhandled exception: %d (%s) at %08x\n",
+               frame->trapno, VECTOR_NAME(frame->trapno), frame->eip);
     printk("ERR=%04x IP=%04x:%08x SP=%04x:%08x GDT=%08x IDT=%08x\n", frame->err,
             frame->cs, frame->eip, frame->ds, frame->esp, (unsigned int)&gptr, (unsigned int)&iptr);
     printk("EAX=%08x EBX=%08x ECX=%08x EDX=%08x [u]ESP=%08x\n", frame->eax, frame->ebx, frame->ecx, frame->edx, frame->uesp);
@@ -192,22 +200,33 @@ void trap_handler(struct trap_frame *frame)
 exc_handler:
     dump_trap_frame(frame);
 
-    /* handle the trap - most will be a panic() */
+    /* page fault: decode CR2 and error code bits */
+    if (frame->trapno == INT_PAGE_FAULT) {
+        unsigned int fault_addr;
+        asm volatile("mov %%cr2, %0" : "=r"(fault_addr));
+        printk("Page fault at 0x%x (err=0x%x)\n", fault_addr, frame->err);
+        if (!(frame->err & 0x1)) printk("  page not present\n");
+        if (frame->err & 0x2)    printk("  write access\n");
+        if (frame->err & 0x4)    printk("  user mode\n");
+    }
+
+    /* if the exception came from user mode (ring 3), kill the task
+     * instead of panicking the kernel */
+    if ((frame->cs & 0x3) == 3) {
+        printk("sched: killing '%s' (pid %d)\n",
+               running_task->name, running_task->pid);
+        disable_interrupts();
+        task_kill(running_task);
+        /* task_kill does not return when killing running_task */
+        __builtin_unreachable();
+    }
+
+    /* kernel-mode exception - fatal */
     switch (frame->trapno) {
         case INT_DEBUG:
         case INT_BREAK:
             printk("STOP: %s detected\n", VECTOR_NAME(frame->trapno));
             panic("Stopping kernel execution as requested");
-
-        case INT_PAGE_FAULT: {
-            unsigned int fault_addr;
-            asm volatile("mov %%cr2, %0" : "=r"(fault_addr));
-            printk("Page fault at 0x%x (err=0x%x)\n", fault_addr, frame->err);
-            if (!(frame->err & 0x1)) printk("  page not present\n");
-            if (frame->err & 0x2)    printk("  write access\n");
-            if (frame->err & 0x4)    printk("  user mode\n");
-            panic("page fault");
-        }
 
         default:
             panic("CPU exception");

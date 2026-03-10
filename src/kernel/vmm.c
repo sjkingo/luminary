@@ -132,17 +132,35 @@ void vmm_destroy_page_dir(uint32_t dir_phys)
         if (!(dir[i] & PTE_PRESENT))
             continue;
 
-        /* Skip entries that match the kernel template (shared kernel tables) */
+        /* Skip entries that exactly match the kernel template */
         if (dir[i] == page_directory[i])
             continue;
 
-        /* This is a user page table - free mapped frames and the table itself */
-        uint32_t *pt = (uint32_t *)(dir[i] & 0xFFFFF000);
-        for (int j = 0; j < 1024; j++) {
-            if (pt[j] & PTE_PRESENT)
-                pmm_free_frame(pt[j] & 0xFFFFF000);
+        uint32_t dir_frame = dir[i] & 0xFFFFF000;
+        uint32_t kern_frame = page_directory[i] & 0xFFFFF000;
+
+        if ((page_directory[i] & PTE_PRESENT) && dir_frame == kern_frame) {
+            /* Same page table frame as kernel (just PDE flags differ, e.g.
+             * PTE_USER was promoted). Only free user-mapped PTEs, not the
+             * shared page table itself. Also clear the PTE_USER flag we
+             * added to the kernel's PDE copy. */
+            uint32_t *pt = (uint32_t *)dir_frame;
+            for (int j = 0; j < 1024; j++) {
+                if ((pt[j] & PTE_PRESENT) && (pt[j] & PTE_USER)) {
+                    pmm_free_frame(pt[j] & 0xFFFFF000);
+                    pt[j] = 0;
+                }
+            }
+        } else {
+            /* Task-private page table - free all mapped frames and the
+             * table itself */
+            uint32_t *pt = (uint32_t *)dir_frame;
+            for (int j = 0; j < 1024; j++) {
+                if (pt[j] & PTE_PRESENT)
+                    pmm_free_frame(pt[j] & 0xFFFFF000);
+            }
+            pmm_free_frame(dir_frame);
         }
-        pmm_free_frame(dir[i] & 0xFFFFF000);
     }
 
     pmm_free_frame(dir_phys);

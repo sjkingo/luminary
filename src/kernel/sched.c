@@ -213,6 +213,12 @@ next:
         running_task->switched_in_ms = now;
 #endif
     }
+#ifdef DEBUG
+    else {
+        printk("sched: pid %d (%s) continues\n",
+            picked->pid, picked->name);
+    }
+#endif
     update_queue_statusline();
 }
 
