@@ -147,9 +147,15 @@ exc_handler:
             printk("STOP: %s detected\n", VECTOR_NAME(frame->trapno));
             panic("Stopping kernel execution as requested");
 
-        case INT_PAGE_FAULT:
-            printk("TODO: page fault\n");
-            goto out;
+        case INT_PAGE_FAULT: {
+            unsigned int fault_addr;
+            asm volatile("mov %%cr2, %0" : "=r"(fault_addr));
+            printk("Page fault at 0x%x (err=0x%x)\n", fault_addr, frame->err);
+            if (!(frame->err & 0x1)) printk("  page not present\n");
+            if (frame->err & 0x2)    printk("  write access\n");
+            if (frame->err & 0x4)    printk("  user mode\n");
+            panic("page fault");
+        }
 
         default:
             panic("CPU exception");

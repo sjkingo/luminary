@@ -59,11 +59,11 @@ static inline bool in_protected_mode(void)
 
 static inline bool is_paging_enabled(void)
 {
-    /* bit 16 = PG
+    /* bit 31 = PG
      * https://en.wikipedia.org/wiki/Control_register#CR0
      */
     int cr0 = get_cr0();
-    return cr0 & (1<<16);
+    return cr0 & (1<<31);
 }
 
 #define disable_interrupts() ({ asm volatile("cli\nnop"); })

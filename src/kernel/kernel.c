@@ -9,6 +9,8 @@
 #include "kernel/kernel.h"
 #include "kernel/task.h"
 #include "kernel/heap.h"
+#include "kernel/pmm.h"
+#include "kernel/vmm.h"
 #include "pci/pci.h"
 #include "version.h"
 
@@ -136,6 +138,10 @@ void kernel_main(struct multiboot_info *mb, uint32_t start, uint32_t stack, uint
     printk("kernel stack at 0x%x\n", kernel_stack);
 
     print_startup_banner();
+
+    /* physical and virtual memory */
+    init_pmm(mb_info->mem_upper);
+    init_vmm();
 
     /* devices */
     init_cpu();
