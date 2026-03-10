@@ -84,7 +84,7 @@ void write_top_right(char *str)
     int y = 0;
     unsigned char def_color = vid.def_color;
     vid.def_color = make_color(COLOR_WHITE, COLOR_BLUE);
-    for (int i = 0; i < strlen(str); i++) {
+    for (size_t i = 0; i < strlen(str); i++) {
         putchar_at(str[i], x++, y);
     }
     vid.def_color = def_color;

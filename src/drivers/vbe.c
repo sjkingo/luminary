@@ -16,7 +16,7 @@ static void dump_vbe_structs(void)
 {
     printk(MODULE "found valid VESA extensions (version %d.%d):\n",
         control->major_version, control->minor_version);
-    printk("  framebuffer 0x%x\n", mode->framebuffer);
+    printk("  framebuffer 0x%lx\n", mode->framebuffer);
     printk("  memory %d KB\n", control->video_memory*64);
     printk("  current mode %dx%dx%d (pitch=%d)\n", mode->width,
         mode->height, mode->bpp, mode->pitch);

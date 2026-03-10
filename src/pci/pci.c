@@ -28,8 +28,8 @@ static void scan_device(struct pci_device_location *location)
     } else {
         name = "unknown device";
     }
-    printk("  %02x:%02x:%d (0x%08x): %04x/%04x (%s)\n", 
-            location->bus, location->dev, location->func, id, 
+    printk("  %02lx:%02lx:%ld (0x%08lx): %04x/%04x (%s)\n",
+            location->bus, location->dev, location->func, id,
             device.vendor_id, device.device_id, name);
 #endif
 

@@ -59,7 +59,7 @@ void rtl8139_init(struct pci_device_location *loc)
     } else {
 	panic(MODULE "could not get I/O base address after bus mastering enabled");
     }
-    printk(MODULE "iobase: 0x%x\n", iobase);
+    printk(MODULE "iobase: 0x%lx\n", iobase);
 
     /* Read MAC address */
     for (int i = 0; i < 6; ++i) {

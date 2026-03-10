@@ -200,7 +200,7 @@ void init_fbdev(char *fbaddr, uint32_t width, uint32_t height, uint8_t depth,
 
     /* Refuse to operate on a display too small for even one character */
     if (console.cols == 0 || console.rows == 0) {
-        printk(MODULE "display too small for console (%dx%d)\n", width, height);
+        printk(MODULE "display too small for console (%ldx%ld)\n", width, height);
         return;
     }
 
@@ -208,6 +208,6 @@ void init_fbdev(char *fbaddr, uint32_t width, uint32_t height, uint8_t depth,
     memset(console.cells, 0, sizeof(console.cells));
 
     fbdev_ready = true;
-    printk(MODULE "framebuffer console %dx%d (%d cols x %d rows)\n",
+    printk(MODULE "framebuffer console %ldx%ld (%ld cols x %ld rows)\n",
             width, height, console.cols, console.rows);
 }

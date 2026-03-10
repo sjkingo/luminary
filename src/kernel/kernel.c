@@ -66,7 +66,7 @@ static void print_startup_banner(void)
     print_defines();
     printk("\n");
     printk(" \\  \\~/  /   Built at: %s %s\n", __DATE__, __TIME__);
-    printk("  `, Y ,'    Kernel loaded at 0x%x -> 0x%x (%d KB)\n", kernel_start, kernel_end, (kernel_end-kernel_start)/1024);
+    printk("  `, Y ,'    Kernel loaded at 0x%lx -> 0x%lx (%ld KB)\n", kernel_start, kernel_end, (kernel_end-kernel_start)/1024);
     printk("   |_|_|     \n");
     printk("   |===|     ");
     printk("%d MB memory available\n", mem_available());
@@ -97,7 +97,7 @@ static void print_memory_map(void)
             default:
                 printk("  ?????\t");
         }
-        printk("0x%x -> 0x%x (%d KB)\n", mmap->base_addr_low,
+        printk("0x%lx -> 0x%lx (%ld KB)\n", mmap->base_addr_low,
                 (mmap->base_addr_low + mmap->length_low), mmap->length_low / 1024);
 		mmap = (struct multiboot_memory_map *)((unsigned long)mmap + mmap->size + sizeof(mmap->size));
 	}
@@ -135,7 +135,7 @@ void kernel_main(struct multiboot_info *mb, uint32_t start, uint32_t stack, uint
     // set up kernel heap 1M above the end of the kernel
     print_memory_map();
     init_kernel_heap((void *)(kernel_end + INT_1M));
-    printk("kernel stack at 0x%x\n", kernel_stack);
+    printk("kernel stack at 0x%lx\n", kernel_stack);
 
     print_startup_banner();
 

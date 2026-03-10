@@ -115,9 +115,8 @@ void init_vmm(void)
             uint32_t fb_size = (uint32_t)vbe->pitch * vbe->height;
             if (fb_size == 0)
                 fb_size = 4 * 1024 * 1024; /* fallback: 4MB */
-            printk(MODULE "mapping VBE framebuffer 0x%x - 0x%x (%d KB)\n",
-                   (unsigned)fb_start, (unsigned)(fb_start + fb_size),
-                   (unsigned)(fb_size / 1024));
+            printk(MODULE "mapping VBE framebuffer 0x%lx - 0x%lx (%ld KB)\n",
+                   fb_start, fb_start + fb_size, fb_size / 1024);
             identity_map_range(fb_start, fb_start + fb_size,
                                PTE_PRESENT | PTE_WRITE);
         }
@@ -131,7 +130,7 @@ void init_vmm(void)
      * them before paging was enabled.
      */
 
-    printk(MODULE "page directory at 0x%x\n", (unsigned)(uint32_t)page_directory);
+    printk(MODULE "page directory at 0x%lx\n", (uint32_t)page_directory);
 
     /* Load page directory into CR3 */
     asm volatile("mov %0, %%cr3" : : "r"(page_directory));

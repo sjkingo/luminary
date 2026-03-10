@@ -83,6 +83,6 @@ void init_pmm(uint32_t mem_upper_kb)
     /* Reserve frame 0 (null page) */
     frame_set(0);
 
-    printk(MODULE "%d MB physical memory, %d frames available\n",
-           (unsigned)(total_kb / 1024), (unsigned)nframes);
+    printk(MODULE "%ld MB physical memory, %ld frames available\n",
+           total_kb / 1024, nframes);
 }

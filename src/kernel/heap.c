@@ -39,7 +39,7 @@ static struct kernel_heap heap;
 #ifdef DEBUG
 static void dump_heap(void)
 {
-    printk(MODULE "dump_heap(): %d blocks free |", heap.free_blocks);
+    printk(MODULE "dump_heap(): %ld blocks free |", heap.free_blocks);
     for (int32_t i = 0; i < KERNEL_HEAP_MAX_BLOCKS; i++) {
         struct kernel_heap_block *block = &heap.blocks[i];
         if (block->allocated) {
@@ -102,7 +102,7 @@ void *kmalloc(uint32_t size)
             heap.free_blocks -= required_blocks;
 
 #ifdef DEBUG
-            printk(MODULE "%s:%d(%s) kmalloc found %d blocks (for %d bytes) at 0x%x\n",
+            printk(MODULE "%s:%d(%s) kmalloc found %ld blocks (for %ld bytes) at 0x%lx\n",
                     calling_file, calling_line, calling_func, required_blocks,
                     size, (uint32_t)ptr);
 #endif
@@ -112,7 +112,7 @@ void *kmalloc(uint32_t size)
 
 fail:
 #ifdef DEBUG
-    printk(MODULE "%s:%d(%s) kmalloc failed to allocate %d bytes in %d blocks\n",
+    printk(MODULE "%s:%d(%s) kmalloc failed to allocate %ld bytes in %ld blocks\n",
             calling_file, calling_line, calling_func, size, required_blocks);
 #endif
     return NULL;
@@ -138,7 +138,7 @@ void kfree(void *ptr)
         int32_t count = block->blocks_spanned;
 
 #ifdef DEBUG
-        printk(MODULE "%s:%d(%s) kfree freeing %d blocks at 0x%x\n",
+        printk(MODULE "%s:%d(%s) kfree freeing %ld blocks at 0x%lx\n",
                 calling_file, calling_line, calling_func, count, (uint32_t)ptr);
 #endif
 
@@ -165,7 +165,7 @@ void init_kernel_heap(void *start_addr)
     heap.free_blocks = KERNEL_HEAP_MAX_BLOCKS;
 
 #ifdef DEBUG
-    printk(MODULE "kernel heap 0x%x -> 0x%x (%d KB available)\n", (uint32_t)heap.data_area,
+    printk(MODULE "kernel heap 0x%lx -> 0x%lx (%ld KB available)\n", (uint32_t)heap.data_area,
         (uint32_t)heap.data_area + heap_size, heap_size/1024);
     printk(MODULE "heap consists of %d blocks of %d bytes each\n",
         KERNEL_HEAP_MAX_BLOCKS, KERNEL_HEAP_BLOCK_SIZE);

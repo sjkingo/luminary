@@ -151,6 +151,10 @@ static int print(char **out, const char *format, va_list args )
 				if (width > 256)
 					width = 256;
 			}
+			/* consume 'l' length modifier (on i686, long == int in va_arg) */
+			if (*format == 'l') {
+				++format;
+			}
 			if( *format == 's' ) {
 				register char *s = (char *)va_arg( args, int );
 				pc += prints (out, s?s:"(null)", width, pad);
