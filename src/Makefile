@@ -1,5 +1,6 @@
 # Set configuration variables for the build
 KERNEL_BIN=	kernel.bin
+USER_ELF=	../user/init.elf
 EMULATOR=	qemu-system-i386
 QEMU_ARGS=	-net nic,model=rtl8139 -net user -nographic
 DEFINES=	-DDEBUG -DTURTLE -DUSE_SERIAL
@@ -27,23 +28,27 @@ all: $(KERNEL_BIN)
 $(KERNEL_BIN): linker.ld $(KERNEL_OBJS)
 	$(CC) $(ARCH) $(LDFLAGS) -o $@ $(KERNEL_OBJS)
 
+.PHONY: user
+user:
+	make -C ../user
+
 .PHONY: qemu
-qemu: $(KERNEL_BIN)
-	$(EMULATOR) -kernel $(KERNEL_BIN) $(QEMU_ARGS)
+qemu: $(KERNEL_BIN) user
+	$(EMULATOR) -kernel $(KERNEL_BIN) -initrd $(USER_ELF) $(QEMU_ARGS)
 
 .PHONY: qemucd
-qemucd: $(KERNEL_BIN) bootiso
+qemucd: $(KERNEL_BIN) user bootiso
 	$(EMULATOR) -cdrom ../grub2/boot.iso $(QEMU_ARGS)
 
 .PHONY: console
-console: $(KERNEL_BIN)
-	$(EMULATOR) -kernel $(KERNEL_BIN) -nographic $(QEMU_ARGS) &
+console: $(KERNEL_BIN) user
+	$(EMULATOR) -kernel $(KERNEL_BIN) -initrd $(USER_ELF) -nographic $(QEMU_ARGS) &
 	sleep 2
 	pkill qemu-system-*
 
 .PHONY: debug
-debug: $(KERNEL_BIN)
-	$(EMULATOR) -kernel $(KERNEL_BIN) -s -S $(QEMU_ARGS)
+debug: $(KERNEL_BIN) user
+	$(EMULATOR) -kernel $(KERNEL_BIN) -initrd $(USER_ELF) -s -S $(QEMU_ARGS)
 
 .PHONY: gdb
 gdb:
@@ -53,6 +58,7 @@ gdb:
 clean:
 	rm -f $(KERNEL_OBJS) $(KERNEL_OBJS:.o=.d) $(KERNEL_BIN) core.* cpu/vectors.S version.h
 	make -C ../grub2 clean
+	make -C ../user clean
 
 .PHONY: bootiso
 bootiso:

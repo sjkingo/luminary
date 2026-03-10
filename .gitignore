@@ -1,6 +1,7 @@
 *.o
 *.d
 *.swp
+*.elf
 core.*
 src/kernel.bin
 src/version.h

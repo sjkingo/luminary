@@ -25,6 +25,13 @@ struct multiboot_memory_map {
     unsigned long type;
 };
 
+struct multiboot_mod_entry {
+    unsigned long mod_start;
+    unsigned long mod_end;
+    unsigned long string;       /* command line for this module */
+    unsigned long reserved;
+};
+
 struct multiboot_aout_table {
     unsigned long tabsize;
     unsigned long strsize;

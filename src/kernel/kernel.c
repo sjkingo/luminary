@@ -169,8 +169,22 @@ void kernel_main(struct multiboot_info *mb, uint32_t start, uint32_t stack, uint
     // higher level startup
     init_task();
     create_task(&task_a, "taskA", 5, task_a_func);
-    create_user_task(&task_b, "taskB", 3,
-                     (void *)user_program, sizeof(user_program));
+
+    /* Load user task from multiboot module (initrd) if available,
+     * otherwise fall back to the embedded user_program bytes */
+    if (mb_info->mods_count > 0) {
+        struct multiboot_mod_entry *mod =
+            (struct multiboot_mod_entry *)mb_info->mods_addr;
+        uint32_t mod_size = mod->mod_end - mod->mod_start;
+        printk("initrd: module at 0x%lx - 0x%lx (%ld bytes)\n",
+               mod->mod_start, mod->mod_end, mod_size);
+        create_elf_task(&task_b, "user", 3,
+                        (const void *)mod->mod_start, mod_size);
+    } else {
+        printk("initrd: no modules, using embedded user program\n");
+        create_user_task(&task_b, "taskB", 3,
+                         (void *)user_program, sizeof(user_program));
+    }
 
     startup_complete = true;
     enable_interrupts();

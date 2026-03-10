@@ -1,6 +1,7 @@
 #include <stddef.h>
 
 #include "kernel/kernel.h"
+#include "kernel/elf.h"
 #include "kernel/heap.h"
 #include "kernel/pmm.h"
 #include "kernel/sched.h"
@@ -151,8 +152,8 @@ out:
 
 /* Build a synthetic trap frame for a user-mode task. When trapret runs iret,
  * the CPU sees ring 3 CS and pops SS:ESP from the frame, switching to the
- * user stack. */
-static void setup_user_task_stack(struct task *t)
+ * user stack. entry_point is the virtual address to begin execution at. */
+static void setup_user_task_stack(struct task *t, uint32_t entry_point)
 {
     unsigned char *stack = (unsigned char *)kmalloc(TASK_STACK_SIZE);
     if (stack == NULL)
@@ -167,7 +168,7 @@ static void setup_user_task_stack(struct task *t)
     *(--sp) = USER_STACK_TOP;            /* ESP: top of user stack */
     *(--sp) = 0x202;                     /* EFLAGS: IF=1 */
     *(--sp) = SEG_USER_CODE;             /* CS: user code segment */
-    *(--sp) = USER_SPACE_START;          /* EIP: user entry point */
+    *(--sp) = entry_point;               /* EIP: user entry point */
 
     /* skipped by addl $12 */
     *(--sp) = 0;                         /* err */
@@ -226,7 +227,7 @@ void create_user_task(struct task *t, char *name, int prio,
     vmm_map_page_in(t->page_dir_phys, USER_STACK_TOP - PAGE_SIZE, stack_frame,
                     PTE_PRESENT | PTE_WRITE | PTE_USER);
 
-    setup_user_task_stack(t);
+    setup_user_task_stack(t, USER_SPACE_START);
 
     /* Insert into scheduler queue (same logic as create_task) */
     struct task *before = sched_queue;
@@ -253,6 +254,132 @@ out:
     printk("new_user_task: %s, pid=%d, created=%d, prio=%d\n",
            name, t->pid, t->created, prio);
 #endif
+}
+
+/* Helper to insert a task into the scheduler queue by priority */
+static void insert_task_sorted(struct task *t, int prio)
+{
+    struct task *before = sched_queue;
+    struct task *last_node = before;
+    do {
+        if (prio >= before->prio_s) {
+            insert_task_before(t, before);
+            return;
+        }
+        last_node = before;
+        before = before->next;
+    } while (before != NULL);
+
+    last_node->next = t;
+    t->prev = last_node;
+}
+
+void create_elf_task(struct task *t, char *name, int prio,
+                     const void *elf_data, unsigned int elf_size)
+{
+    if (prio < SCHED_LEVEL_MIN || prio > SCHED_LEVEL_MAX)
+        panic("requested priority out of range");
+
+    disable_interrupts();
+
+    t->name = name;
+    t->pid = ++last_pid;
+    t->created = timekeeper.uptime_ms;
+    t->prio_s = prio;
+    t->prio_d = prio;
+    t->entry = NULL;
+    t->page_dir_phys = vmm_create_page_dir();
+    t->prev = NULL;
+    t->next = NULL;
+
+    /* Load the ELF into the task's address space */
+    uint32_t entry_point = elf_load(elf_data, elf_size, t->page_dir_phys);
+    if (entry_point == 0)
+        panic("create_elf_task: ELF load failed");
+
+    /* Allocate a user stack */
+    uint32_t stack_frame = pmm_alloc_frame();
+    vmm_map_page(stack_frame, stack_frame, PTE_PRESENT | PTE_WRITE);
+    memset((void *)stack_frame, 0, PAGE_SIZE);
+    vmm_map_page_in(t->page_dir_phys, USER_STACK_TOP - PAGE_SIZE, stack_frame,
+                    PTE_PRESENT | PTE_WRITE | PTE_USER);
+
+    setup_user_task_stack(t, entry_point);
+    insert_task_sorted(t, prio);
+
+    if (sched_queue == NULL)
+        panic("BUG: head of sched_queue is empty");
+
+    enable_interrupts();
+
+#ifdef DEBUG
+    printk("new_elf_task: %s, pid=%d, entry=0x%lx, prio=%d\n",
+           name, t->pid, entry_point, prio);
+#endif
+}
+
+void task_kill(struct task *t)
+{
+    if (t->pid == PID_IDLE)
+        panic("task_kill: cannot kill idle task");
+
+    printk("sched: removing '%s' (pid %d) from run queue\n", t->name, t->pid);
+
+    /* unlink from scheduler queue */
+    if (t->prev != NULL)
+        t->prev->next = t->next;
+    else
+        sched_queue = t->next;
+
+    if (t->next != NULL)
+        t->next->prev = t->prev;
+
+    /* free kernel stack */
+    if (t->stack_base != 0)
+        kfree((void *)t->stack_base);
+
+    /* destroy task's page directory (frees user page tables and frames) */
+    if (t->page_dir_phys != vmm_get_kernel_page_dir())
+        vmm_destroy_page_dir(t->page_dir_phys);
+
+    /* if we killed the running task, force a context switch.
+     * We pick a new task and jump directly to its saved state,
+     * bypassing the normal scheduler path since the current
+     * trap frame belongs to the dead task. */
+    if (t == running_task) {
+        /* pick the first schedulable task */
+        struct task *next = sched_queue;
+        while (next != NULL && next->prio_d == SCHED_LEVEL_SUSP)
+            next = next->next;
+        if (next == NULL) {
+            /* all suspended - reset priorities and pick again */
+            next = sched_queue;
+            while (next != NULL) {
+                if (next->pid != PID_IDLE)
+                    next->prio_d = next->prio_s;
+                next = next->next;
+            }
+            next = sched_queue;
+        }
+        if (next == NULL)
+            panic("task_kill: no tasks left");
+
+        prev_task = NULL;
+        running_task = next;
+
+        /* switch to the new task's address space and stack, then
+         * jump to trapret to restore its saved context */
+        vmm_switch_page_dir(running_task->page_dir_phys);
+        tss_set_kernel_stack(running_task->stack_base + TASK_STACK_SIZE);
+
+        asm volatile(
+            "movl %0, %%esp\n\t"
+            "jmp trapret\n\t"
+            :
+            : "r"(running_task->esp)
+        );
+        __builtin_unreachable();
+    }
 }
 
 void init_task(void)

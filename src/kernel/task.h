@@ -36,3 +36,14 @@ void create_task(struct task *t, char *name, int prio, void (*entry)(void));
  * space. A user stack is allocated at USER_STACK_TOP. The task starts in ring 3. */
 void create_user_task(struct task *t, char *name, int prio,
                       void *code, unsigned int code_size);
+
+/* Create a user-mode task from an ELF binary loaded in memory.
+ * The ELF's PT_LOAD segments are mapped into the task's address space
+ * and execution begins at the ELF entry point. */
+void create_elf_task(struct task *t, char *name, int prio,
+                     const void *elf_data, unsigned int elf_size);
+
+/* Kill a task: remove from scheduler queue, free resources, reschedule.
+ * Must be called with interrupts disabled. If the killed task is the
+ * currently running task, this function does not return. */
+void task_kill(struct task *t);
