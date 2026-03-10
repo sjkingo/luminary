@@ -148,6 +148,8 @@ static int print(char **out, const char *format, va_list args )
 			for ( ; *format >= '0' && *format <= '9'; ++format) {
 				width *= 10;
 				width += *format - '0';
+				if (width > 256)
+					width = 256;
 			}
 			if( *format == 's' ) {
 				register char *s = (char *)va_arg( args, int );

@@ -1,6 +1,7 @@
 #include "kernel/kernel.h"
 #include "kernel/sched.h"
 #include "kernel/task.h"
+#include "cpu/x86.h"
 
 /* last PID allocated to a task */
 static unsigned int last_pid = PID_IDLE;
@@ -32,6 +33,10 @@ void create_task(struct task *t, char *name, int prio)
     if (prio < SCHED_LEVEL_MIN || prio > SCHED_LEVEL_MAX)
         panic("requested priority out of range");
 
+    /* Disable interrupts while modifying the scheduler queue, since the
+     * timer interrupt calls sched() which reads sched_queue. */
+    disable_interrupts();
+
     t->name = name;
     t->pid = ++last_pid;
     t->created = timekeeper.uptime_ms;
@@ -44,18 +49,26 @@ void create_task(struct task *t, char *name, int prio)
 
     /* figure out where to add this task */
     struct task *before = sched_queue;
+    struct task *last = before;
     do {
         if (prio >= before->prio_s) {
             insert_task_before(t, before);
             goto out;
         }
+        last = before;
         before = before->next;
     } while (before != NULL);
-    panic("BUG: could not find a place in the queue for this task");
+
+    /* No insertion point found - append after the last node */
+    last->next = t;
+    t->prev = last;
 
 out:
     if (sched_queue == NULL)
         panic("BUG: head of sched_queue is empty");
+
+    enable_interrupts();
+
 #ifdef DEBUG
     printk("new_task: %s, pid=%d, created=%d, prio=%d\n", name, t->pid, t->created, prio);
 #endif

@@ -36,7 +36,7 @@ void rtl8139_init(struct pci_device_location *loc)
     /* Attempt to enable bus mastering */
     uint16_t r = pci_read_field(pci_id, PCI_CONFIG_COMMAND, 4);
     r |= (1 << 2); /* set bit 2 */
-    pci_outb(pci_id, PCI_CONFIG_COMMAND, r);
+    pci_write_field(pci_id, PCI_CONFIG_COMMAND, r, 2);
 
     /* Confirm bus mastering is now enabled */
     r = pci_read_field(pci_id, PCI_CONFIG_COMMAND, 4);

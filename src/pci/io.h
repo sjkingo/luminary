@@ -54,7 +54,13 @@ static uint32_t pci_read_field(uint32_t device, int field, int size) {
     return 0xFFFF;
 }
 
-static inline void pci_outb(uint32_t id, int field, uint32_t value) {
-    outb(PCI_CONFIG_ADDR, pci_get_addr(id, field));
-    outb(PCI_CONFIG_DATA, value);
+static inline void pci_write_field(uint32_t id, int field, uint32_t value, int size) {
+    outb_32(PCI_CONFIG_ADDR, pci_get_addr(id, field));
+    if (size == 4) {
+        outb_32(PCI_CONFIG_DATA, value);
+    } else if (size == 2) {
+        outb_16(PCI_CONFIG_DATA + (field & 2), value);
+    } else if (size == 1) {
+        outb(PCI_CONFIG_DATA + (field & 3), value);
+    }
 }

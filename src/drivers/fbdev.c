@@ -29,6 +29,8 @@ bool fbdev_is_ready(void)
 
 static void putpixel(uint32_t x, uint32_t y, uint32_t color)
 {
+    if (x >= console.width || y >= console.height)
+        return;
     unsigned where = (x * (console.depth / 8)) + (y * console.pitch);
     console.framebuffer[where] = color & 255;              // blue
     console.framebuffer[where + 1] = (color >> 8) & 255;   // green
@@ -59,6 +61,9 @@ static void drawglyph(uint8_t *glyph, uint32_t x, uint32_t y, uint32_t fgcolor)
         }
     }
 }
+
+_Static_assert(sizeof(fontdata) >= 256 * CONSOLE_FONT_WIDTH * CONSOLE_FONT_HEIGHT / 8,
+        "fontdata too small for 256 glyphs");
 
 static void drawchar(uint8_t c, uint32_t x, uint32_t y, uint32_t fgcolor)
 {
@@ -116,6 +121,10 @@ void writechar_fb(char c)
             console.cur_col--;
     } else if (c == '\t') {
         console.cur_col = (console.cur_col + 4) & ~3;
+        if (console.cur_col >= console.cols) {
+            console.cur_col = 0;
+            console.cur_row++;
+        }
     } else {
         /* Wrap if we hit the right edge */
         if (console.cur_col >= console.cols) {
@@ -187,6 +196,12 @@ void init_fbdev(char *fbaddr, uint32_t width, uint32_t height, uint8_t depth,
         console.cols = FBDEV_MAX_COLS;
     if (console.rows > FBDEV_MAX_ROWS)
         console.rows = FBDEV_MAX_ROWS;
+
+    /* Refuse to operate on a display too small for even one character */
+    if (console.cols == 0 || console.rows == 0) {
+        printk(MODULE "display too small for console (%dx%d)\n", width, height);
+        return;
+    }
 
     /* Clear the back-buffer */
     memset(console.cells, 0, sizeof(console.cells));

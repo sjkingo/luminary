@@ -107,7 +107,7 @@ static void clear_queues(void)
 static void update_queue_statusline(void)
 {
     char line[1024];
-    line[0] = '\0';
+    int pos = 0;
 
     /* build up the queue line */
     struct task *t = sched_queue;
@@ -118,7 +118,8 @@ static void update_queue_statusline(void)
         } else if (t->prio_d == SCHED_LEVEL_SUSP) {
             r = 'S';
         }
-        sprintf(line, "%s%c%d:%s (p=%d)  ", line, r, t->pid, t->name, t->prio_d);
+        if (pos < (int)sizeof(line) - 32)
+            pos += sprintf(line + pos, "%c%d:%s (p=%d)  ", r, t->pid, t->name, t->prio_d);
         t = t->next;
     } while (t != NULL);
 
