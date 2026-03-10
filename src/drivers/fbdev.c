@@ -1,4 +1,5 @@
 #include "drivers/vbe.h"
+#include "drivers/fbdev.h"
 #include "kernel/kernel.h"
 #include "fonts/console.h"
 

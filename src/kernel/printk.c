@@ -25,6 +25,7 @@
 extern void putchar(int);
 extern void put_newline(void);
 extern void write_statusline(char *);
+extern void writechar_fb(char);
 #ifdef USE_SERIAL
 extern void write_serial(char);
 #endif

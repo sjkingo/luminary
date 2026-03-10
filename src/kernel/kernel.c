@@ -11,6 +11,7 @@
 #include "pci/pci.h"
 #include "version.h"
 
+struct multiboot_info *mb_info;
 struct kernel_time timekeeper;
 
 bool startup_complete = false;
