@@ -4,10 +4,11 @@ EMULATOR=	qemu-system-i386
 QEMU_ARGS=	-net nic,model=rtl8139 -net user -vga std
 DEFINES=	-DDEBUG -DDEBUG_HEAP -DTURTLE -DUSE_SERIAL
 
-CC=		gcc
+CROSS=		i686-elf-
+CC=		$(CROSS)gcc
 AS=		$(CC)
 ARCH=		-m32
-CFLAGS=		$(ARCH) -Wall -Wextra -Wno-unused-variable -Wno-unused-function -ffreestanding -std=gnu99 -g -I . $(DEFINES)
+CFLAGS=		$(ARCH) -Wall -Wextra -Wno-unused-variable -Wno-unused-function -ffreestanding -std=gnu99 -g -I . -isystem include $(DEFINES)
 ASFLAGS=	$(ARCH)
 LDFLAGS=	-T linker.ld -nostdlib -lgcc
 

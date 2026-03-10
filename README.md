@@ -35,10 +35,37 @@ Available options are:
 
 First, ensure all build requirements are met:
 
-* `gcc` and GNU `as` compilers that are capable of producing 32-bit executables
-* `glibc-devel.i686`
+* An `i686-elf` cross-compiler toolchain (`i686-elf-gcc`, `i686-elf-binutils`)
+* `python3` (for interrupt vector code generation)
+* `qemu-system-i386` (for running the kernel)
+* `xorriso` and `grub2-mkrescue` (only needed for bootable ISO builds)
 
-Then, building the kernel is as simple as running the included `Makefile`:
+### macOS (Homebrew)
+
+```bash
+brew install i686-elf-gcc i686-elf-binutils qemu python3
+# For ISO builds only:
+brew install xorriso
+```
+
+### Linux (Debian/Ubuntu)
+
+If your system GCC can produce 32-bit ELF binaries natively, you can override the
+cross-compiler prefix:
+
+```bash
+sudo apt install gcc gcc-multilib make qemu-system-x86 python3
+# For ISO builds only:
+sudo apt install xorriso grub2-common
+# Then build with:
+make -C src CROSS=
+```
+
+Otherwise, build or install an `i686-elf-gcc` cross-compiler.
+
+### Building
+
+Building the kernel is as simple as running the included `Makefile`:
 
 ```bash
 $ make -C src

@@ -1,3 +1,4 @@
+#include <string.h>
 #include "cpu/x86.h"
 #include "drivers/vga.h"
 
