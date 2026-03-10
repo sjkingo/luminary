@@ -28,5 +28,11 @@ struct task {
 /* Initialise the task subsystem */
 void init_task(void);
 
-/* Create a new task and insert it into the queue */
+/* Create a new kernel task and insert it into the queue */
 void create_task(struct task *t, char *name, int prio, void (*entry)(void));
+
+/* Create a user-mode task. The code at entry (size code_size bytes) is copied
+ * to a new physical frame and mapped at USER_SPACE_START in the task's address
+ * space. A user stack is allocated at USER_STACK_TOP. The task starts in ring 3. */
+void create_user_task(struct task *t, char *name, int prio,
+                      void *code, unsigned int code_size);

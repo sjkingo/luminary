@@ -43,6 +43,10 @@ void vmm_map_page_in(uint32_t dir_phys, uint32_t virt, uint32_t phys, uint32_t f
             vmm_map_page(pt_frame, pt_frame, PTE_PRESENT | PTE_WRITE);
         memset((void *)pt_frame, 0, PAGE_SIZE);
         dir[pd_index] = pt_frame | PTE_PRESENT | PTE_WRITE | (flags & PTE_USER);
+    } else if ((flags & PTE_USER) && !(dir[pd_index] & PTE_USER)) {
+        /* PDE exists but lacks user access - add it. Both the PDE and
+         * PTE must have PTE_USER for ring 3 access to work. */
+        dir[pd_index] |= PTE_USER;
     }
 
     uint32_t *page_table = (uint32_t *)(dir[pd_index] & 0xFFFFF000);

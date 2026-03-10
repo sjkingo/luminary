@@ -1,6 +1,7 @@
 #pragma once
 
 #define TRAP_MAGIC 0xc0ffee
+#define SYSCALL_VECTOR 0x80
 
 #ifndef __ASSEMBLER__
 

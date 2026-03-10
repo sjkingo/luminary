@@ -2,9 +2,11 @@
 
 #include "kernel/kernel.h"
 #include "kernel/heap.h"
+#include "kernel/pmm.h"
 #include "kernel/sched.h"
 #include "kernel/task.h"
 #include "kernel/vmm.h"
+#include "cpu/dt.h"
 #include "cpu/traps.h"
 #include "cpu/x86.h"
 
@@ -144,6 +146,112 @@ out:
 
 #ifdef DEBUG
     printk("new_task: %s, pid=%d, created=%d, prio=%d\n", name, t->pid, t->created, prio);
+#endif
+}
+
+/* Build a synthetic trap frame for a user-mode task. When trapret runs iret,
+ * the CPU sees ring 3 CS and pops SS:ESP from the frame, switching to the
+ * user stack. */
+static void setup_user_task_stack(struct task *t)
+{
+    unsigned char *stack = (unsigned char *)kmalloc(TASK_STACK_SIZE);
+    if (stack == NULL)
+        panic("setup_user_task_stack: kmalloc failed");
+
+    t->stack_base = (unsigned int)stack;
+
+    unsigned int *sp = (unsigned int *)(stack + TASK_STACK_SIZE);
+
+    /* iret to ring 3 pops: EIP, CS, EFLAGS, ESP, SS (5 dwords) */
+    *(--sp) = SEG_USER_DATA;             /* SS: user data segment */
+    *(--sp) = USER_STACK_TOP;            /* ESP: top of user stack */
+    *(--sp) = 0x202;                     /* EFLAGS: IF=1 */
+    *(--sp) = SEG_USER_CODE;             /* CS: user code segment */
+    *(--sp) = USER_SPACE_START;          /* EIP: user entry point */
+
+    /* skipped by addl $12 */
+    *(--sp) = 0;                         /* err */
+    *(--sp) = 0;                         /* trapno */
+    *(--sp) = TRAP_MAGIC;                /* magic */
+
+    /* popal: EAX, ECX, EDX, EBX, ESP(ignored), EBP, ESI, EDI */
+    *(--sp) = 0;
+    *(--sp) = 0;
+    *(--sp) = 0;
+    *(--sp) = 0;
+    *(--sp) = 0;
+    *(--sp) = 0;
+    *(--sp) = 0;
+    *(--sp) = 0;
+
+    /* pop ds */
+    *(--sp) = SEG_USER_DATA;             /* DS: user data segment */
+
+    t->esp = (unsigned int)sp;
+}
+
+void create_user_task(struct task *t, char *name, int prio,
+                      void *code, unsigned int code_size)
+{
+    if (prio < SCHED_LEVEL_MIN || prio > SCHED_LEVEL_MAX)
+        panic("requested priority out of range");
+    if (code_size > PAGE_SIZE)
+        panic("create_user_task: code exceeds one page");
+
+    disable_interrupts();
+
+    t->name = name;
+    t->pid = ++last_pid;
+    t->created = timekeeper.uptime_ms;
+    t->prio_s = prio;
+    t->prio_d = prio;
+    t->entry = NULL;
+    t->page_dir_phys = vmm_create_page_dir();
+    t->prev = NULL;
+    t->next = NULL;
+
+    /* Allocate a physical frame for user code and copy it there */
+    uint32_t code_frame = pmm_alloc_frame();
+    vmm_map_page(code_frame, code_frame, PTE_PRESENT | PTE_WRITE);
+    memcpy((void *)code_frame, code, code_size);
+    /* Map it at USER_SPACE_START in the task's address space */
+    vmm_map_page_in(t->page_dir_phys, USER_SPACE_START, code_frame,
+                    PTE_PRESENT | PTE_USER);
+
+    /* Allocate a physical frame for user stack */
+    uint32_t stack_frame = pmm_alloc_frame();
+    vmm_map_page(stack_frame, stack_frame, PTE_PRESENT | PTE_WRITE);
+    memset((void *)stack_frame, 0, PAGE_SIZE);
+    /* Map at USER_STACK_TOP - PAGE_SIZE .. USER_STACK_TOP */
+    vmm_map_page_in(t->page_dir_phys, USER_STACK_TOP - PAGE_SIZE, stack_frame,
+                    PTE_PRESENT | PTE_WRITE | PTE_USER);
+
+    setup_user_task_stack(t);
+
+    /* Insert into scheduler queue (same logic as create_task) */
+    struct task *before = sched_queue;
+    struct task *last = before;
+    do {
+        if (prio >= before->prio_s) {
+            insert_task_before(t, before);
+            goto out;
+        }
+        last = before;
+        before = before->next;
+    } while (before != NULL);
+
+    last->next = t;
+    t->prev = last;
+
+out:
+    if (sched_queue == NULL)
+        panic("BUG: head of sched_queue is empty");
+
+    enable_interrupts();
+
+#ifdef DEBUG
+    printk("new_user_task: %s, pid=%d, created=%d, prio=%d\n",
+           name, t->pid, t->created, prio);
 #endif
 }
 

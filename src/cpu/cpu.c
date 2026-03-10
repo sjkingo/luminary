@@ -5,6 +5,7 @@
 #include "cpu/traps.h"
 #include "cpu/x86.h"
 #include "kernel/kernel.h"
+#include "kernel/syscall.h"
 
 #ifdef USE_SERIAL
 #include "drivers/serial.h"
@@ -92,14 +93,21 @@ static void gdt_install(void)
 #endif
 }
 
-static inline void idt_set_gate(int index, int vector, int selector, char flags)
+static inline void idt_set_gate(int index, int vector, int selector, unsigned char flags)
 {
     idt[index].base_low = vector & 0xFFFF;
     idt[index].base_high = (vector >> 16) & 0xFFFF;
     idt[index].selector = selector;
     idt[index].always0 = 0;
-    idt[index].flags = flags | 0x60; /* ring 0 */
+    idt[index].flags = flags;
 }
+
+/* IDT gate flags:
+ *   0x8E = present, ring 0, 32-bit interrupt gate
+ *   0xEE = present, ring 3, 32-bit interrupt gate (for syscalls)
+ */
+#define IDT_GATE_RING0  0x8E
+#define IDT_GATE_RING3  0xEE
 
 extern int vectors[]; /* in vectors.s */
 static void idt_install(void)
@@ -107,10 +115,14 @@ static void idt_install(void)
     iptr.limit = (sizeof(struct idt_entry) * NUM_TRAP_VECTORS) - 1;
     iptr.base = (unsigned int)&idt;
 
-    /* fill in the IDT */
+    /* fill in the IDT - all gates default to ring 0 */
     for (int i = 0; i < NUM_TRAP_VECTORS; i++) {
-        idt_set_gate(i, vectors[i], IDT_KERNEL_SEG, 0x8E); /* TODO: 0x8E ??? */
+        idt_set_gate(i, vectors[i], IDT_KERNEL_SEG, IDT_GATE_RING0);
     }
+
+    /* syscall gate: int 0x80 must be callable from ring 3 */
+    idt_set_gate(SYSCALL_VECTOR, vectors[SYSCALL_VECTOR],
+                 IDT_KERNEL_SEG, IDT_GATE_RING3);
 
     asm volatile("lidt (%0)" : : "r" (&iptr));
 #ifdef DEBUG
@@ -163,6 +175,11 @@ void dump_trap_frame(struct trap_frame *frame)
 
 void trap_handler(struct trap_frame *frame)
 {
+    if (frame->trapno == SYSCALL_VECTOR) {
+        syscall_handler(frame);
+        return;
+    }
+
     if (frame->trapno >= IRQ_BASE_OFFSET) {
         /* interrupt from the PIC */
         irq_handler(frame);
@@ -174,12 +191,6 @@ void trap_handler(struct trap_frame *frame)
 
 exc_handler:
     dump_trap_frame(frame);
-
-    /* frame->cs should always be == IDT_KERNEL_SEG */
-    if (frame->cs != IDT_KERNEL_SEG) {
-        printk("BUG: trap received from outside kernel code segment (CS=%04x)\n", frame->cs);
-        printk("     (will attempt to continue execution..)\n");
-    }
 
     /* handle the trap - most will be a panic() */
     switch (frame->trapno) {
