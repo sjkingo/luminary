@@ -1,6 +1,7 @@
 #include "cpu/pic.h"
 #include "cpu/traps.h"
 #include "cpu/x86.h"
+#include "drivers/keyboard.h"
 #include "kernel/kernel.h"
 #include "kernel/sched.h"
 #include "kernel/task.h"
@@ -56,7 +57,7 @@ void pic_init(void)
     timer_init();
 
     /* mask the interrupts we want to receive */
-    outb(PIC_MASTER_DATA, PIC_MASK_ALL & PIC_MASK_TIMER);
+    outb(PIC_MASTER_DATA, PIC_MASK_ALL & PIC_MASK_TIMER & PIC_MASK_KEYBOARD);
     outb(PIC_SLAVE_DATA, PIC_MASK_ALL);
 }
 
@@ -65,6 +66,10 @@ void irq_handler(struct trap_frame *frame)
     switch (frame->trapno) {
         case IRQ_TIMER:
             timer_tick();
+            goto out;
+
+        case IRQ_KEYBOARD:
+            keyboard_irq_handler();
             goto out;
 
         default:

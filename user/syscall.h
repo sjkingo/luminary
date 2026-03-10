@@ -7,6 +7,11 @@
 #define SYS_NOP     0
 #define SYS_WRITE   1
 #define SYS_EXIT    2
+#define SYS_READ    3
+#define SYS_UPTIME  4
+#define SYS_GETPID  5
+#define SYS_HALT    6
+#define SYS_PS      7
 
 static inline int syscall0(int num)
 {
@@ -34,4 +39,30 @@ static inline void exit(void)
 {
     syscall0(SYS_EXIT);
     for (;;);  /* unreachable */
+}
+
+static inline int read(char *buf, unsigned int len)
+{
+    return syscall2(SYS_READ, (unsigned int)buf, len);
+}
+
+static inline int uptime(void)
+{
+    return syscall0(SYS_UPTIME);
+}
+
+static inline int getpid(void)
+{
+    return syscall0(SYS_GETPID);
+}
+
+static inline void halt(void)
+{
+    syscall0(SYS_HALT);
+    for (;;);
+}
+
+static inline int ps(void)
+{
+    return syscall0(SYS_PS);
 }

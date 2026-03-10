@@ -4,6 +4,7 @@
 #include "cpu/pic.h"
 #include "cpu/x86.h"
 #include "drivers/fbdev.h"
+#include "drivers/keyboard.h"
 #include "drivers/vbe.h"
 #include "drivers/vga.h"
 #include "kernel/kernel.h"
@@ -164,6 +165,7 @@ void kernel_main(struct multiboot_info *mb, uint32_t start, uint32_t stack, uint
 
     /* devices */
     init_cpu();
+    init_keyboard();
     init_pci();
 
     // higher level startup
