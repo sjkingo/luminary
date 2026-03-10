@@ -91,6 +91,9 @@ static struct task *queues[SCHED_QUEUE_HIGHEST][SCHED_QUEUE_MAX_TASKS_PER];
 /* The currently running task, updated by the scheduler */
 struct task *running_task;
 
+/* Set non-NULL when a context switch is needed */
+struct task *prev_task;
+
 /* The scheduling queue */
 struct task *sched_queue;
 
@@ -101,6 +104,7 @@ static void clear_queues(void)
 {
     sched_queue = NULL;
     running_task = NULL;
+    prev_task = NULL;
     memset(queues, 0, sizeof(queues));
 }
 
@@ -144,6 +148,8 @@ static unsigned int reset_all_priorities(void)
 void sched(void)
 {
     struct task *picked, *t;
+
+    prev_task = NULL;
 
     if (sched_queue == NULL)
         panic("BUG: no tasks to run as head of sched_queue is missing");
@@ -195,8 +201,18 @@ next:
         }
     }
 
-    /* TODO: run this task */
-    running_task = picked;
+    if (picked != running_task) {
+        prev_task = running_task;
+        running_task = picked;
+#ifdef DEBUG_SCHED
+        unsigned int now = (unsigned int)timekeeper.uptime_ms;
+        unsigned int ran = now - (unsigned int)prev_task->switched_in_ms;
+        printk("sched: pid %d (%s, %u ms) -> pid %d (%s)\n",
+            prev_task->pid, prev_task->name, ran,
+            running_task->pid, running_task->name);
+        running_task->switched_in_ms = now;
+#endif
+    }
     update_queue_statusline();
 }
 

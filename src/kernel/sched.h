@@ -7,6 +7,9 @@
 /* The currently running task */
 extern struct task *running_task;
 
+/* The previously running task (set when a context switch is needed) */
+extern struct task *prev_task;
+
 /* Scheduling queue head */
 extern struct task *sched_queue;
 

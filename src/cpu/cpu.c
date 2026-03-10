@@ -120,9 +120,9 @@ void dump_trap_frame(struct trap_frame *frame)
     printk("\n");
 }
 
-void trap_handler(struct trap_frame frame)
+void trap_handler(struct trap_frame *frame)
 {
-    if (frame.trapno >= IRQ_BASE_OFFSET) {
+    if (frame->trapno >= IRQ_BASE_OFFSET) {
         /* interrupt from the PIC */
         irq_handler(frame);
         goto out;
@@ -132,19 +132,19 @@ void trap_handler(struct trap_frame frame)
     }
 
 exc_handler:
-    dump_trap_frame(&frame);
+    dump_trap_frame(frame);
 
-    /* frame.cs should always be == IDT_KERNEL_SEG */
-    if (frame.cs != IDT_KERNEL_SEG) {
-        printk("BUG: trap received from outside kernel code segment (CS=%04x)\n", frame.cs);
+    /* frame->cs should always be == IDT_KERNEL_SEG */
+    if (frame->cs != IDT_KERNEL_SEG) {
+        printk("BUG: trap received from outside kernel code segment (CS=%04x)\n", frame->cs);
         printk("     (will attempt to continue execution..)\n");
     }
 
     /* handle the trap - most will be a panic() */
-    switch (frame.trapno) {
+    switch (frame->trapno) {
         case INT_DEBUG:
         case INT_BREAK:
-            printk("STOP: %s detected\n", VECTOR_NAME(frame.trapno));
+            printk("STOP: %s detected\n", VECTOR_NAME(frame->trapno));
             panic("Stopping kernel execution as requested");
 
         case INT_PAGE_FAULT:

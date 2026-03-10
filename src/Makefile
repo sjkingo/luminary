@@ -1,8 +1,8 @@
 # Set configuration variables for the build
 KERNEL_BIN=	kernel.bin
 EMULATOR=	qemu-system-i386
-QEMU_ARGS=	-net nic,model=rtl8139 -net user -vga std
-DEFINES=	-DDEBUG -DDEBUG_HEAP -DTURTLE -DUSE_SERIAL
+QEMU_ARGS=	-net nic,model=rtl8139 -net user -nographic
+DEFINES=	-DDEBUG -DDEBUG_HEAP -DDEBUG_SCHED -DTURTLE -DUSE_SERIAL
 
 CROSS=		i686-elf-
 CC=		$(CROSS)gcc
@@ -33,7 +33,7 @@ qemu: $(KERNEL_BIN)
 
 .PHONY: qemucd
 qemucd: $(KERNEL_BIN) bootiso
-	$(EMULATOR) -cdrom ../grub2/boot.iso $(QEMU_ARGS) -serial stdio
+	$(EMULATOR) -cdrom ../grub2/boot.iso $(QEMU_ARGS)
 
 .PHONY: console
 console: $(KERNEL_BIN)

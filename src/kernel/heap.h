@@ -1,5 +1,7 @@
 #pragma once
 
+#include <stdint.h>
+
 #ifdef DEBUG_HEAP
 void *kmalloc_real(uint32_t, char const *, int, char const *);
 void kfree_real(void *, char const *, int, char const *);

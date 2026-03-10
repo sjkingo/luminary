@@ -101,6 +101,21 @@ static void print_memory_map(void)
 	}
 }
 
+/* Test tasks for context switching */
+static struct task task_a, task_b;
+
+static void task_a_func(void)
+{
+    while (1)
+        ;
+}
+
+static void task_b_func(void)
+{
+    while (1)
+        ;
+}
+
 extern void kernel_main() __attribute__((noreturn));
 void kernel_main(struct multiboot_info *mb, uint32_t start, uint32_t stack, uint32_t end)
 {
@@ -128,6 +143,8 @@ void kernel_main(struct multiboot_info *mb, uint32_t start, uint32_t stack, uint
 
     // higher level startup
     init_task();
+    create_task(&task_a, "taskA", 5, task_a_func);
+    create_task(&task_b, "taskB", 3, task_b_func);
 
     startup_complete = true;
     enable_interrupts();

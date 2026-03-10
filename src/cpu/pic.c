@@ -60,18 +60,18 @@ void pic_init(void)
     outb(PIC_SLAVE_DATA, PIC_MASK_ALL);
 }
 
-void irq_handler(struct trap_frame frame)
+void irq_handler(struct trap_frame *frame)
 {
-    switch (frame.trapno) {
+    switch (frame->trapno) {
         case IRQ_TIMER:
             timer_tick();
             goto out;
 
         default:
-            printk("Unhandled IRQ%d\n", frame.trapno);
+            printk("Unhandled IRQ%d\n", frame->trapno);
             goto out;
     }
 
 out:
-    ack_irq(frame.trapno);
+    ack_irq(frame->trapno);
 }

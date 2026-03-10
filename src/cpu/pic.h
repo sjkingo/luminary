@@ -48,4 +48,4 @@ enum pic_interrupts {
 void pic_init(void);
 
 /* Called from trap_handler() when an IRQ is received */
-void irq_handler(struct trap_frame);
+void irq_handler(struct trap_frame *frame);

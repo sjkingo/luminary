@@ -2,6 +2,8 @@
 
 #include "traps.h"
 
+#define TASK_ESP_OFFSET 24
+
 .section .text
 
 .globl alltraps
@@ -20,10 +22,29 @@ alltraps:
     movw %ax, %fs
     movw %ax, %gs
 
-    # call the C handler
+    # call the C handler with pointer to trap frame
+    pushl %esp
     call trap_handler
+    addl $4, %esp
 
-    # clean up
+    # check if scheduler requested a context switch
+    movl prev_task, %eax
+    testl %eax, %eax
+    jz trapret
+
+    # save current ESP to prev_task->esp
+    movl %esp, TASK_ESP_OFFSET(%eax)
+
+    # load new task's ESP
+    movl running_task, %eax
+    movl TASK_ESP_OFFSET(%eax), %esp
+
+    # clear prev_task
+    movl $0, prev_task
+
+.globl trapret
+trapret:
+    # restore segment registers and general purpose registers
     pop %ebx
     mov %bx, %ds
     mov %bx, %es
@@ -31,7 +52,7 @@ alltraps:
     mov %bx, %gs
     popal
 
-    # throw away eax, ds and magic from the stack and return
+    # throw away magic, trapno and err from the stack and return
     addl $12, %esp
     sti
 
