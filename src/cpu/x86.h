@@ -69,4 +69,4 @@ static inline bool is_paging_enabled(void)
 #define disable_interrupts() ({ asm volatile("cli\nnop"); })
 #define enable_interrupts() ({ asm volatile("sti\nnop"); })
 
-#define INT_1M (1024*1024*1024)
+#define INT_1M (1024*1024)
