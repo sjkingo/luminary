@@ -24,6 +24,11 @@ static unsigned int last_pid = PID_IDLE;
 /* The first task */
 static struct task idle_task;
 
+/* Init task and its ELF data for respawning */
+static struct task task_init;
+static const void *init_elf_data;
+static unsigned int init_elf_size;
+
 /* Wrapper that calls the task's entry point and halts if it returns */
 static void task_wrapper(void)
 {
@@ -143,8 +148,6 @@ out:
     if (sched_queue == NULL)
         panic("BUG: head of sched_queue is empty");
 
-    enable_interrupts();
-
 #ifdef DEBUG
     printk("new_task: %s, pid=%d, created=%d, prio=%d\n", name, t->pid, t->created, prio);
 #endif
@@ -248,8 +251,6 @@ out:
     if (sched_queue == NULL)
         panic("BUG: head of sched_queue is empty");
 
-    enable_interrupts();
-
 #ifdef DEBUG
     printk("new_user_task: %s, pid=%d, created=%d, prio=%d\n",
            name, t->pid, t->created, prio);
@@ -310,12 +311,24 @@ void create_elf_task(struct task *t, char *name, int prio,
     if (sched_queue == NULL)
         panic("BUG: head of sched_queue is empty");
 
-    enable_interrupts();
-
 #ifdef DEBUG
     printk("new_elf_task: %s, pid=%d, entry=0x%lx, prio=%d\n",
            name, t->pid, entry_point, prio);
 #endif
+}
+
+void spawn_init(const void *elf_data, unsigned int elf_size)
+{
+    init_elf_data = elf_data;
+    init_elf_size = elf_size;
+    create_elf_task(&task_init, "init", 5, elf_data, elf_size);
+}
+
+static void respawn_init(void)
+{
+    printk("init: respawning\n");
+    memset(&task_init, 0, sizeof(task_init));
+    create_elf_task(&task_init, "init", 5, init_elf_data, init_elf_size);
 }
 
 void task_kill(struct task *t)
@@ -341,6 +354,10 @@ void task_kill(struct task *t)
     /* destroy task's page directory (frees user page tables and frames) */
     if (t->page_dir_phys != vmm_get_kernel_page_dir())
         vmm_destroy_page_dir(t->page_dir_phys);
+
+    /* if the killed task is init, respawn it immediately */
+    if (t == &task_init)
+        respawn_init();
 
     /* if we killed the running task, force a context switch.
      * We pick a new task and jump directly to its saved state,

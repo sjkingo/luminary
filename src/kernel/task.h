@@ -20,6 +20,7 @@ struct task {
 };
 
 #define PID_IDLE                1
+#define PID_INIT                2
 #define TASK_STACK_SIZE         4096
 #define TASK_ESP_OFFSET         24  /* byte offset of esp in struct task */
 #define TASK_PAGE_DIR_OFFSET    28  /* byte offset of page_dir_phys in struct task */
@@ -43,7 +44,12 @@ void create_user_task(struct task *t, char *name, int prio,
 void create_elf_task(struct task *t, char *name, int prio,
                      const void *elf_data, unsigned int elf_size);
 
+/* Spawn init from ELF data in the initrd. Saves the ELF location so init
+ * can be respawned automatically if it dies (like Unix PID 1). */
+void spawn_init(const void *elf_data, unsigned int elf_size);
+
 /* Kill a task: remove from scheduler queue, free resources, reschedule.
  * Must be called with interrupts disabled. If the killed task is the
- * currently running task, this function does not return. */
+ * currently running task, this function does not return.
+ * If the killed task is init, it is respawned automatically. */
 void task_kill(struct task *t);

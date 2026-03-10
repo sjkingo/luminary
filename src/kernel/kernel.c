@@ -105,39 +105,6 @@ static void print_memory_map(void)
 	}
 }
 
-/* Test tasks for context switching */
-static struct task task_a, task_b;
-
-static void task_a_func(void)
-{
-    while (1)
-        ;
-}
-
-/* User-mode program for taskB.
- * This is position-independent x86 code that will be copied to USER_SPACE_START.
- * It writes "user!\n" via sys_write (int 0x80, EAX=1, EBX=buf, ECX=len),
- * then loops forever.
- *
- * Equivalent to:
- *   push 0x0a21     ; "!\n" on stack
- *   push 0x72657375 ; "user" on stack
- *   mov eax, 1      ; SYS_WRITE
- *   mov ebx, esp    ; buffer = stack pointer
- *   mov ecx, 6      ; length
- *   int 0x80
- *   jmp $           ; spin forever
- */
-static const unsigned char user_program[] = {
-    0x68, 0x21, 0x0a, 0x00, 0x00,       /* push 0x00000a21  "!\n\0\0" */
-    0x68, 0x75, 0x73, 0x65, 0x72,       /* push 0x72657375  "user"    */
-    0xB8, 0x01, 0x00, 0x00, 0x00,       /* mov eax, 1  (SYS_WRITE)   */
-    0x89, 0xE3,                         /* mov ebx, esp               */
-    0xB9, 0x06, 0x00, 0x00, 0x00,       /* mov ecx, 6                */
-    0xCD, 0x80,                         /* int 0x80                   */
-    0xEB, 0xFE,                         /* jmp $ (infinite loop)      */
-};
-
 extern void kernel_main() __attribute__((noreturn));
 void kernel_main(struct multiboot_info *mb, uint32_t start, uint32_t stack, uint32_t end)
 {
@@ -170,22 +137,17 @@ void kernel_main(struct multiboot_info *mb, uint32_t start, uint32_t stack, uint
 
     // higher level startup
     init_task();
-    create_task(&task_a, "taskA", 5, task_a_func);
 
-    /* Load user task from multiboot module (initrd) if available,
-     * otherwise fall back to the embedded user_program bytes */
+    /* Load init from multiboot module (initrd) */
     if (mb_info->mods_count > 0) {
         struct multiboot_mod_entry *mod =
             (struct multiboot_mod_entry *)mb_info->mods_addr;
         uint32_t mod_size = mod->mod_end - mod->mod_start;
         printk("initrd: module at 0x%lx - 0x%lx (%ld bytes)\n",
                mod->mod_start, mod->mod_end, mod_size);
-        create_elf_task(&task_b, "user", 3,
-                        (const void *)mod->mod_start, mod_size);
+        spawn_init((const void *)mod->mod_start, mod_size);
     } else {
-        printk("initrd: no modules, using embedded user program\n");
-        create_user_task(&task_b, "taskB", 3,
-                         (void *)user_program, sizeof(user_program));
+        panic("no initrd module - cannot load init");
     }
 
     startup_complete = true;
