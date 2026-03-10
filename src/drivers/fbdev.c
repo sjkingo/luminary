@@ -160,7 +160,8 @@ void writestr_fb(char *str)
         writechar_fb(*str++);
 }
 
-void writeline_fb(uint32_t row, char *str, uint32_t fgcolor, uint32_t bgcolor)
+void writeline_fb(uint32_t row, char *str, uint32_t fgcolor,
+        uint32_t bgcolor __attribute__((unused)))
 {
     if (!fbdev_ready || row >= console.rows)
         return;
