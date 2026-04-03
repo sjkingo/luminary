@@ -111,6 +111,38 @@ uint32_t vmm_get_kernel_page_dir(void)
     return (uint32_t)page_directory;
 }
 
+/* Bump allocator for kernel virtual address space above 0xC0000000.
+ * This region is never used for user space or identity-mapped kernel memory. */
+#define KVIRT_BASE 0xC0000000u
+static uint32_t kvirt_next = KVIRT_BASE;
+
+/* Allocate n physical frames and map them at a contiguous virtual address.
+ * Returns the virtual base address, or 0 on failure. */
+void *vmm_alloc_pages(uint32_t n)
+{
+    if (n == 0) return NULL;
+    uint32_t virt_base = kvirt_next;
+    for (uint32_t i = 0; i < n; i++) {
+        uint32_t frame = pmm_alloc_frame();
+        if (!frame) return NULL; /* out of physical memory */
+        vmm_map_page(virt_base + i * PAGE_SIZE, frame, PTE_PRESENT | PTE_WRITE);
+    }
+    kvirt_next += n * PAGE_SIZE;
+    return (void *)virt_base;
+}
+
+/* Free n pages previously allocated by vmm_alloc_pages at virt_base.
+ * Unmaps and frees the underlying physical frames. */
+void vmm_free_pages(void *virt_base, uint32_t n)
+{
+    uint32_t v = (uint32_t)virt_base;
+    for (uint32_t i = 0; i < n; i++) {
+        uint32_t phys = vmm_get_phys(v + i * PAGE_SIZE);
+        if (phys) pmm_free_frame(phys);
+        vmm_unmap_page(v + i * PAGE_SIZE);
+    }
+}
+
 uint32_t vmm_create_page_dir(void)
 {
     uint32_t dir_frame = pmm_alloc_frame();
@@ -299,24 +331,24 @@ void init_vmm(void)
      * them before paging was enabled.
      */
 
-    /* Pre-allocate page tables for the first 128MB of physical memory.
-     * This ensures vmm_map_page() can identity-map any frame returned
-     * by pmm_alloc_frame() without needing to allocate a new page table
-     * (which would cause a chicken-and-egg problem after paging is enabled).
-     * Cost: 32 frames (128KB) for page tables covering 128MB.
-     * Each page table frame is also identity-mapped so it remains
-     * accessible after paging is enabled. */
-    for (uint32_t addr = 0; addr < 128 * 1024 * 1024; addr += 4 * 1024 * 1024) {
-        uint32_t pd_index = addr >> 22;
+    /* Pre-allocate page tables for the first 128MB of physical memory,
+     * plus the kernel virtual allocator region at 0xC0000000-0xC3FFFFFF
+     * (16 PDEs = 64MB, enough for back buffers and window backbuffers).
+     * Must be done before paging is enabled so PT frames are directly
+     * accessible by physical address and can be identity-mapped. */
+    auto void prealloc_pt(uint32_t pd_index);
+    auto void prealloc_pt(uint32_t pd_index) {
         if (!(page_directory[pd_index] & PTE_PRESENT)) {
             uint32_t pt_frame = pmm_alloc_frame();
             memset((void *)pt_frame, 0, PAGE_SIZE);
             page_directory[pd_index] = pt_frame | PTE_PRESENT | PTE_WRITE;
-            /* Identity-map the page table frame itself so we can
-             * write PTEs into it after paging is enabled */
             vmm_map_page(pt_frame, pt_frame, PTE_PRESENT | PTE_WRITE);
         }
     }
+    for (uint32_t addr = 0; addr < 128 * 1024 * 1024; addr += 4 * 1024 * 1024)
+        prealloc_pt(addr >> 22);
+    for (uint32_t pdi = 0xC0000000 >> 22; pdi < (0xC0000000 >> 22) + 16; pdi++)
+        prealloc_pt(pdi);
 
     printk(MODULE "page directory at 0x%lx\n", (uint32_t)page_directory);
 

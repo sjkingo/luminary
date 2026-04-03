@@ -327,37 +327,18 @@ static inline uint32_t client_w(struct window *w)
  * Sets *nframes_out to the number of frames allocated. */
 static uint32_t *bb_alloc(uint32_t cw, uint32_t ch, uint32_t *nframes_out)
 {
-    uint32_t bytes  = cw * ch * sizeof(uint32_t);
+    uint32_t bytes   = cw * ch * sizeof(uint32_t);
     uint32_t nframes = (bytes + PAGE_SIZE - 1) / PAGE_SIZE;
     *nframes_out = 0;
-
-    uint32_t first = pmm_alloc_frame();
-    if (!first) return NULL;
-    vmm_map_page(first, first, PTE_PRESENT | PTE_WRITE);
-
-    for (uint32_t i = 1; i < nframes; i++) {
-        uint32_t f = pmm_alloc_frame();
-        if (f != first + i * PAGE_SIZE) {
-            /* Non-contiguous — free what we got and give up */
-            pmm_free_frame(f);
-            for (uint32_t j = 0; j < i; j++)
-                pmm_free_frame(first + j * PAGE_SIZE);
-            return NULL;
-        }
-        vmm_map_page(f, f, PTE_PRESENT | PTE_WRITE);
-    }
-
+    void *p = vmm_alloc_pages(nframes);
+    if (!p) return NULL;
     *nframes_out = nframes;
-    return (uint32_t *)first;
+    return (uint32_t *)p;
 }
 
-/* Free contiguous PMM frames previously allocated by bb_alloc. */
 static void bb_free(uint32_t *buf, uint32_t nframes)
 {
-    if (!buf || !nframes) return;
-    uint32_t base = (uint32_t)buf;
-    for (uint32_t i = 0; i < nframes; i++)
-        pmm_free_frame(base + i * PAGE_SIZE);
+    vmm_free_pages(buf, nframes);
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -998,14 +979,7 @@ void compositor_task(void)
             prev_cursor_y    = 0xFFFFFFFF;
             cursor_type      = CURSOR_TYPE_NORMAL;
             hovered_win      = NULL;
-            /* Free the back buffer PMM frames (previously leaked on exit) */
-            if (back && back_nframes) {
-                uint32_t base = (uint32_t)back;
-                for (uint32_t i = 0; i < back_nframes; i++)
-                    pmm_free_frame(base + i * PAGE_SIZE);
-                back_nframes = 0;
-            }
-            back             = NULL;
+            /* back buffer is owned by init_gui(), not freed here */
             fb               = fb_hw;
             struct task *self = compositor_task_ptr;
             compositor_task_ptr = NULL;
@@ -1245,10 +1219,49 @@ static void gui_start_compositor(void)
 {
     if (compositor_task_ptr) return; /* already running */
 
-    /* Allocate full-screen back buffer from PMM frames.
-     * Frames may be above the 8MB identity-mapped region, so explicitly
-     * map each one at its physical address (identity map) so the kernel
-     * can write to them. */
+    /* back buffer was pre-allocated in init_gui(); just activate it */
+    if (back) {
+        uint32_t back_size = (uint32_t)fb_h * fb_pitch;
+        memset(back, 0, back_size);
+        fb = back;
+        DBGK("gui", "back buffer at 0x%lx (%ld KB)\n",
+             (uint32_t)back, back_size / 1024);
+    } else {
+        DBGK("gui", "no back buffer, drawing direct\n");
+    }
+
+    static struct task comp_task;
+    create_task(&comp_task, "compositor", 9, compositor_task);
+    compositor_task_ptr = &comp_task;
+
+    DBGK("gui", "compositor started (%ldx%ld %d bpp)\n",
+         (uint32_t)fb_w, (uint32_t)fb_h, fb_depth);
+}
+
+void init_gui(void)
+{
+    if (!fbdev_is_ready()) {
+        DBGK("gui", "no framebuffer, GUI disabled\n");
+        return;
+    }
+
+    struct vbe_mode_info_struct *mode = vbe_get_mode_info();
+    if (!mode) {
+        DBGK("gui", "no VBE mode info, GUI disabled\n");
+        return;
+    }
+
+    /* Grab framebuffer parameters from VBE */
+    fb_hw    = (char *)mode->framebuffer;
+    fb       = fb_hw;   /* draw direct until compositor starts */
+    fb_w     = mode->width;
+    fb_h     = mode->height;
+    fb_pitch = mode->pitch;
+    fb_depth = mode->bpp;
+    fb_bpp   = fb_depth / 8;
+
+    /* Allocate the back buffer now, while PMM is unfragmented, so frames
+     * are physically contiguous and identity-mapped (fast memcpy). */
     uint32_t back_size = (uint32_t)fb_h * fb_pitch;
     uint32_t nframes   = (back_size + PAGE_SIZE - 1) / PAGE_SIZE;
     uint32_t first     = pmm_alloc_frame();
@@ -1263,55 +1276,20 @@ static void gui_start_compositor(void)
         if (ok) {
             back = (char *)first;
             back_nframes = nframes;
-            memset(back, 0, back_size);
-            fb = back;
-            printk("gui: back buffer at 0x%lx (%ld KB)\n", first, back_size / 1024);
+            DBGK("gui", "back buffer reserved at 0x%lx (%ld KB)\n",
+                 first, back_size / 1024);
         } else {
-            printk("gui: back buffer frames not contiguous, drawing direct\n");
+            /* Shouldn't happen this early, but fall back gracefully */
             back = NULL;
             back_nframes = 0;
+            DBGK("gui", "back buffer frames not contiguous\n");
         }
-    } else {
-        printk("gui: back buffer pmm alloc failed, drawing direct\n");
-        back = NULL;
-        back_nframes = 0;
     }
-
-    static struct task comp_task;
-    create_task(&comp_task, "compositor", 9, compositor_task);
-    compositor_task_ptr = &comp_task;
-
-    printk("gui: compositor started (%ldx%ld %d bpp)\n",
-           (uint32_t)fb_w, (uint32_t)fb_h, fb_depth);
-}
-
-void init_gui(void)
-{
-    if (!fbdev_is_ready()) {
-        printk("gui: no framebuffer, GUI disabled\n");
-        return;
-    }
-
-    struct vbe_mode_info_struct *mode = vbe_get_mode_info();
-    if (!mode) {
-        printk("gui: no VBE mode info, GUI disabled\n");
-        return;
-    }
-
-    /* Grab framebuffer parameters from VBE */
-    fb_hw    = (char *)mode->framebuffer;
-    fb       = fb_hw;   /* draw direct until back buffer is allocated */
-    fb_w     = mode->width;
-    fb_h     = mode->height;
-    fb_pitch = mode->pitch;
-    fb_depth = mode->bpp;
-    fb_bpp   = fb_depth / 8;
 
     memset(win_pool, 0, sizeof(win_pool));
     win_list = NULL;
     next_id  = 1;
 
-    /* Compositor is NOT started here — it starts lazily on first win_create */
-    printk("gui: subsystem ready (%ldx%ld %d bpp), compositor not yet running\n",
-           (uint32_t)fb_w, (uint32_t)fb_h, fb_depth);
+    DBGK("gui", "subsystem ready (%ldx%ld %d bpp)\n",
+         (uint32_t)fb_w, (uint32_t)fb_h, fb_depth);
 }

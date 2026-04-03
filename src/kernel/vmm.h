@@ -27,6 +27,11 @@ void vmm_switch_page_dir(uint32_t dir_phys);
 void vmm_map_page_in(uint32_t dir_phys, uint32_t virt, uint32_t phys, uint32_t flags);
 void vmm_unmap_page_in(uint32_t dir_phys, uint32_t virt);
 
+/* Kernel virtual page allocator: maps n physical frames to a fresh contiguous
+ * virtual range above 0xC0000000. Physical frames need not be contiguous. */
+void *vmm_alloc_pages(uint32_t n);
+void  vmm_free_pages(void *virt_base, uint32_t n);
+
 /* Clone a page directory: deep-copy all user-space mappings (PDE indices
  * covering USER_SPACE_START..USER_SPACE_END) into a new page directory.
  * Each mapped user frame is copied to a fresh physical frame.
