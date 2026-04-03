@@ -2,7 +2,10 @@
 #include "cpu/traps.h"
 #include "cpu/x86.h"
 #include "drivers/keyboard.h"
+#include "drivers/mouse.h"
+#include "kernel/gui.h"
 #include "kernel/kernel.h"
+#include "kernel/sched.h"
 #include "kernel/sched.h"
 #include "kernel/task.h"
 
@@ -24,6 +27,8 @@ static void timer_init(void)
     printk("Built with -DTURTLE: will only schedule every second\n");
 #endif
 }
+
+#define GUI_FRAME_MS 16   /* ~60 Hz */
 
 static void timer_tick(void)
 {
@@ -58,7 +63,10 @@ void pic_init(void)
 
     /* mask the interrupts we want to receive */
     outb(PIC_MASTER_DATA, PIC_MASK_ALL & PIC_MASK_TIMER & PIC_MASK_KEYBOARD);
-    outb(PIC_SLAVE_DATA, PIC_MASK_ALL);
+    /* unmask slave IRQ4 (IRQ12 mouse) on slave PIC; also unmask IRQ2 cascade on master */
+    outb(PIC_SLAVE_DATA, PIC_SLAVE_MASK_ALL & PIC_SLAVE_MASK_MOUSE);
+    /* also unmask IRQ2 (cascade) on master so slave IRQs reach us */
+    outb(PIC_MASTER_DATA, inb(PIC_MASTER_DATA) & ~(1 << 2));
 }
 
 void irq_handler(struct trap_frame *frame)
@@ -70,6 +78,12 @@ void irq_handler(struct trap_frame *frame)
 
         case IRQ_KEYBOARD:
             keyboard_irq_handler();
+            if (gui_has_windows())
+                gui_wake();
+            goto out;
+
+        case IRQ_MOUSE:
+            mouse_irq_handler();
             goto out;
 
         default:

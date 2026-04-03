@@ -146,16 +146,19 @@ pick:
             picked = t;
             break;
         } else if (t->prio_d == t->next->prio_d) {
-            /* tie break as there are >1 tasks at this priority level */
-            if (running_task == t) {
-                picked = t;
-                break;
-            } else if (running_task == t->next) {
-                picked = t->next;
-                break;
-            } else {
-                panic("BUG: tie break failed");
+            /* tie: walk the tied group; prefer the task that ran most recently */
+            struct task *group_start = t;
+            int prio = t->prio_d;
+            picked = group_start; /* default: first in group */
+            struct task *g = group_start;
+            while (g != NULL && g->prio_d == prio) {
+                if (g == running_task) {
+                    picked = g;
+                    break;
+                }
+                g = g->next;
             }
+            break;
         }
 next:
         t = t->next;

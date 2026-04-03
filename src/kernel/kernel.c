@@ -5,8 +5,10 @@
 #include "cpu/x86.h"
 #include "drivers/fbdev.h"
 #include "drivers/keyboard.h"
+#include "drivers/mouse.h"
 #include "drivers/vbe.h"
 #include "drivers/vga.h"
+#include "kernel/gui.h"
 #include "kernel/kernel.h"
 #include "kernel/syscall.h"
 #include "kernel/task.h"
@@ -133,10 +135,12 @@ void kernel_main(struct multiboot_info *mb, uint32_t start, uint32_t stack, uint
     /* devices */
     init_cpu();
     init_keyboard();
+    init_mouse();
     init_pci();
 
     // higher level startup
     init_task();
+    init_gui();
 
     /* Load init from multiboot module (initrd) */
     if (mb_info->mods_count > 0) {

@@ -218,6 +218,7 @@ void create_user_task(struct task *t, char *name, int prio,
     uint32_t code_frame = pmm_alloc_frame();
     vmm_map_page(code_frame, code_frame, PTE_PRESENT | PTE_WRITE);
     memcpy((void *)code_frame, code, code_size);
+    vmm_unmap_page(code_frame);
     /* Map it at USER_SPACE_START in the task's address space */
     vmm_map_page_in(t->page_dir_phys, USER_SPACE_START, code_frame,
                     PTE_PRESENT | PTE_USER);
@@ -226,6 +227,7 @@ void create_user_task(struct task *t, char *name, int prio,
     uint32_t stack_frame = pmm_alloc_frame();
     vmm_map_page(stack_frame, stack_frame, PTE_PRESENT | PTE_WRITE);
     memset((void *)stack_frame, 0, PAGE_SIZE);
+    vmm_unmap_page(stack_frame);
     /* Map at USER_STACK_TOP - PAGE_SIZE .. USER_STACK_TOP */
     vmm_map_page_in(t->page_dir_phys, USER_STACK_TOP - PAGE_SIZE, stack_frame,
                     PTE_PRESENT | PTE_WRITE | PTE_USER);
@@ -302,6 +304,7 @@ void create_elf_task(struct task *t, char *name, int prio,
     uint32_t stack_frame = pmm_alloc_frame();
     vmm_map_page(stack_frame, stack_frame, PTE_PRESENT | PTE_WRITE);
     memset((void *)stack_frame, 0, PAGE_SIZE);
+    vmm_unmap_page(stack_frame);
     vmm_map_page_in(t->page_dir_phys, USER_STACK_TOP - PAGE_SIZE, stack_frame,
                     PTE_PRESENT | PTE_WRITE | PTE_USER);
 

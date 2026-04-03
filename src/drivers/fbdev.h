@@ -5,6 +5,8 @@
 
 #define FBDEV_MAX_COLS 256
 #define FBDEV_MAX_ROWS 128
+#define FBDEV_HISTORY_ROWS 300   /* total rows kept in scrollback (>= MAX_ROWS) */
+#define FBDEV_SCROLL_STEP 5      /* rows to scroll per Page Up/Down keypress */
 
 /* in vbe.c */
 uint32_t rgb(uint8_t r, uint8_t g, uint8_t b);
@@ -25,3 +27,7 @@ void writestr_fb(char *str);
  * Clears the row first, does not affect cursor position.
  */
 void writeline_fb(uint32_t row, char *str, uint32_t fgcolor, uint32_t bgcolor);
+
+/* Scroll the console view up/down through scrollback history */
+void fbdev_scroll_up(void);
+void fbdev_scroll_down(void);

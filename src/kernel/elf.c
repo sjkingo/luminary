@@ -86,7 +86,7 @@ uint32_t elf_load(const void *elf_data, uint32_t elf_size, uint32_t page_dir)
 
         for (uint32_t vaddr = seg_start; vaddr < seg_end; vaddr += PAGE_SIZE) {
             uint32_t frame = pmm_alloc_frame();
-            /* Identity-map so we can write to it from kernel context */
+            /* Temporarily identity-map so we can write from kernel context */
             vmm_map_page(frame, frame, PTE_PRESENT | PTE_WRITE);
             memset((void *)frame, 0, PAGE_SIZE);
 
@@ -110,6 +110,9 @@ uint32_t elf_load(const void *elf_data, uint32_t elf_size, uint32_t page_dir)
                        copy_end - copy_start);
             }
             /* Remainder of page (bss) is already zeroed from memset above */
+
+            /* Remove temp identity mapping from current page directory */
+            vmm_unmap_page(frame);
 
             /* Map in the task's address space */
             vmm_map_page_in(page_dir, vaddr, frame, flags);

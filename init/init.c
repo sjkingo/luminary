@@ -59,16 +59,57 @@ static void utoa(unsigned int val, char *buf)
     buf[j] = '\0';
 }
 
+static unsigned int atou(const char *s)
+{
+    unsigned int v = 0;
+    while (*s >= '0' && *s <= '9')
+        v = v * 10 + (unsigned int)(*s++ - '0');
+    return v;
+}
+
+static void cmd_kill(const char *arg)
+{
+    if (*arg == '\0') {
+        puts("usage: kill <pid>\n");
+        return;
+    }
+    unsigned int pid = atou(arg);
+    int ret = kill(pid);
+    if (ret < 0)
+        puts("kill: failed (pid not found?)\n");
+}
+
+static void cmd_run(const char *arg)
+{
+    if (*arg == '\0') {
+        puts("usage: run <module_index>\n");
+        return;
+    }
+    unsigned int idx = atou(arg);
+    int pid = exec(idx);
+    if (pid < 0) {
+        puts("run: failed (invalid module index?)\n");
+    } else {
+        char buf[12];
+        puts("run: spawned pid ");
+        utoa((unsigned int)pid, buf);
+        puts(buf);
+        puts("\n");
+    }
+}
+
 static void cmd_help(void)
 {
     puts("commands:\n");
-    puts("  help    - show this message\n");
-    puts("  echo    - print text\n");
-    puts("  uptime  - show system uptime\n");
-    puts("  getpid  - show current PID\n");
-    puts("  ps      - list tasks\n");
-    puts("  halt    - shut down\n");
-    puts("  crash   - dereference a null pointer\n");
+    puts("  help       - show this message\n");
+    puts("  echo       - print text\n");
+    puts("  uptime     - show system uptime\n");
+    puts("  getpid     - show current PID\n");
+    puts("  ps         - list tasks\n");
+    puts("  run <n>    - execute multiboot module n as a task\n");
+    puts("  kill <pid> - terminate a task by PID\n");
+    puts("  halt       - shut down\n");
+    puts("  crash      - dereference a null pointer\n");
 }
 
 static void cmd_uptime(void)
@@ -110,6 +151,14 @@ static void dispatch(char *cmd)
         ps();
     } else if (strcmp(cmd, "halt") == 0) {
         halt();
+    } else if (strncmp(cmd, "kill ", 5) == 0) {
+        cmd_kill(cmd + 5);
+    } else if (strcmp(cmd, "kill") == 0) {
+        cmd_kill("");
+    } else if (strncmp(cmd, "run ", 4) == 0) {
+        cmd_run(cmd + 4);
+    } else if (strcmp(cmd, "run") == 0) {
+        cmd_run("");
     } else if (strcmp(cmd, "crash") == 0) {
         puts("dereferencing NULL...\n");
         volatile int *p = (volatile int *)0x0;

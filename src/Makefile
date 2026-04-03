@@ -1,9 +1,11 @@
 # Set configuration variables for the build
 KERNEL_BIN=	kernel.bin
 INIT_ELF=	../init/init.elf
+GUI_ELF=	../gui/gui.elf
 EMULATOR=	qemu-system-i386
-QEMU_ARGS=	-net nic,model=rtl8139 -net user -nographic
-DEFINES=	-DDEBUG -DTURTLE -DUSE_SERIAL
+QEMU_ARGS=	-net nic,model=rtl8139 -net user -serial file:/tmp/luminary.log #-nographic
+#DEFINES=	-DDEBUG -DTURTLE -DUSE_SERIAL
+DEFINES=	-DUSE_SERIAL
 
 CROSS=		i686-elf-
 CC=		$(CROSS)gcc
@@ -32,23 +34,31 @@ $(KERNEL_BIN): linker.ld $(KERNEL_OBJS)
 init:
 	make -C ../init
 
+.PHONY: gui
+gui:
+	make -C ../gui
+
 .PHONY: qemu
-qemu: $(KERNEL_BIN) init
-	$(EMULATOR) -kernel $(KERNEL_BIN) -initrd $(INIT_ELF) $(QEMU_ARGS)
+qemu: $(KERNEL_BIN) init gui
+	$(EMULATOR) -kernel $(KERNEL_BIN) -initrd "$(INIT_ELF),$(GUI_ELF)" $(QEMU_ARGS)
 
 .PHONY: qemucd
-qemucd: $(KERNEL_BIN) init bootiso
+qemucd: $(KERNEL_BIN) init gui bootiso
 	$(EMULATOR) -cdrom ../grub2/boot.iso $(QEMU_ARGS)
 
 .PHONY: console
-console: $(KERNEL_BIN) init
-	$(EMULATOR) -kernel $(KERNEL_BIN) -initrd $(INIT_ELF) -nographic $(QEMU_ARGS) &
+console: $(KERNEL_BIN) init gui
+	$(EMULATOR) -kernel $(KERNEL_BIN) -initrd "$(INIT_ELF),$(GUI_ELF)" -nographic $(QEMU_ARGS) &
 	sleep 2
 	pkill qemu-system-*
 
 .PHONY: debug
-debug: $(KERNEL_BIN) init
-	$(EMULATOR) -kernel $(KERNEL_BIN) -initrd $(INIT_ELF) -s -S $(QEMU_ARGS)
+debug: $(KERNEL_BIN) init gui
+	$(EMULATOR) -kernel $(KERNEL_BIN) -initrd "$(INIT_ELF),$(GUI_ELF)" -s -S $(QEMU_ARGS)
+
+.PHONY: qemudebug
+qemudebug: $(KERNEL_BIN) init gui
+	$(EMULATOR) -kernel $(KERNEL_BIN) -initrd "$(INIT_ELF),$(GUI_ELF)" $(QEMU_ARGS) -serial file:/tmp/luminary-serial.log
 
 .PHONY: gdb
 gdb:
@@ -59,6 +69,7 @@ clean:
 	rm -f $(KERNEL_OBJS) $(KERNEL_OBJS:.o=.d) $(KERNEL_BIN) core.* cpu/vectors.S version.h
 	make -C ../grub2 clean
 	make -C ../init clean
+	make -C ../gui clean
 
 .PHONY: bootiso
 bootiso:

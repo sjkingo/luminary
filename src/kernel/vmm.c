@@ -43,9 +43,18 @@ void vmm_map_page_in(uint32_t dir_phys, uint32_t virt, uint32_t phys, uint32_t f
             vmm_map_page(pt_frame, pt_frame, PTE_PRESENT | PTE_WRITE);
         memset((void *)pt_frame, 0, PAGE_SIZE);
         dir[pd_index] = pt_frame | PTE_PRESENT | PTE_WRITE | (flags & PTE_USER);
+    } else if (dir_phys != (uint32_t)page_directory &&
+               (dir[pd_index] & 0xFFFFF000) == (page_directory[pd_index] & 0xFFFFF000)) {
+        /* This task's PDE points to a shared kernel page table. Writing a
+         * user mapping into it would corrupt all other tasks sharing that
+         * table. Allocate a private copy for this task instead. */
+        uint32_t kern_pt = dir[pd_index] & 0xFFFFF000;
+        uint32_t pt_frame = pmm_alloc_frame();
+        vmm_map_page(pt_frame, pt_frame, PTE_PRESENT | PTE_WRITE);
+        memcpy((void *)pt_frame, (void *)kern_pt, PAGE_SIZE);
+        dir[pd_index] = pt_frame | PTE_PRESENT | PTE_WRITE | (flags & PTE_USER);
     } else if ((flags & PTE_USER) && !(dir[pd_index] & PTE_USER)) {
-        /* PDE exists but lacks user access - add it. Both the PDE and
-         * PTE must have PTE_USER for ring 3 access to work. */
+        /* PDE exists (already private) but lacks user access flag on the PDE. */
         dir[pd_index] |= PTE_USER;
     }
 

@@ -22,6 +22,11 @@ static void dump_vbe_structs(void)
         mode->height, mode->bpp, mode->pitch);
 }
 
+struct vbe_mode_info_struct *vbe_get_mode_info(void)
+{
+    return mode;
+}
+
 void init_vbe(struct multiboot_info *mb)
 {
     control = mb->vbe_control_info;

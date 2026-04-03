@@ -44,6 +44,7 @@ static struct {
     unsigned int tail; /* read index */
     int shift;
     int caps;
+    int extended; /* set when 0xE0 prefix received */
 } kb;
 
 void init_keyboard(void)
@@ -52,6 +53,7 @@ void init_keyboard(void)
     kb.tail = 0;
     kb.shift = 0;
     kb.caps = 0;
+    kb.extended = 0;
 }
 
 static void kb_buf_put(char c)
@@ -66,6 +68,21 @@ static void kb_buf_put(char c)
 void keyboard_irq_handler(void)
 {
     unsigned char scancode = inb(KB_DATA_PORT);
+
+    /* Extended scancode prefix */
+    if (scancode == 0xE0) {
+        kb.extended = 1;
+        return;
+    }
+
+    if (kb.extended) {
+        kb.extended = 0;
+        /* Page Up (0xE0 0x49) and Page Down (0xE0 0x51) - make codes only */
+        if (scancode == 0x49) { kb_buf_put(KEY_PGUP); return; }
+        if (scancode == 0x51) { kb_buf_put(KEY_PGDN); return; }
+        /* Ignore all other extended keys */
+        return;
+    }
 
     /* Shift make/break */
     if (scancode == 0x2A || scancode == 0x36) {

@@ -13,7 +13,6 @@
 #define SYS_HALT    6
 #define SYS_PS      7
 #define SYS_EXEC    16  /* exec(module_index) -> pid or -1 */
-#define SYS_KILL    17  /* kill(pid) -> 0 or -1 */
 #define SYS_YIELD   18  /* yield() - give up CPU slice */
 
 static inline int syscall0(int num)
@@ -54,6 +53,11 @@ static inline int uptime(void)
     return syscall0(SYS_UPTIME);
 }
 
+static inline void yield(void)
+{
+    syscall0(SYS_YIELD);
+}
+
 static inline int getpid(void)
 {
     return syscall0(SYS_GETPID);
@@ -76,16 +80,6 @@ static inline int exec(unsigned int mod_index)
     __asm__ volatile("int $0x80"
                      : "=a"(ret)
                      : "a"(SYS_EXEC), "b"(mod_index)
-                     : "memory");
-    return ret;
-}
-
-static inline int kill(unsigned int pid)
-{
-    int ret;
-    __asm__ volatile("int $0x80"
-                     : "=a"(ret)
-                     : "a"(SYS_KILL), "b"(pid)
                      : "memory");
     return ret;
 }

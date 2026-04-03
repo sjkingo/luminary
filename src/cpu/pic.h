@@ -12,6 +12,7 @@
 enum pic_interrupts {
     IRQ_TIMER           = IRQ_BASE_OFFSET + 0,  // system timer
     IRQ_KEYBOARD        = IRQ_BASE_OFFSET + 1,  // PS/2 keyboard
+    IRQ_MOUSE           = IRQ_BASE_OFFSET + 12, // PS/2 mouse (slave IRQ4)
 };
 
 /* PIC ports */
@@ -33,6 +34,9 @@ enum pic_interrupts {
 #define PIC_MASK_ALL            0xFF
 #define PIC_MASK_TIMER          ~(1 << (0 & 0x7))       // IRQ 0
 #define PIC_MASK_KEYBOARD       ~(1 << 1)               // IRQ 1
+/* Slave PIC masks */
+#define PIC_SLAVE_MASK_ALL      0xFF
+#define PIC_SLAVE_MASK_MOUSE    ~(1 << 4)               // slave IRQ4 = IRQ12
 
 /* PIT (system timer) definitions.
  * See http://wiki.osdev.org/Programmable_Interval_Timer

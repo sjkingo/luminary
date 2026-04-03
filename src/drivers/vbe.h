@@ -62,4 +62,7 @@ struct multiboot_info; // in multiboot.h
 uint32_t display_width(void);
 uint32_t display_height(void);
 
+/* Returns the VBE mode info struct, or NULL if VBE is not available */
+struct vbe_mode_info_struct *vbe_get_mode_info(void);
+
 void init_vbe(struct multiboot_info *mb);
