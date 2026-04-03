@@ -125,6 +125,7 @@ void create_task(struct task *t, char *name, int prio, void (*entry)(void))
     t->page_dir_phys = vmm_create_page_dir();
     t->prev = NULL;
     t->next = NULL;
+    memset(t->fds, 0, sizeof(t->fds));
 
     setup_task_stack(t);
 
@@ -213,6 +214,7 @@ void create_user_task(struct task *t, char *name, int prio,
     t->page_dir_phys = vmm_create_page_dir();
     t->prev = NULL;
     t->next = NULL;
+    memset(t->fds, 0, sizeof(t->fds));
 
     /* Allocate a physical frame for user code and copy it there */
     uint32_t code_frame = pmm_alloc_frame();
@@ -294,6 +296,7 @@ void create_elf_task(struct task *t, char *name, int prio,
     t->page_dir_phys = vmm_create_page_dir();
     t->prev = NULL;
     t->next = NULL;
+    memset(t->fds, 0, sizeof(t->fds));
 
     /* Load the ELF into the task's address space */
     uint32_t entry_point = elf_load(elf_data, elf_size, t->page_dir_phys);
@@ -330,6 +333,10 @@ void spawn_init(const void *elf_data, unsigned int elf_size)
 
 static void respawn_init(void)
 {
+    /* Note: always called from within task_kill(), which has already called
+     * disable_interrupts(). The window between memset and create_elf_task
+     * (where a zeroed task_init could be visible to the scheduler) is
+     * therefore safe — no timer IRQ can fire here. */
     printk("init: respawning\n");
     memset(&task_init, 0, sizeof(task_init));
     create_elf_task(&task_init, "init", 5, init_elf_data, init_elf_size);
@@ -340,6 +347,12 @@ void task_kill(struct task *t)
 {
     if (t->pid == PID_IDLE)
         panic("task_kill: cannot kill idle task");
+
+    /* Disable interrupts while manipulating the scheduler queue.
+     * Callers that already have interrupts disabled (e.g. sys_kill, the
+     * compositor self-kill path) calling disable_interrupts() again is
+     * harmless on this single-core x86 kernel. */
+    disable_interrupts();
 
     printk("sched: removing '%s' (pid %d) from run queue\n", t->name, t->pid);
 
@@ -402,6 +415,9 @@ void task_kill(struct task *t)
         );
         __builtin_unreachable();
     }
+
+    /* Killed a different task — re-enable interrupts before returning. */
+    enable_interrupts();
 }
 
 void init_task(void)

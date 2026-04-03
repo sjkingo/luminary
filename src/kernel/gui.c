@@ -2,7 +2,7 @@
  *
  * Architecture:
  *   - Window list: singly-linked list of struct window, z-ordered (head = topmost)
- *   - Each window has a client-area backbuffer (w × client_h × 4 bytes) in kernel heap
+ *   - Each window has a client-area backbuffer (w × client_h × 4 bytes) in PMM frames
  *   - Compositor task sleeps (suspends itself) when idle, woken by gui_wake()
  *   - On each wake: composite all windows to framebuffer, draw cursor
  *   - Mouse drag is handled entirely inside the compositor task
@@ -17,7 +17,6 @@
 
 #include "kernel/gui.h"
 #include "kernel/kernel.h"
-#include "kernel/heap.h"
 #include "kernel/pmm.h"
 #include "kernel/vmm.h"
 #include "kernel/sched.h"
@@ -34,6 +33,7 @@
 static char    *fb;            /* draw target: points to back during compose, fb_hw otherwise */
 static char    *fb_hw;         /* real hardware framebuffer address */
 static char    *back;          /* full-screen back buffer (allocated at compositor start) */
+static uint32_t back_nframes;  /* number of PMM frames backing 'back' (for free on exit) */
 static uint32_t fb_w;
 static uint32_t fb_h;
 static uint16_t fb_pitch;
@@ -315,6 +315,49 @@ static inline uint32_t client_w(struct window *w)
     return w->w > GUI_BORDER * 2
            ? w->w - GUI_BORDER * 2
            : 0;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ * Window backbuffer allocation (PMM frames, identity-mapped)
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+/* Allocate contiguous PMM frames for a backbuffer of cw×ch pixels.
+ * Maps each frame into the kernel page directory.
+ * Returns pointer to the buffer, or NULL on failure.
+ * Sets *nframes_out to the number of frames allocated. */
+static uint32_t *bb_alloc(uint32_t cw, uint32_t ch, uint32_t *nframes_out)
+{
+    uint32_t bytes  = cw * ch * sizeof(uint32_t);
+    uint32_t nframes = (bytes + PAGE_SIZE - 1) / PAGE_SIZE;
+    *nframes_out = 0;
+
+    uint32_t first = pmm_alloc_frame();
+    if (!first) return NULL;
+    vmm_map_page(first, first, PTE_PRESENT | PTE_WRITE);
+
+    for (uint32_t i = 1; i < nframes; i++) {
+        uint32_t f = pmm_alloc_frame();
+        if (f != first + i * PAGE_SIZE) {
+            /* Non-contiguous — free what we got and give up */
+            pmm_free_frame(f);
+            for (uint32_t j = 0; j < i; j++)
+                pmm_free_frame(first + j * PAGE_SIZE);
+            return NULL;
+        }
+        vmm_map_page(f, f, PTE_PRESENT | PTE_WRITE);
+    }
+
+    *nframes_out = nframes;
+    return (uint32_t *)first;
+}
+
+/* Free contiguous PMM frames previously allocated by bb_alloc. */
+static void bb_free(uint32_t *buf, uint32_t nframes)
+{
+    if (!buf || !nframes) return;
+    uint32_t base = (uint32_t)buf;
+    for (uint32_t i = 0; i < nframes; i++)
+        pmm_free_frame(base + i * PAGE_SIZE);
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -693,18 +736,19 @@ static void window_realloc_backbuffer(struct window *w)
 {
     uint32_t cw = client_w(w);
     uint32_t ch = client_h(w);
-    if (w->backbuffer) {
-        kfree(w->backbuffer);
-        w->backbuffer = NULL;
-    }
+    bb_free(w->backbuffer, w->bb_nframes);
+    w->backbuffer = NULL;
+    w->bb_nframes = 0;
     if (cw > 0 && ch > 0) {
-        uint32_t *bb = (uint32_t *)kmalloc(cw * ch * sizeof(uint32_t));
+        uint32_t nframes;
+        uint32_t *bb = bb_alloc(cw, ch, &nframes);
         if (bb) {
             for (uint32_t i = 0; i < cw * ch; i++)
                 bb[i] = COL_CLIENT_BG;
             w->backbuffer = bb;
-            w->bb_w = cw;
-            w->bb_h = ch;
+            w->bb_w       = cw;
+            w->bb_h       = ch;
+            w->bb_nframes = nframes;
         }
     }
     w->dirty = true;
@@ -954,6 +998,13 @@ void compositor_task(void)
             prev_cursor_y    = 0xFFFFFFFF;
             cursor_type      = CURSOR_TYPE_NORMAL;
             hovered_win      = NULL;
+            /* Free the back buffer PMM frames (previously leaked on exit) */
+            if (back && back_nframes) {
+                uint32_t base = (uint32_t)back;
+                for (uint32_t i = 0; i < back_nframes; i++)
+                    pmm_free_frame(base + i * PAGE_SIZE);
+                back_nframes = 0;
+            }
             back             = NULL;
             fb               = fb_hw;
             struct task *self = compositor_task_ptr;
@@ -1062,10 +1113,10 @@ int gui_window_create(int32_t x, int32_t y, uint32_t w, uint32_t h,
     uint32_t ch = h > (uint32_t)(GUI_TITLE_HEIGHT + GUI_BORDER * 2)
                   ? h - (uint32_t)(GUI_TITLE_HEIGHT + GUI_BORDER * 2) : 0;
 
-    uint32_t bb_bytes = cw * ch * sizeof(uint32_t);
+    uint32_t nframes = 0;
     uint32_t *bb = NULL;
-    if (bb_bytes > 0) {
-        bb = (uint32_t *)kmalloc(bb_bytes);
+    if (cw > 0 && ch > 0) {
+        bb = bb_alloc(cw, ch, &nframes);
         if (!bb) return -1;
         /* Default client background */
         for (uint32_t i = 0; i < cw * ch; i++)
@@ -1078,8 +1129,9 @@ int gui_window_create(int32_t x, int32_t y, uint32_t w, uint32_t h,
     slot->w         = w;
     slot->h         = h;
     slot->backbuffer = bb;
-    slot->bb_w      = cw;
-    slot->bb_h      = ch;
+    slot->bb_w       = cw;
+    slot->bb_h       = ch;
+    slot->bb_nframes = nframes;
     slot->visible   = true;
     slot->focused   = false;
     slot->dirty     = true;
@@ -1110,10 +1162,9 @@ void gui_window_destroy(int id)
 
     win_list_remove(w);
 
-    if (w->backbuffer) {
-        kfree(w->backbuffer);
-        w->backbuffer = NULL;
-    }
+    bb_free(w->backbuffer, w->bb_nframes);
+    w->backbuffer = NULL;
+    w->bb_nframes = 0;
     w->id = 0;  /* mark slot as free */
 
     /* Focus the new topmost window, or quit compositor if none left */
@@ -1211,16 +1262,19 @@ static void gui_start_compositor(void)
         }
         if (ok) {
             back = (char *)first;
+            back_nframes = nframes;
             memset(back, 0, back_size);
             fb = back;
             printk("gui: back buffer at 0x%lx (%ld KB)\n", first, back_size / 1024);
         } else {
             printk("gui: back buffer frames not contiguous, drawing direct\n");
             back = NULL;
+            back_nframes = 0;
         }
     } else {
         printk("gui: back buffer pmm alloc failed, drawing direct\n");
         back = NULL;
+        back_nframes = 0;
     }
 
     static struct task comp_task;

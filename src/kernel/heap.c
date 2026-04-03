@@ -1,173 +1,283 @@
-/* Kernel heap implementation. The kernel's memory manager
- * is a fixed-size block allocator, which maintains a pool of
- * fixed-size blocks for use when calling kmalloc().
+/* Slab allocator - replaces the fixed-block heap.
  *
- * Since there is no virtual address space in the kernel, the
- * allocator makes use of a contiguous chunk of memory and a
- * compiled-in maximum heap size.
+ * Size classes: 32, 64, 128, 256, 512, 1024, 2048, 4096 bytes.
+ * Each class maintains a list of 4KB PMM pages. Within each page, slots
+ * are tracked by a 128-bit bitmap (4 × uint32_t), where bit=0 means free
+ * and bit=1 means allocated.
  *
- * It is designed for efficient, constant-time access.
+ * For allocations > 4096 bytes, falls back to contiguous PMM frames
+ * tracked in a small overflow table.
  *
- * The implementation details are described below:
+ * Thread safety: this kernel is single-core and kmalloc/kfree are never
+ * called from IRQ context. Callers that need atomicity (e.g. task creation)
+ * disable interrupts themselves before calling kmalloc.
  */
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <string.h>
 
 #include "kernel/kernel.h"
 #include "kernel/heap.h"
+#include "kernel/pmm.h"
+#include "kernel/vmm.h"
 
 #define MODULE "heap: "
 
-#define KERNEL_HEAP_BLOCK_SIZE 1024
-#define KERNEL_HEAP_MAX_BLOCKS 1024
+/* ── size classes ────────────────────────────────────────────────────────── */
 
-struct kernel_heap_block {
-    bool allocated;
-    int32_t blocks_spanned; // only valid on the first block of an allocation
-    void *ptr;              // only valid on the first block of an allocation
+static const uint32_t slab_sizes[NUM_SLAB_CLASSES] = {
+    32, 64, 128, 256, 512, 1024, 2048, 4096
 };
 
-// This is a struct for future use so it's possible to add new elements
-struct kernel_heap {
-    struct kernel_heap_block blocks[KERNEL_HEAP_MAX_BLOCKS];
-    int32_t free_blocks;
-    void *data_area; // memory that heap will allocate in
-};
-static struct kernel_heap heap;
+/* ── per-page metadata ───────────────────────────────────────────────────── */
 
-#ifdef DEBUG
-static void dump_heap(void)
+#define SLAB_BITMAP_WORDS 4     /* 4 × 32 = 128 bits; enough for 4096/32 = 128 slots */
+
+struct slab_page {
+    uint32_t phys;              /* physical (= virtual, identity-mapped) address of page */
+    uint32_t n_slots;           /* total slots in this page */
+    uint32_t n_free;            /* number of free slots remaining */
+    uint32_t bitmap[SLAB_BITMAP_WORDS]; /* 0 = free, 1 = allocated */
+};
+
+/* ── per-class state ─────────────────────────────────────────────────────── */
+
+#define MAX_SLABS_PER_CLASS 64
+
+struct slab_class {
+    uint32_t         obj_size;
+    uint32_t         n_pages;
+    struct slab_page pages[MAX_SLABS_PER_CLASS];
+};
+
+static struct slab_class classes[NUM_SLAB_CLASSES];
+
+/* ── overflow table for allocations > 4096 bytes ────────────────────────── */
+
+#define MAX_OVERFLOW 64
+
+struct overflow_entry {
+    uint32_t phys;      /* base physical address of the first frame */
+    uint32_t nframes;   /* number of contiguous frames */
+};
+
+static struct overflow_entry overflow_table[MAX_OVERFLOW];
+
+/* ── helpers ─────────────────────────────────────────────────────────────── */
+
+/* Find the smallest size class that fits 'size' bytes.
+ * Returns NUM_SLAB_CLASSES if size > 4096 (overflow path). */
+static int find_class(uint32_t size)
 {
-    printk(MODULE "dump_heap(): %ld blocks free |", heap.free_blocks);
-    for (int32_t i = 0; i < KERNEL_HEAP_MAX_BLOCKS; i++) {
-        struct kernel_heap_block *block = &heap.blocks[i];
-        if (block->allocated) {
-            for (int32_t n = 0; n < block->blocks_spanned; n++)
-                printk("X");
-            if (block->blocks_spanned > 0)
-                printk("|");
-        } else {
-            printk("-|");
-        }
+    for (int i = 0; i < NUM_SLAB_CLASSES; i++) {
+        if (size <= slab_sizes[i])
+            return i;
     }
-    printk("\n");
+    return NUM_SLAB_CLASSES;
 }
-#endif
+
+/* Allocate a new slab page for the given class. Returns 1 on success. */
+static int slab_grow(struct slab_class *cls)
+{
+    if (cls->n_pages >= MAX_SLABS_PER_CLASS)
+        return 0;
+
+    uint32_t frame = pmm_alloc_frame(); /* panics on OOM */
+    vmm_map_page(frame, frame, PTE_PRESENT | PTE_WRITE);
+    memset((void *)frame, 0, PAGE_SIZE);
+
+    struct slab_page *sp = &cls->pages[cls->n_pages++];
+    sp->phys    = frame;
+    sp->n_slots = PAGE_SIZE / cls->obj_size;
+    sp->n_free  = sp->n_slots;
+    memset(sp->bitmap, 0, sizeof(sp->bitmap)); /* all free */
+    return 1;
+}
+
+/* Allocate one slot from a slab page. Returns NULL if page is full. */
+static void *slab_page_alloc(struct slab_page *sp, uint32_t obj_size)
+{
+    for (int w = 0; w < SLAB_BITMAP_WORDS; w++) {
+        if (sp->bitmap[w] == 0xFFFFFFFFu)
+            continue;
+        int bit = __builtin_ctz(~sp->bitmap[w]); /* index of first 0-bit */
+        uint32_t slot = (uint32_t)(w * 32 + bit);
+        if (slot >= sp->n_slots)
+            continue;
+        sp->bitmap[w] |= (1u << bit);
+        sp->n_free--;
+        return (void *)(sp->phys + slot * obj_size);
+    }
+    return NULL;
+}
+
+/* ── public API ──────────────────────────────────────────────────────────── */
 
 #ifdef DEBUG
-void *kmalloc_real(uint32_t size, char const *calling_file, int calling_line,
-        char const *calling_func)
+void *kmalloc_real(uint32_t size, char const *file, int line, char const *func)
 #else
 void *kmalloc(uint32_t size)
 #endif
 {
-    // Determine how many blocks this allocation will span
-    int32_t required_blocks = size / KERNEL_HEAP_BLOCK_SIZE;
-    if ((size % KERNEL_HEAP_BLOCK_SIZE) != 0)
-        required_blocks++;
+    if (size == 0) return NULL;
 
-    // Shortcut to avoid looping if the allocation requires too many blocks
-    if (required_blocks > heap.free_blocks)
-        goto fail;
+    int ci = find_class(size);
 
-    // Iterate over the heap and find a contiguous run of free blocks
-    int32_t run_start = -1;
-    int32_t run_length = 0;
-    for (int32_t i = 0; i < KERNEL_HEAP_MAX_BLOCKS; i++) {
-        if (heap.blocks[i].allocated) {
-            // Reset the run, this block breaks contiguity
-            run_start = -1;
-            run_length = 0;
-            continue;
+    if (ci == NUM_SLAB_CLASSES) {
+        /* Overflow: allocate contiguous PMM frames */
+        uint32_t nframes = (size + PAGE_SIZE - 1) / PAGE_SIZE;
+
+        /* Find a free overflow slot */
+        int slot = -1;
+        for (int i = 0; i < MAX_OVERFLOW; i++) {
+            if (overflow_table[i].phys == 0) { slot = i; break; }
+        }
+        if (slot < 0) {
+#ifdef DEBUG
+            printk(MODULE "%s:%d(%s) overflow table full (size=%ld)\n",
+                   file, line, func, size);
+#endif
+            return NULL;
         }
 
-        if (run_start == -1)
-            run_start = i;
-        run_length++;
+        uint32_t first = pmm_alloc_frame(); /* panics on OOM */
+        vmm_map_page(first, first, PTE_PRESENT | PTE_WRITE);
 
-        if (run_length == required_blocks) {
-            // Found enough contiguous blocks, mark them allocated
-            for (int32_t j = run_start; j <= i; j++) {
-                heap.blocks[j].allocated = true;
-                heap.blocks[j].blocks_spanned = 0;
-                heap.blocks[j].ptr = NULL;
-            }
-
-            // Store metadata on the first block of the allocation
-            void *ptr = heap.data_area + (run_start * KERNEL_HEAP_BLOCK_SIZE);
-            heap.blocks[run_start].blocks_spanned = required_blocks;
-            heap.blocks[run_start].ptr = ptr;
-
-            heap.free_blocks -= required_blocks;
-
+        for (uint32_t i = 1; i < nframes; i++) {
+            uint32_t f = pmm_alloc_frame();
+            if (f != first + i * PAGE_SIZE) {
+                /* Non-contiguous frames — can't satisfy the request.
+                 * Free what we managed to get and fail. */
+                pmm_free_frame(first);
+                for (uint32_t j = 1; j < i; j++)
+                    pmm_free_frame(first + j * PAGE_SIZE);
+                pmm_free_frame(f);
 #ifdef DEBUG
-            printk(MODULE "%s:%d(%s) kmalloc found %ld blocks (for %ld bytes) at 0x%lx\n",
-                    calling_file, calling_line, calling_func, required_blocks,
-                    size, (uint32_t)ptr);
+                printk(MODULE "%s:%d(%s) overflow alloc non-contiguous (size=%ld)\n",
+                       file, line, func, size);
+#endif
+                return NULL;
+            }
+            vmm_map_page(f, f, PTE_PRESENT | PTE_WRITE);
+        }
+
+        overflow_table[slot].phys    = first;
+        overflow_table[slot].nframes = nframes;
+#ifdef DEBUG
+        printk(MODULE "%s:%d(%s) overflow alloc %ld frames at 0x%lx (size=%ld)\n",
+               file, line, func, nframes, first, size);
+#endif
+        return (void *)first;
+    }
+
+    struct slab_class *cls = &classes[ci];
+
+    /* Try existing pages first */
+    for (uint32_t i = 0; i < cls->n_pages; i++) {
+        if (cls->pages[i].n_free == 0) continue;
+        void *ptr = slab_page_alloc(&cls->pages[i], cls->obj_size);
+        if (ptr) {
+#ifdef DEBUG
+            printk(MODULE "%s:%d(%s) slab[%ld] alloc at 0x%lx (size=%ld)\n",
+                   file, line, func, cls->obj_size, (uint32_t)ptr, size);
 #endif
             return ptr;
         }
     }
 
-fail:
+    /* No free slot — grow the class */
+    if (!slab_grow(cls)) {
 #ifdef DEBUG
-    printk(MODULE "%s:%d(%s) kmalloc failed to allocate %ld bytes in %ld blocks\n",
-            calling_file, calling_line, calling_func, size, required_blocks);
+        printk(MODULE "%s:%d(%s) slab[%ld] grow failed (size=%ld)\n",
+               file, line, func, cls->obj_size, size);
 #endif
-    return NULL;
+        return NULL;
+    }
+
+    /* Allocate from the newly added page */
+    void *ptr = slab_page_alloc(&cls->pages[cls->n_pages - 1], cls->obj_size);
+#ifdef DEBUG
+    printk(MODULE "%s:%d(%s) slab[%ld] alloc (new page) at 0x%lx (size=%ld)\n",
+           file, line, func, cls->obj_size, (uint32_t)ptr, size);
+#endif
+    return ptr;
 }
 
 #ifdef DEBUG
-void kfree_real(void *ptr, char const *calling_file, int calling_line,
-        char const *calling_func)
+void kfree_real(void *ptr, char const *file, int line, char const *func)
 #else
 void kfree(void *ptr)
 #endif
 {
-    if (ptr == NULL)
-        return;
+    if (!ptr) return;
 
-    // Find the block that owns this pointer
-    for (int32_t i = 0; i < KERNEL_HEAP_MAX_BLOCKS; i++) {
-        struct kernel_heap_block *block = &heap.blocks[i];
-        if (!block->allocated || block->ptr != ptr || block->blocks_spanned == 0)
-            continue;
+    uint32_t addr = (uint32_t)ptr;
 
-        // Found it, free this block and all blocks it spans
-        int32_t count = block->blocks_spanned;
-
+    /* Check overflow table first */
+    for (int i = 0; i < MAX_OVERFLOW; i++) {
+        if (overflow_table[i].phys == addr) {
+            for (uint32_t j = 0; j < overflow_table[i].nframes; j++)
+                pmm_free_frame(addr + j * PAGE_SIZE);
+            overflow_table[i].phys    = 0;
+            overflow_table[i].nframes = 0;
 #ifdef DEBUG
-        printk(MODULE "%s:%d(%s) kfree freeing %ld blocks at 0x%lx\n",
-                calling_file, calling_line, calling_func, count, (uint32_t)ptr);
+            printk(MODULE "%s:%d(%s) overflow free at 0x%lx\n",
+                   file, line, func, addr);
 #endif
-
-        for (int32_t j = i; j < i + count; j++) {
-            heap.blocks[j].allocated = false;
-            heap.blocks[j].blocks_spanned = 0;
-            heap.blocks[j].ptr = NULL;
+            return;
         }
-
-        heap.free_blocks += count;
-        return;
     }
 
-    panic("kfree: pointer not found in heap");
+    /* Search slab pages */
+    for (int ci = 0; ci < NUM_SLAB_CLASSES; ci++) {
+        struct slab_class *cls = &classes[ci];
+        for (uint32_t pi = 0; pi < cls->n_pages; pi++) {
+            struct slab_page *sp = &cls->pages[pi];
+            if (addr < sp->phys || addr >= sp->phys + PAGE_SIZE)
+                continue;
+            /* ptr is within this slab page */
+            uint32_t slot = (addr - sp->phys) / cls->obj_size;
+            /* Validate alignment */
+            if (sp->phys + slot * cls->obj_size != addr) {
+#ifdef DEBUG
+                printk(MODULE "%s:%d(%s) misaligned pointer 0x%lx\n",
+                       file, line, func, addr);
+#endif
+                panic("kfree: misaligned pointer");
+            }
+            uint32_t w   = slot / 32;
+            uint32_t bit = slot % 32;
+            if (!(sp->bitmap[w] & (1u << bit))) {
+#ifdef DEBUG
+                printk(MODULE "%s:%d(%s) double free at 0x%lx\n",
+                       file, line, func, addr);
+#endif
+                panic("kfree: double free");
+            }
+            sp->bitmap[w] &= ~(1u << bit);
+            sp->n_free++;
+#ifdef DEBUG
+            printk(MODULE "%s:%d(%s) slab[%ld] free slot %ld at 0x%lx\n",
+                   file, line, func, cls->obj_size, slot, addr);
+#endif
+            return;
+        }
+    }
+
+    panic("kfree: pointer not found in any slab");
 }
 
 void init_kernel_heap(void *start_addr)
 {
-    uint32_t heap_size = KERNEL_HEAP_MAX_BLOCKS * KERNEL_HEAP_BLOCK_SIZE;
+    (void)start_addr; /* ignored — we use PMM directly now */
 
-    // clear the heap data area
-    heap.data_area = start_addr;
-    memset(heap.data_area, 0, heap_size);
-    heap.free_blocks = KERNEL_HEAP_MAX_BLOCKS;
+    memset(classes, 0, sizeof(classes));
+    memset(overflow_table, 0, sizeof(overflow_table));
 
-#ifdef DEBUG
-    printk(MODULE "kernel heap 0x%lx -> 0x%lx (%ld KB available)\n", (uint32_t)heap.data_area,
-        (uint32_t)heap.data_area + heap_size, heap_size/1024);
-    printk(MODULE "heap consists of %d blocks of %d bytes each\n",
-        KERNEL_HEAP_MAX_BLOCKS, KERNEL_HEAP_BLOCK_SIZE);
-#endif
+    for (int i = 0; i < NUM_SLAB_CLASSES; i++)
+        classes[i].obj_size = slab_sizes[i];
+
+    printk("heap: slab allocator ready (%d classes: 32..4096 bytes)\n",
+           NUM_SLAB_CLASSES);
 }

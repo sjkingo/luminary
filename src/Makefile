@@ -1,7 +1,6 @@
 # Set configuration variables for the build
 KERNEL_BIN=	kernel.bin
-INIT_ELF=	../init/init.elf
-GUI_ELF=	../gui/gui.elf
+INITRD_IMG=	../initrd.img
 EMULATOR=	qemu-system-i386
 QEMU_ARGS=	-net nic,model=rtl8139 -net user -serial file:/tmp/luminary.log #-nographic
 #DEFINES=	-DDEBUG -DTURTLE -DUSE_SERIAL
@@ -30,35 +29,41 @@ all: $(KERNEL_BIN)
 $(KERNEL_BIN): linker.ld $(KERNEL_OBJS)
 	$(CC) $(ARCH) $(LDFLAGS) -o $@ $(KERNEL_OBJS)
 
-.PHONY: init
-init:
+.PHONY: userspace
+userspace:
 	make -C ../init
-
-.PHONY: gui
-gui:
 	make -C ../gui
 
+# Build the cpio initrd from ../rootfs/
+# Copy freshly-built ELF binaries into rootfs/bin, then pack with cpio.
+.PHONY: initrd
+initrd: userspace
+	cp ../init/init.elf ../rootfs/bin/init
+	cp ../gui/gui.elf   ../rootfs/bin/gui
+	cd ../rootfs && find . | sort | cpio -o --format=newc > ../initrd.img
+	@echo "initrd: built $$(wc -c < ../initrd.img) bytes"
+
 .PHONY: qemu
-qemu: $(KERNEL_BIN) init gui
-	$(EMULATOR) -kernel $(KERNEL_BIN) -initrd "$(INIT_ELF),$(GUI_ELF)" $(QEMU_ARGS)
+qemu: $(KERNEL_BIN) initrd
+	$(EMULATOR) -kernel $(KERNEL_BIN) -initrd "$(INITRD_IMG)" $(QEMU_ARGS)
 
 .PHONY: qemucd
-qemucd: $(KERNEL_BIN) init gui bootiso
+qemucd: $(KERNEL_BIN) initrd bootiso
 	$(EMULATOR) -cdrom ../grub2/boot.iso $(QEMU_ARGS)
 
 .PHONY: console
-console: $(KERNEL_BIN) init gui
-	$(EMULATOR) -kernel $(KERNEL_BIN) -initrd "$(INIT_ELF),$(GUI_ELF)" -nographic $(QEMU_ARGS) &
+console: $(KERNEL_BIN) initrd
+	$(EMULATOR) -kernel $(KERNEL_BIN) -initrd "$(INITRD_IMG)" -nographic $(QEMU_ARGS) &
 	sleep 2
 	pkill qemu-system-*
 
 .PHONY: debug
-debug: $(KERNEL_BIN) init gui
-	$(EMULATOR) -kernel $(KERNEL_BIN) -initrd "$(INIT_ELF),$(GUI_ELF)" -s -S $(QEMU_ARGS)
+debug: $(KERNEL_BIN) initrd
+	$(EMULATOR) -kernel $(KERNEL_BIN) -initrd "$(INITRD_IMG)" -s -S $(QEMU_ARGS)
 
 .PHONY: qemudebug
-qemudebug: $(KERNEL_BIN) init gui
-	$(EMULATOR) -kernel $(KERNEL_BIN) -initrd "$(INIT_ELF),$(GUI_ELF)" $(QEMU_ARGS) -serial file:/tmp/luminary-serial.log
+qemudebug: $(KERNEL_BIN) initrd
+	$(EMULATOR) -kernel $(KERNEL_BIN) -initrd "$(INITRD_IMG)" $(QEMU_ARGS) -serial file:/tmp/luminary-serial.log
 
 .PHONY: gdb
 gdb:
@@ -67,6 +72,7 @@ gdb:
 .PHONY: clean
 clean:
 	rm -f $(KERNEL_OBJS) $(KERNEL_OBJS:.o=.d) $(KERNEL_BIN) core.* cpu/vectors.S version.h
+	rm -f $(INITRD_IMG)
 	make -C ../grub2 clean
 	make -C ../init clean
 	make -C ../gui clean

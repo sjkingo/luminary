@@ -168,7 +168,7 @@ next:
         panic("BUG: no tasks to schedule");
 
     /* if we picked the idle task, attempt to run other tasks instead */
-    if (t->pid == PID_IDLE) {
+    if (t != NULL && t->pid == PID_IDLE) {
         unsigned int r = reset_all_priorities();
         if (r > 0)
             goto pick;

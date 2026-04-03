@@ -1,5 +1,10 @@
 #pragma once
 
+#include "kernel/vfs.h"
+
+/* ── per-task open file descriptor table ─────────────────────────────────── */
+/* Stored inline in struct task to avoid heap allocation on task creation.   */
+
 /* A task to be scheduled in the system */
 struct task {
     char *name;
@@ -15,6 +20,9 @@ struct task {
     unsigned int page_dir_phys; /* physical address of task's page directory */
     unsigned int stack_base;    /* base of allocated stack (for kfree) */
     void (*entry)(void);        /* entry point for new tasks */
+
+    /* Open file descriptor table */
+    struct vfs_fd fds[VFS_FD_MAX];
 
     struct task *prev, *next;
 };

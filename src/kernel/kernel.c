@@ -15,6 +15,8 @@
 #include "kernel/heap.h"
 #include "kernel/pmm.h"
 #include "kernel/vmm.h"
+#include "kernel/vfs.h"
+#include "kernel/initrd.h"
 #include "pci/pci.h"
 #include "version.h"
 
@@ -142,17 +144,46 @@ void kernel_main(struct multiboot_info *mb, uint32_t start, uint32_t stack, uint
     init_task();
     init_gui();
 
-    /* Load init from multiboot module (initrd) */
-    if (mb_info->mods_count > 0) {
-        struct multiboot_mod_entry *mod =
-            (struct multiboot_mod_entry *)mb_info->mods_addr;
-        uint32_t mod_size = mod->mod_end - mod->mod_start;
-        printk("initrd: module at 0x%lx - 0x%lx (%ld bytes)\n",
-               mod->mod_start, mod->mod_end, mod_size);
-        spawn_init((const void *)mod->mod_start, mod_size);
-    } else {
-        panic("no initrd module - cannot load init");
+    /* Find and parse the initrd cpio module.
+     * Convention: the last multiboot module whose cmdline string contains
+     * "initrd" (or any module tagged "initrd") is the cpio archive.
+     * We pass it to initrd_init() which mounts it at "/".
+     * Then we load init from /bin/init within the VFS. */
+    if (mb_info->mods_count == 0)
+        panic("no multiboot modules - cannot load initrd");
+
+    struct multiboot_mod_entry *mods =
+        (struct multiboot_mod_entry *)mb_info->mods_addr;
+
+    /* Find the initrd module: look for one tagged "initrd", else use last */
+    struct multiboot_mod_entry *initrd_mod = &mods[mb_info->mods_count - 1];
+    for (uint32_t i = 0; i < mb_info->mods_count; i++) {
+        const char *cmdline = (const char *)mods[i].string;
+        if (cmdline) {
+            /* simple substring search for "initrd" */
+            const char *p = cmdline;
+            while (*p) {
+                if (p[0]=='i' && p[1]=='n' && p[2]=='i' && p[3]=='t' &&
+                    p[4]=='r' && p[5]=='d') {
+                    initrd_mod = &mods[i];
+                    break;
+                }
+                p++;
+            }
+        }
     }
+
+    uint32_t initrd_size = initrd_mod->mod_end - initrd_mod->mod_start;
+    printk("initrd: cpio at 0x%lx - 0x%lx (%ld bytes)\n",
+           initrd_mod->mod_start, initrd_mod->mod_end, initrd_size);
+    initrd_init((const void *)initrd_mod->mod_start, initrd_size);
+
+    /* Load /bin/init from the VFS */
+    uint32_t init_size = 0;
+    const void *init_elf = initrd_get_file("/bin/init", &init_size);
+    if (!init_elf)
+        panic("initrd: /bin/init not found - check rootfs/bin/init exists");
+    spawn_init(init_elf, init_size);
 
     startup_complete = true;
     enable_interrupts();

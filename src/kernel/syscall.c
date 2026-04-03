@@ -10,12 +10,27 @@
 #include "kernel/sched.h"
 #include "kernel/heap.h"
 #include "kernel/gui.h"
+#include "kernel/vmm.h"
+#include "kernel/vfs.h"
+#include "kernel/initrd.h"
 #include "boot/multiboot.h"
 #include "cpu/traps.h"
 #include "cpu/x86.h"
 #include "drivers/keyboard.h"
 #include "drivers/mouse.h"
 #include "drivers/fbdev.h"
+
+/* Validate that a user-supplied pointer range lies entirely within user space.
+ * Pass len=0 to check only the start address (e.g. for string pointers where
+ * the length is unknown). Returns true if the range is acceptable. */
+static inline bool user_access_ok(const void *ptr, uint32_t len)
+{
+    uint32_t addr = (uint32_t)ptr;
+    if (addr < USER_SPACE_START) return false;
+    if (addr >= USER_SPACE_END)  return false;
+    if (len > 1 && (addr + len - 1) >= USER_SPACE_END) return false;
+    return true;
+}
 
 static int sys_nop(void)
 {
@@ -28,8 +43,7 @@ static int sys_write(struct trap_frame *frame)
     const char *buf = (const char *)frame->ebx;
     unsigned int len = frame->ecx;
 
-    /* Basic validation: reject null pointers and unreasonable lengths */
-    if (buf == NULL || len > 4096)
+    if (!user_access_ok(buf, len) || len > 4096)
         return -1;
 
     /* Print character by character (safe, no format string issues) */
@@ -70,7 +84,8 @@ static int sys_win_get_size(struct trap_frame *frame)
     int id       = (int)frame->ebx;
     uint32_t *pw = (uint32_t *)frame->ecx;
     uint32_t *ph = (uint32_t *)frame->edx;
-    if (!pw || !ph) return -1;
+    if (!user_access_ok(pw, sizeof(uint32_t)) ||
+        !user_access_ok(ph, sizeof(uint32_t))) return -1;
     return gui_window_get_size(id, pw, ph);
 }
 
@@ -78,7 +93,7 @@ static int sys_read_nb(struct trap_frame *frame)
 {
     char *buf = (char *)frame->ebx;
     unsigned int len = frame->ecx;
-    if (!buf || len > 4096) return -1;
+    if (!user_access_ok(buf, len) || len > 4096) return -1;
     return keyboard_read(buf, len);
 }
 
@@ -95,7 +110,7 @@ static int sys_read(struct trap_frame *frame)
     char *buf = (char *)frame->ebx;
     unsigned int len = frame->ecx;
 
-    if (buf == NULL || len > 4096)
+    if (!user_access_ok(buf, len) || len > 4096)
         return -1;
 
     /* Loop: consume scroll sentinel keys without returning them to user space */
@@ -183,7 +198,7 @@ static int sys_win_create(struct trap_frame *frame)
     uint32_t h        = user_stack_arg(frame, 0);
     const char *title = (const char *)user_stack_arg(frame, 4);
 
-    if (!title || w == 0 || h == 0) return -1;
+    if (!user_access_ok(title, 1) || w == 0 || h == 0) return -1;
     return gui_window_create(x, y, w, h, title);
 }
 
@@ -229,7 +244,7 @@ static int sys_win_draw_text(struct trap_frame *frame)
     uint32_t    fgcolor = user_stack_arg(frame, 4);
     uint32_t    bgcolor = user_stack_arg(frame, 8);
 
-    if (!str) return -1;
+    if (!user_access_ok(str, 1)) return -1;
     gui_window_draw_text(id, x, y, str, fgcolor, bgcolor);
     return 0;
 }
@@ -245,7 +260,7 @@ static int sys_win_poll_event(struct trap_frame *frame)
     /* EBX=id, ECX=ptr to struct gui_event in user space */
     int id = (int)frame->ebx;
     struct gui_event *ev = (struct gui_event *)frame->ecx;
-    if (!ev) return -1;
+    if (!user_access_ok(ev, sizeof(struct gui_event))) return -1;
     return gui_window_poll_event(id, ev);
 }
 
@@ -253,7 +268,7 @@ static int sys_mouse_get(struct trap_frame *frame)
 {
     /* EBX=ptr to struct { uint32_t x, y; uint8_t buttons; } in user space */
     uint32_t *buf = (uint32_t *)frame->ebx;
-    if (!buf) return -1;
+    if (!user_access_ok(buf, 3 * sizeof(uint32_t))) return -1;
     buf[0] = mouse_x;
     buf[1] = mouse_y;
     buf[2] = (uint32_t)mouse_buttons;
@@ -289,31 +304,156 @@ static int sys_kill(struct trap_frame *frame)
 
 static int sys_exec(struct trap_frame *frame)
 {
-    unsigned int mod_idx = frame->ebx;
+    /* EBX = pointer to path string in user space */
+    const char *path = (const char *)frame->ebx;
+    if (!user_access_ok(path, 1)) return -1;
 
-    if (!mb_info || mod_idx >= mb_info->mods_count) {
-        printk("exec: invalid module index %d (mods_count=%ld)\n",
-               mod_idx, mb_info ? mb_info->mods_count : 0);
+    uint32_t elf_size = 0;
+    const void *elf_data = initrd_get_file(path, &elf_size);
+    if (!elf_data) {
+        printk("exec: '%s' not found in VFS\n", path);
         return -1;
     }
 
-    struct multiboot_mod_entry *mods =
-        (struct multiboot_mod_entry *)mb_info->mods_addr;
-    struct multiboot_mod_entry *mod = &mods[mod_idx];
-    uint32_t mod_size = mod->mod_end - mod->mod_start;
-
-    /* Allocate a task struct from the kernel heap */
     struct task *t = (struct task *)kmalloc(sizeof(struct task));
     if (!t) {
         printk("exec: out of memory\n");
         return -1;
     }
 
-    create_elf_task(t, "user_task", 5,
-                    (const void *)mod->mod_start, mod_size);
+    /* Use the basename as the task name */
+    const char *name = path;
+    for (const char *s = path; *s; s++)
+        if (*s == '/') name = s + 1;
 
-    printk("exec: spawned module %d as pid %d\n", mod_idx, t->pid);
+    create_elf_task(t, (char *)name, 5, elf_data, elf_size);
+    printk("exec: spawned '%s' as pid %d\n", name, t->pid);
     return (int)t->pid;
+}
+
+/* ── VFS syscalls ─────────────────────────────────────────────────────────── */
+
+/* Allocate the lowest available fd in the running task. Returns -1 if full. */
+static int fd_alloc(struct vfs_node *node)
+{
+    for (int i = 0; i < VFS_FD_MAX; i++) {
+        if (!running_task->fds[i].open) {
+            running_task->fds[i].open    = true;
+            running_task->fds[i].node    = node;
+            running_task->fds[i].offset  = 0;
+            running_task->fds[i].dir_idx = 0;
+            return i;
+        }
+    }
+    return -1;
+}
+
+static int sys_open(struct trap_frame *frame)
+{
+    const char *path = (const char *)frame->ebx;
+    if (!user_access_ok(path, 1)) return -1;
+
+    struct vfs_node *node = vfs_lookup(path);
+    if (!node) return -1;
+
+    return fd_alloc(node);
+}
+
+static int sys_close(struct trap_frame *frame)
+{
+    int fd = (int)frame->ebx;
+    if (fd < 0 || fd >= VFS_FD_MAX) return -1;
+    if (!running_task->fds[fd].open) return -1;
+    running_task->fds[fd].open = false;
+    running_task->fds[fd].node = NULL;
+    return 0;
+}
+
+static int sys_read_fd(struct trap_frame *frame)
+{
+    int      fd  = (int)frame->ebx;
+    void    *buf = (void *)frame->ecx;
+    uint32_t len = frame->edx;
+
+    if (fd < 0 || fd >= VFS_FD_MAX) return -1;
+    if (!running_task->fds[fd].open) return -1;
+    if (!user_access_ok(buf, len)) return -1;
+
+    struct vfs_fd *vfd = &running_task->fds[fd];
+    if (!(vfd->node->flags & VFS_FILE)) return -1;
+
+    uint32_t n = vfs_read(vfd->node, vfd->offset, len, buf);
+    vfd->offset += n;
+    return (int)n;
+}
+
+static int sys_lseek(struct trap_frame *frame)
+{
+    int      fd     = (int)frame->ebx;
+    uint32_t offset = frame->ecx;
+    int      whence = (int)frame->edx;
+
+    if (fd < 0 || fd >= VFS_FD_MAX) return -1;
+    if (!running_task->fds[fd].open) return -1;
+
+    struct vfs_fd *vfd = &running_task->fds[fd];
+    if (!(vfd->node->flags & VFS_FILE)) return -1;
+
+    uint32_t new_off;
+    if (whence == 0)      new_off = offset;               /* SEEK_SET */
+    else if (whence == 1) new_off = vfd->offset + offset; /* SEEK_CUR */
+    else if (whence == 2) new_off = vfd->node->size + offset; /* SEEK_END */
+    else return -1;
+
+    if (new_off > vfd->node->size) new_off = vfd->node->size;
+    vfd->offset = new_off;
+    return (int)new_off;
+}
+
+static int sys_readdir(struct trap_frame *frame)
+{
+    int fd = (int)frame->ebx;
+    struct vfs_dirent *out = (struct vfs_dirent *)frame->ecx;
+
+    if (fd < 0 || fd >= VFS_FD_MAX) return -1;
+    if (!running_task->fds[fd].open) return -1;
+    if (!user_access_ok(out, sizeof(struct vfs_dirent))) return -1;
+
+    struct vfs_fd *vfd = &running_task->fds[fd];
+    if (!(vfd->node->flags & VFS_DIR)) return -1;
+
+    struct vfs_node *child = vfs_readdir(vfd->node, vfd->dir_idx);
+    if (!child) return 0; /* end of directory */
+
+    vfd->dir_idx++;
+    /* fill dirent */
+    uint32_t nlen = (uint32_t)strlen(child->name);
+    if (nlen >= VFS_NAME_MAX) nlen = VFS_NAME_MAX - 1;
+    memcpy(out->name, child->name, nlen);
+    out->name[nlen] = '\0';
+    out->inode = child->inode;
+    out->type  = child->flags;
+    return 1;
+}
+
+static int sys_stat(struct trap_frame *frame)
+{
+    const char *path = (const char *)frame->ebx;
+    struct vfs_stat *out = (struct vfs_stat *)frame->ecx;
+
+    if (!user_access_ok(path, 1)) return -1;
+    if (!user_access_ok(out, sizeof(struct vfs_stat))) return -1;
+
+    return vfs_stat(path, out);
+}
+
+static int sys_mount(struct trap_frame *frame)
+{
+    (void)frame;
+    /* Print VFS mount information to the kernel console */
+    printk("mount:\n");
+    printk("  / (initrd, cpio, ro)\n");
+    return 0;
 }
 
 /* ── dispatch ─────────────────────────────────────────────────────────────── */
@@ -385,6 +525,27 @@ void syscall_handler(struct trap_frame *frame)
         break;
     case SYS_READ_NB:
         ret = sys_read_nb(frame);
+        break;
+    case SYS_OPEN:
+        ret = sys_open(frame);
+        break;
+    case SYS_CLOSE:
+        ret = sys_close(frame);
+        break;
+    case SYS_READ_FD:
+        ret = sys_read_fd(frame);
+        break;
+    case SYS_LSEEK:
+        ret = sys_lseek(frame);
+        break;
+    case SYS_READDIR:
+        ret = sys_readdir(frame);
+        break;
+    case SYS_STAT:
+        ret = sys_stat(frame);
+        break;
+    case SYS_MOUNT:
+        ret = sys_mount(frame);
         break;
     default:
         printk("unknown syscall %d from pid %d\n",

@@ -32,8 +32,9 @@ struct window {
     char        title[64];
 
     /* Per-window backbuffer for the client area only (w × (h - TITLE_HEIGHT) pixels) */
-    uint32_t   *backbuffer;     /* allocated from kernel frames, NULL if not ready */
+    uint32_t   *backbuffer;     /* allocated from PMM frames, NULL if not ready */
     uint32_t    bb_w, bb_h;     /* dimensions backbuffer was allocated at */
+    uint32_t    bb_nframes;     /* number of PMM frames backing backbuffer */
 
     bool        visible;
     bool        focused;
