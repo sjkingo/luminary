@@ -32,3 +32,4 @@ void real_panic(char *msg, char const *file, int line, char const *func)
 
 /* in cpu.c */
 void init_cpu(void);
+void cpu_reset_fault_counter(void);

@@ -35,10 +35,11 @@ docs/
 
 - Compiler: `i686-elf-gcc -std=gnu99 -ffreestanding -g`
 - Assembler: `i686-elf-gcc` (GAS syntax)
-- Active build defines: `-DUSE_SERIAL`
-- Available defines: `-DDEBUG` (heap tracking), `-DTURTLE` (1Hz scheduling), `-DUSE_SERIAL`
+- Active build defines: `-DDEBUG -DUSE_SERIAL`
+- Available defines: `-DDEBUG` (heap tracking, debug serial output via `DBGK()`), `-DTURTLE` (1Hz scheduling), `-DUSE_SERIAL`
 - `src/cpu/mkvectors.py` generates `vectors.S` (256 interrupt stubs)
 - `tools/make_version_h.sh` runs `git describe` to generate `version.h`
+- Two-pass build for kernel symbol table: pass 1 links without `symtab_gen.o` to get stable addresses, `tools/gen_symtab.sh` runs `nm`+`addr2line` to emit `kernel/symtab_gen.c`, pass 2 links the final binary with symbol data included for stack traces
 
 ### Make Targets
 
@@ -54,11 +55,26 @@ docs/
 
 ## Memory Model
 
-The kernel is identity-mapped: virtual == physical for the first 8MB (kernel, heap, VGA, low memory) and the VBE framebuffer region. Paging is enabled in `init_vmm()`.
+The kernel identity-maps the first 16MB (virtual == physical), covering the kernel image, stack, heap, VGA, and the entirety of ZONE_LOW (which spans 1MB–16MB). Paging is enabled in `init_vmm()`.
+
+All structural VMM frames — page directories, page tables — are allocated from ZONE_LOW, which means they are always within the identity-mapped region and directly accessible by physical address. User data frames are allocated from ZONE_ANY (above 16MB) and are transiently mapped/unmapped when `vmm_clone_page_dir` needs to copy them.
 
 Each user task gets its own page directory. `vmm_create_page_dir()` allocates a new directory that inherits all kernel PDEs by reference. User space spans `0x01000000–0xC0000000`; the user stack lives at `0xBFFFF000`.
 
-`vmm_alloc_pages(n)` provides a kernel virtual allocator: it maps N physical frames (which need not be contiguous) to a contiguous virtual range starting at `0xC0000000`. Page tables for both `0–128MB` and `0xC0000000–0xC3FFFFFF` are pre-allocated in `init_vmm()` before paging is enabled to avoid the chicken-and-egg problem of allocating a PT frame that isn't yet mapped.
+### PMM zones
+
+The physical memory manager uses two allocation zones to prevent fragmentation from polluting contiguous-frame requirements:
+
+- **ZONE_LOW** (`0x00100000–0x01000000`, ~15MB): reserved for physically contiguous allocations — the GUI back buffer, future DMA. Scanned high-to-low within the zone to preserve low addresses for runs. `pmm_alloc_contiguous(n)` allocates n contiguous frames from this zone.
+- **ZONE_ANY** (`0x01000000` and above): general purpose — task stacks, page tables, ELF segments. First-fit, low-to-high. Falls back to ZONE_LOW for single-frame allocations if exhausted.
+
+PMM is initialised from the Multiboot memory map (`mmap_addr`/`mmap_length`), not the `mem_upper` field. All frames start marked used; only `MEMORY_TYPE_RAM` regions are freed. This correctly handles sparse memory maps and removes the previous 128MB limit (bitmap is 128KB in BSS, supports up to 4GB).
+
+### VMM kernel virtual allocator
+
+`vmm_alloc_pages(n)` maps N physical frames (non-contiguous) to a contiguous virtual range starting at `0xC0000000`. Uses a 64-entry free-list so `vmm_free_pages()` reclaims virtual address space for reuse. Falls back to a bump allocator when the free-list has no suitable range.
+
+Page tables for all managed physical memory (driven by `pmm_total_frames()`) and for `0xC0000000–0xCFFFFFFF` (256MB of kernel virtual space, 64 PDEs) are pre-allocated in `init_vmm()` before paging is enabled to avoid the chicken-and-egg problem of needing a mapped PT frame to map a PT frame.
 
 ## Scheduling
 
@@ -68,11 +84,17 @@ Priority-based preemptive scheduler with dynamic aging. Tasks have a static prio
 
 Tasks are created with per-task 4KB kernel stacks and synthetic trap frames for initial context switching via `trapret`. Context switches swap CR3 (page directory) and update TSS esp0.
 
+## Heap
+
+`kmalloc`/`kfree` are backed by a slab allocator with 8 size classes: 32, 64, 128, 256, 512, 1024, 2048, 4096 bytes. Each class maintains up to 64 4KB PMM pages; within each page, slots are tracked by a 128-bit bitmap. Allocations larger than 4096 bytes go to an overflow list (up to 64 entries) backed by `vmm_alloc_pages`. With `-DDEBUG`, each alloc/free prints the call site and slab class to serial.
+
 Init (PID 1) is loaded from the initrd and respawned automatically if killed — analogous to Unix PID 1. `task_fork()` does a full address space copy (no CoW). `task_exec()` replaces the calling task's address space in-place.
 
 ## Trap Handling
 
 All 256 interrupt vectors go through `alltraps` in `traps.S`, which saves the full register state (with magic cookie `0xc0ffee` for stack validation) and calls `trap_handler()` in C. On return, `alltraps` checks `prev_task` to determine if a context switch is needed, then does `iret`. Syscalls use vector `0x80` with a ring 3 gate.
+
+Unhandled CPU exceptions call `dump_trap_frame()` which prints registers and walks the EBP chain for a kernel stack trace, resolving addresses to `function (file:line)` via the embedded symbol table. User-mode exceptions kill the offending task rather than panicking. A global consecutive-fault counter triggers a kernel panic if more than 5 faults fire without a clean exec or exit in between.
 
 ## Filesystem
 
@@ -95,13 +117,13 @@ Init spawns `/bin/sh` via fork+exec and respawns it if it exits. The shell suppo
 | PIT frequency | 1000 Hz (1 Hz if TURTLE) | cpu.c |
 | IRQ base vector | 32 | x86.h |
 | Trap magic | 0xc0ffee | x86.h |
-| Heap block size | 1024 bytes | heap.h |
-| Heap max blocks | 1024 (1MB total) | heap.h |
+| Slab size classes | 8 (32–4096 bytes) | heap.h |
+| Max slabs per class | 64 pages | heap.c |
 | Idle task PID | 0 | task.h |
 | Init task PID | 1 | task.h |
 | Max priority | 10 | sched.h |
 | Page size | 4096 bytes | pmm.h |
-| Max physical frames | 32768 (128MB) | pmm.c |
+| Max physical frames | 1M (4GB) | pmm.c |
 | User space start | 0x01000000 | vmm.h |
 | User space end | 0xC0000000 | vmm.h |
 | User stack top | 0xBFFFF000 | vmm.h |

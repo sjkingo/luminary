@@ -6,6 +6,7 @@
 #include "cpu/x86.h"
 #include "kernel/kernel.h"
 #include "kernel/sched.h"
+#include "kernel/symtab.h"
 #include "kernel/syscall.h"
 #include "kernel/task.h"
 
@@ -146,6 +147,30 @@ void init_cpu(void)
 #endif
 }
 
+/* Walk the kernel call stack from ebp, printing up to max_frames entries.
+ * Stops when EBP is 0 or outside the kernel code range. */
+static void stack_trace_from(uint32_t ebp, int max_frames)
+{
+    /* Kernel text lives from 0x100000 up to ~0xC0000000.
+     * We use a conservative upper bound to avoid chasing garbage. */
+    printk("Kernel stack trace:\n");
+    for (int i = 0; i < max_frames && ebp != 0; i++) {
+        uint32_t *frame = (uint32_t *)ebp;
+        uint32_t ret_eip = frame[1];
+
+        if (ret_eip < 0x100000 || ret_eip >= 0xC0000000u)
+            break;
+
+        const struct ksym *sym = ksym_lookup(ret_eip);
+        if (sym)
+            printk("  #%d 0x%08lx in %s\n", i, ret_eip, sym->name);
+        else
+            printk("  #%d 0x%08lx in ???\n", i, ret_eip);
+
+        ebp = frame[0];
+    }
+}
+
 void dump_trap_frame(struct trap_frame *frame)
 {
     printk("\n");
@@ -179,6 +204,29 @@ void dump_trap_frame(struct trap_frame *frame)
     }
     printk(" ] PE=%d PG=%d\n", in_protected_mode(), is_paging_enabled());
     printk("\n");
+
+    /* For kernel-mode exceptions, walk the kernel EBP chain.
+     * For user-mode exceptions, walk the kernel stack we're currently on
+     * (frame->ebp is the user EBP which is meaningless here). */
+    if ((frame->cs & 0x3) != 3) {
+        /* Kernel exception: EBP saved in pushal is the kernel EBP */
+        stack_trace_from(frame->ebp, 16);
+    } else {
+        /* User exception: walk from our own EBP to show kernel path to fault */
+        uint32_t cur_ebp;
+        asm volatile("mov %%ebp, %0" : "=r"(cur_ebp));
+        stack_trace_from(cur_ebp, 16);
+    }
+    printk("\n");
+}
+
+#define MAX_CONSECUTIVE_FAULTS 5
+static int consecutive_faults = 0;
+
+/* Called from syscall.c when a task successfully execs or exits cleanly */
+void cpu_reset_fault_counter(void)
+{
+    consecutive_faults = 0;
 }
 
 void trap_handler(struct trap_frame *frame)
@@ -198,6 +246,12 @@ void trap_handler(struct trap_frame *frame)
     }
 
 exc_handler:
+    consecutive_faults++;
+    if (consecutive_faults > MAX_CONSECUTIVE_FAULTS) {
+        printk("fault limit reached (%d consecutive faults)\n", consecutive_faults);
+        panic("too many consecutive faults");
+    }
+
     dump_trap_frame(frame);
 
     /* page fault: decode CR2 and error code bits */

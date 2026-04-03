@@ -2,7 +2,7 @@
 KERNEL_BIN=	kernel.bin
 INITRD_IMG=	../initrd.img
 EMULATOR=	qemu-system-i386
-QEMU_ARGS=	-net nic,model=rtl8139 -net user -serial file:/tmp/luminary.log #-nographic
+QEMU_ARGS=	-m 512 -net nic,model=rtl8139 -net user -serial file:/tmp/luminary.log #-nographic
 #DEFINES=	-DDEBUG -DTURTLE -DUSE_SERIAL
 DEFINES=	-DDEBUG -DUSE_SERIAL
 
@@ -25,6 +25,22 @@ include pci/Makefile.mk
 
 .PHONY: all
 all: $(KERNEL_BIN) initrd
+
+NM=		$(CROSS)nm
+ADDR2LINE=	$(CROSS)addr2line
+
+# Two-pass build to embed symbol names.
+# Pass 1: link everything except symtab_gen.o to get stable symbol addresses.
+# Generate symtab_gen.c from nm output, compile it, then final link.
+KERNEL_OBJS_NO_SYMS = $(filter-out kernel/symtab_gen.o kernel/symtab.o, $(KERNEL_OBJS))
+
+kernel/symtab_gen.c: $(KERNEL_OBJS_NO_SYMS) linker.ld
+	$(CC) $(ARCH) $(LDFLAGS) -Wl,--unresolved-symbols=ignore-all -o kernel.bin.pass1 $(KERNEL_OBJS_NO_SYMS) 2>/dev/null || true
+	../tools/gen_symtab.sh $(NM) $(ADDR2LINE) kernel.bin.pass1 kernel/symtab_gen.c
+	rm -f kernel.bin.pass1
+
+kernel/symtab_gen.o: kernel/symtab_gen.c
+	$(CC) $(CFLAGS) -c kernel/symtab_gen.c -o kernel/symtab_gen.o
 
 $(KERNEL_BIN): linker.ld $(KERNEL_OBJS)
 	$(CC) $(ARCH) $(LDFLAGS) -o $@ $(KERNEL_OBJS)
@@ -73,6 +89,7 @@ gdb:
 .PHONY: clean
 clean:
 	rm -f $(KERNEL_OBJS) $(KERNEL_OBJS:.o=.d) $(KERNEL_BIN) core.* cpu/vectors.S version.h
+	rm -f kernel/symtab_gen.c kernel/symtab_gen.o kernel/symtab_gen.d kernel.bin.pass1
 	rm -f $(INITRD_IMG)
 	make -C ../grub2 clean
 	make -C ../userland clean

@@ -31,6 +31,8 @@ struct task {
     int          wait_pid;      /* pid this task is blocked waiting for (-1 = not waiting) */
     bool         wait_done;     /* set true when the waited-on child has exited */
 
+    unsigned int fault_count;   /* consecutive CPU exceptions; panic at MAX_TASK_FAULTS */
+
     struct task *prev, *next;
 };
 

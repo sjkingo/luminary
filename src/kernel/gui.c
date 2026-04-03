@@ -321,8 +321,9 @@ static inline uint32_t client_w(struct window *w)
  * Window backbuffer allocation (PMM frames, identity-mapped)
  * ═══════════════════════════════════════════════════════════════════════════ */
 
-/* Allocate contiguous PMM frames for a backbuffer of cw×ch pixels.
- * Maps each frame into the kernel page directory.
+/* Allocate a backbuffer of cw×ch pixels via vmm_alloc_pages.
+ * Physical frames need not be contiguous; they are mapped to a
+ * contiguous virtual range in the kernel virtual allocator space.
  * Returns pointer to the buffer, or NULL on failure.
  * Sets *nframes_out to the number of frames allocated. */
 static uint32_t *bb_alloc(uint32_t cw, uint32_t ch, uint32_t *nframes_out)
@@ -1260,30 +1261,24 @@ void init_gui(void)
     fb_depth = mode->bpp;
     fb_bpp   = fb_depth / 8;
 
-    /* Allocate the back buffer now, while PMM is unfragmented, so frames
-     * are physically contiguous and identity-mapped (fast memcpy). */
+    /* Allocate the back buffer from ZONE_LOW while PMM is unfragmented.
+     * pmm_alloc_contiguous guarantees physically contiguous frames, which
+     * are also identity-mapped (virtual == physical), giving fast memcpy. */
     uint32_t back_size = (uint32_t)fb_h * fb_pitch;
     uint32_t nframes   = (back_size + PAGE_SIZE - 1) / PAGE_SIZE;
-    uint32_t first     = pmm_alloc_frame();
+    uint32_t first     = pmm_alloc_contiguous(nframes);
     if (first) {
-        vmm_map_page(first, first, PTE_PRESENT | PTE_WRITE);
-        uint32_t ok = 1;
-        for (uint32_t i = 1; i < nframes; i++) {
-            uint32_t f = pmm_alloc_frame();
-            if (f != first + i * PAGE_SIZE) { ok = 0; break; }
-            vmm_map_page(f, f, PTE_PRESENT | PTE_WRITE);
-        }
-        if (ok) {
-            back = (char *)first;
-            back_nframes = nframes;
-            DBGK("gui", "back buffer reserved at 0x%lx (%ld KB)\n",
-                 first, back_size / 1024);
-        } else {
-            /* Shouldn't happen this early, but fall back gracefully */
-            back = NULL;
-            back_nframes = 0;
-            DBGK("gui", "back buffer frames not contiguous\n");
-        }
+        for (uint32_t i = 0; i < nframes; i++)
+            vmm_map_page(first + i * PAGE_SIZE, first + i * PAGE_SIZE,
+                         PTE_PRESENT | PTE_WRITE);
+        back = (char *)first;
+        back_nframes = nframes;
+        DBGK("gui", "back buffer reserved at 0x%lx (%ld KB)\n",
+             first, back_size / 1024);
+    } else {
+        back = NULL;
+        back_nframes = 0;
+        DBGK("gui", "back buffer: pmm_alloc_contiguous failed, GUI degraded\n");
     }
 
     memset(win_pool, 0, sizeof(win_pool));

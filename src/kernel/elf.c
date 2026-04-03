@@ -114,8 +114,10 @@ uint32_t elf_load(const void *elf_data, uint32_t elf_size, uint32_t page_dir,
 
         for (uint32_t vaddr = seg_start; vaddr < seg_end; vaddr += PAGE_SIZE) {
             uint32_t frame = pmm_alloc_frame();
-            vmm_map_page(frame, frame, PTE_PRESENT | PTE_WRITE);
-            memset((void *)frame, 0, PAGE_SIZE);
+
+            /* Map frame temporarily into kernel virtual space for zeroing/copy */
+            void *kp = vmm_kmap(frame);
+            memset(kp, 0, PAGE_SIZE);
 
             uint32_t page_off_start = vaddr;
             uint32_t page_off_end = vaddr + PAGE_SIZE;
@@ -128,13 +130,12 @@ uint32_t elf_load(const void *elf_data, uint32_t elf_size, uint32_t page_dir,
             if (copy_start < copy_end) {
                 uint32_t file_offset = phdr->p_offset + (copy_start - phdr->p_vaddr);
                 uint32_t dest_offset = copy_start - vaddr;
-                memcpy((void *)(frame + dest_offset),
+                memcpy((uint8_t *)kp + dest_offset,
                        base + file_offset,
                        copy_end - copy_start);
             }
 
-            /* Leave frame identity-mapped in the kernel directory so that
-             * vmm_clone_page_dir() can read it later without faulting. */
+            vmm_kunmap(kp);
             vmm_map_page_in(page_dir, vaddr, frame, flags);
             DBGK("elf", "  mapped vaddr=0x%lx -> frame=0x%lx\n", vaddr, frame);
         }
@@ -155,9 +156,9 @@ uint32_t elf_load(const void *elf_data, uint32_t elf_size, uint32_t page_dir,
     uint32_t stack_top = USER_STACK_TOP + PAGE_SIZE; /* one past top page base */
     for (int i = 0; i < USER_STACK_PAGES; i++) {
         uint32_t stack_frame = pmm_alloc_frame();
-        vmm_map_page(stack_frame, stack_frame, PTE_PRESENT | PTE_WRITE);
-        memset((void *)stack_frame, 0, PAGE_SIZE);
-        /* Leave stack_frame identity-mapped in the kernel directory. */
+        void *kp = vmm_kmap(stack_frame);
+        memset(kp, 0, PAGE_SIZE);
+        vmm_kunmap(kp);
         uint32_t stack_vaddr = stack_top - (uint32_t)(i + 1) * PAGE_SIZE;
         vmm_map_page_in(page_dir, stack_vaddr, stack_frame,
                         PTE_PRESENT | PTE_WRITE | PTE_USER);
@@ -218,9 +219,9 @@ uint32_t elf_load(const void *elf_data, uint32_t elf_size, uint32_t page_dir,
     DBGK("elf", "WRITE_USER32: vaddr=0x%lx val=0x%lx\n", \
          (uint32_t)(vaddr_arg), (uint32_t)(val_arg)); \
     resolve_uva((dir_phys_arg), (vaddr_arg), &_frame, &_off); \
-    vmm_map_page(_frame, _frame, PTE_PRESENT | PTE_WRITE); \
-    *(uint32_t *)(_frame + _off) = (uint32_t)(val_arg); \
-    vmm_unmap_page(_frame); \
+    void *_kp = vmm_kmap(_frame); \
+    *(uint32_t *)((uint8_t *)_kp + _off) = (uint32_t)(val_arg); \
+    vmm_kunmap(_kp); \
 } while(0)
 
     /* Write the string data to the user stack pages */
@@ -236,11 +237,11 @@ uint32_t elf_load(const void *elf_data, uint32_t elf_size, uint32_t page_dir,
             resolve_uva(page_dir, dst_virt & 0xFFFFF000, &frame, &off);
             uint32_t page_off = dst_virt & 0xFFF;
 
-            vmm_map_page(frame, frame, PTE_PRESENT | PTE_WRITE);
+            void *kp = vmm_kmap(frame);
             uint32_t can_write = PAGE_SIZE - page_off;
             if (can_write > remaining) can_write = remaining;
-            memcpy((void *)(frame + page_off), scratch + src_off, can_write);
-            vmm_unmap_page(frame);
+            memcpy((uint8_t *)kp + page_off, scratch + src_off, can_write);
+            vmm_kunmap(kp);
 
             dst_virt += can_write;
             src_off += can_write;

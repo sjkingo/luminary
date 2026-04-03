@@ -226,18 +226,18 @@ void create_user_task(struct task *t, char *name, int prio,
 
     /* Allocate a physical frame for user code and copy it there */
     uint32_t code_frame = pmm_alloc_frame();
-    vmm_map_page(code_frame, code_frame, PTE_PRESENT | PTE_WRITE);
-    memcpy((void *)code_frame, code, code_size);
-    vmm_unmap_page(code_frame);
+    void *kp_code = vmm_kmap(code_frame);
+    memcpy(kp_code, code, code_size);
+    vmm_kunmap(kp_code);
     /* Map it at USER_SPACE_START in the task's address space */
     vmm_map_page_in(t->page_dir_phys, USER_SPACE_START, code_frame,
                     PTE_PRESENT | PTE_USER);
 
     /* Allocate a physical frame for user stack */
     uint32_t stack_frame = pmm_alloc_frame();
-    vmm_map_page(stack_frame, stack_frame, PTE_PRESENT | PTE_WRITE);
-    memset((void *)stack_frame, 0, PAGE_SIZE);
-    vmm_unmap_page(stack_frame);
+    void *kp_stack = vmm_kmap(stack_frame);
+    memset(kp_stack, 0, PAGE_SIZE);
+    vmm_kunmap(kp_stack);
     /* Map at USER_STACK_TOP - PAGE_SIZE .. USER_STACK_TOP */
     vmm_map_page_in(t->page_dir_phys, USER_STACK_TOP - PAGE_SIZE, stack_frame,
                     PTE_PRESENT | PTE_WRITE | PTE_USER);
@@ -455,10 +455,9 @@ struct task *task_fork(struct trap_frame *frame)
     child->prev   = NULL;
     child->next   = NULL;
 
-    /* Deep-copy the address space */
-    child->page_dir_phys = vmm_clone_page_dir(running_task->page_dir_phys);
-
-    /* Allocate a new kernel stack and copy the current one */
+    /* Allocate the child's kernel stack BEFORE cloning the page directory,
+     * so the new slab mapping is in the kernel page directory at clone time
+     * and the child's copy inherits it. */
     uint8_t *kstack = (uint8_t *)kmalloc(TASK_STACK_SIZE);
     if (!kstack) {
         kfree(child);
@@ -466,6 +465,9 @@ struct task *task_fork(struct trap_frame *frame)
         printk("fork: out of memory for kernel stack\n");
         return NULL;
     }
+
+    /* Deep-copy the address space (kernel page dir now includes kstack mapping) */
+    child->page_dir_phys = vmm_clone_page_dir(running_task->page_dir_phys);
     uint8_t *parent_kstack = (uint8_t *)running_task->stack_base;
     memcpy(kstack, parent_kstack, TASK_STACK_SIZE);
 
@@ -487,9 +489,43 @@ struct task *task_fork(struct trap_frame *frame)
      * The trap frame is embedded in the kernel stack, so we
      * find it at the same offset as in the parent's stack. */
     struct trap_frame *child_frame = (struct trap_frame *)child->esp;
-    DBGK("task", "fork: child_frame->ds=0x%x magic=0x%x eax=0x%x\n",
-         child_frame->ds, child_frame->magic, child_frame->eax);
+    DBGK("task", "fork: child_frame->ds=0x%x magic=0x%x eax=0x%x eip=0x%x cs=0x%x uesp=0x%x\n",
+         child_frame->ds, child_frame->magic, child_frame->eax,
+         child_frame->eip, child_frame->cs, child_frame->uesp);
     child_frame->eax = 0;
+
+    /* Debug: peek at top of child's and parent's user stack */
+    {
+        uint32_t uesp = child_frame->uesp;
+        uint32_t pdi = uesp >> 22;
+        uint32_t pti = (uesp >> 12) & 0x3FF;
+        uint32_t off = uesp & 0xFFF;
+        uint32_t *cdir = (uint32_t *)child->page_dir_phys;
+        uint32_t *pdir = (uint32_t *)running_task->page_dir_phys;
+        if (cdir[pdi] & 1) {
+            uint32_t *cpt = (uint32_t *)(cdir[pdi] & 0xFFFFF000);
+            uint32_t cframe = cpt[pti] & 0xFFFFF000;
+            void *kp = vmm_kmap(cframe);
+            uint32_t cval = *(uint32_t *)((uint8_t *)kp + off);
+            vmm_kunmap(kp);
+            DBGK("task", "fork: child  stack[0x%lx] = 0x%lx frame=0x%lx\n", uesp, cval, cframe);
+        }
+        if (pdir[pdi] & 1) {
+            uint32_t *ppt = (uint32_t *)(pdir[pdi] & 0xFFFFF000);
+            uint32_t pframe = ppt[pti] & 0xFFFFF000;
+            void *kp = vmm_kmap(pframe);
+            uint32_t pval = *(uint32_t *)((uint8_t *)kp + off);
+            vmm_kunmap(kp);
+            DBGK("task", "fork: parent stack[0x%lx] = 0x%lx frame=0x%lx\n", uesp, pval, pframe);
+        }
+    }
+
+    /* Verify child trap frame EIP just before scheduling */
+    {
+        struct trap_frame *cf = (struct trap_frame *)child->esp;
+        DBGK("task", "fork: pre-sched child_frame eip=0x%lx ds=0x%lx esp=0x%lx\n",
+             (uint32_t)cf->eip, (uint32_t)cf->ds, (uint32_t)cf->esp);
+    }
 
     /* Insert child into scheduler after parent */
     insert_task_sorted(child, child->prio_s);

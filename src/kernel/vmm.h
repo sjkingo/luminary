@@ -32,6 +32,11 @@ void vmm_unmap_page_in(uint32_t dir_phys, uint32_t virt);
 void *vmm_alloc_pages(uint32_t n);
 void  vmm_free_pages(void *virt_base, uint32_t n);
 
+/* Temporarily map/unmap a physical frame into kernel virtual address space.
+ * vmm_kmap does not allocate a physical frame; vmm_kunmap does not free it. */
+void *vmm_kmap(uint32_t phys);
+void  vmm_kunmap(void *virt);
+
 /* Clone a page directory: deep-copy all user-space mappings (PDE indices
  * covering USER_SPACE_START..USER_SPACE_END) into a new page directory.
  * Each mapped user frame is copied to a fresh physical frame.

@@ -32,15 +32,11 @@ void vmm_map_page_in(uint32_t dir_phys, uint32_t virt, uint32_t phys, uint32_t f
     uint32_t pd_index = virt >> 22;
     uint32_t pt_index = (virt >> 12) & 0x3FF;
 
-    /* Get or create page table */
+    /* Get or create page table.
+     * PT frames are allocated from ZONE_LOW so they are within the identity-mapped
+     * region and directly accessible by physical address. */
     if (!(dir[pd_index] & PTE_PRESENT)) {
-        uint32_t pt_frame = pmm_alloc_frame();
-        /* For non-kernel directories, identity-map the page table frame
-         * in the kernel directory so it's accessible. For the kernel
-         * directory itself, page tables for 0-128MB are pre-allocated
-         * during init_vmm. */
-        if (dir_phys != (uint32_t)page_directory)
-            vmm_map_page(pt_frame, pt_frame, PTE_PRESENT | PTE_WRITE);
+        uint32_t pt_frame = pmm_alloc_frame_zone(PMM_ZONE_LOW);
         memset((void *)pt_frame, 0, PAGE_SIZE);
         dir[pd_index] = pt_frame | PTE_PRESENT | PTE_WRITE | (flags & PTE_USER);
     } else if (dir_phys != (uint32_t)page_directory &&
@@ -49,8 +45,7 @@ void vmm_map_page_in(uint32_t dir_phys, uint32_t virt, uint32_t phys, uint32_t f
          * user mapping into it would corrupt all other tasks sharing that
          * table. Allocate a private copy for this task instead. */
         uint32_t kern_pt = dir[pd_index] & 0xFFFFF000;
-        uint32_t pt_frame = pmm_alloc_frame();
-        vmm_map_page(pt_frame, pt_frame, PTE_PRESENT | PTE_WRITE);
+        uint32_t pt_frame = pmm_alloc_frame_zone(PMM_ZONE_LOW);
         memcpy((void *)pt_frame, (void *)kern_pt, PAGE_SIZE);
         dir[pd_index] = pt_frame | PTE_PRESENT | PTE_WRITE | (flags & PTE_USER);
     } else if ((flags & PTE_USER) && !(dir[pd_index] & PTE_USER)) {
@@ -111,28 +106,70 @@ uint32_t vmm_get_kernel_page_dir(void)
     return (uint32_t)page_directory;
 }
 
-/* Bump allocator for kernel virtual address space above 0xC0000000.
- * This region is never used for user space or identity-mapped kernel memory. */
-#define KVIRT_BASE 0xC0000000u
+/* Kernel virtual allocator: maps physical frames to virtual addresses
+ * in the range 0xC0000000+.  Uses a free-list so vmm_free_pages()
+ * reclaims virtual address space for reuse.
+ *
+ * Free-list entries are a static array of (base, npages) pairs.
+ * On alloc: check free-list for an exact or larger range first,
+ *           then fall back to bumping kvirt_next.
+ * On free:  add the range back to the free-list; adjacent ranges
+ *           are NOT coalesced (not needed at this scale).
+ */
+#define KVIRT_BASE      0xC0000000u
+#define KVIRT_FL_MAX    64          /* max free-list entries */
+
 static uint32_t kvirt_next = KVIRT_BASE;
 
-/* Allocate n physical frames and map them at a contiguous virtual address.
- * Returns the virtual base address, or 0 on failure. */
+struct virt_range {
+    uint32_t base;
+    uint32_t npages;
+};
+
+static struct virt_range kvirt_free[KVIRT_FL_MAX];
+static uint32_t          kvirt_free_count = 0;
+
 void *vmm_alloc_pages(uint32_t n)
 {
     if (n == 0) return NULL;
-    uint32_t virt_base = kvirt_next;
+
+    /* Check free-list for a range with exactly n pages (best fit) or
+     * the smallest range >= n. */
+    uint32_t best = KVIRT_FL_MAX;
+    for (uint32_t i = 0; i < kvirt_free_count; i++) {
+        if (kvirt_free[i].npages >= n) {
+            if (best == KVIRT_FL_MAX ||
+                kvirt_free[i].npages < kvirt_free[best].npages)
+                best = i;
+        }
+    }
+
+    uint32_t virt_base;
+    if (best < KVIRT_FL_MAX) {
+        virt_base = kvirt_free[best].base;
+        if (kvirt_free[best].npages == n) {
+            /* Exact fit: remove entry */
+            kvirt_free[best] = kvirt_free[--kvirt_free_count];
+        } else {
+            /* Larger: trim the front */
+            kvirt_free[best].base   += n * PAGE_SIZE;
+            kvirt_free[best].npages -= n;
+        }
+    } else {
+        /* Bump allocator */
+        virt_base = kvirt_next;
+        kvirt_next += n * PAGE_SIZE;
+    }
+
+    /* Map physical frames into the chosen virtual range */
     for (uint32_t i = 0; i < n; i++) {
         uint32_t frame = pmm_alloc_frame();
-        if (!frame) return NULL; /* out of physical memory */
+        if (!frame) return NULL;
         vmm_map_page(virt_base + i * PAGE_SIZE, frame, PTE_PRESENT | PTE_WRITE);
     }
-    kvirt_next += n * PAGE_SIZE;
     return (void *)virt_base;
 }
 
-/* Free n pages previously allocated by vmm_alloc_pages at virt_base.
- * Unmaps and frees the underlying physical frames. */
 void vmm_free_pages(void *virt_base, uint32_t n)
 {
     uint32_t v = (uint32_t)virt_base;
@@ -141,24 +178,66 @@ void vmm_free_pages(void *virt_base, uint32_t n)
         if (phys) pmm_free_frame(phys);
         vmm_unmap_page(v + i * PAGE_SIZE);
     }
+
+    /* Return virtual range to free-list if space available */
+    if (kvirt_free_count < KVIRT_FL_MAX) {
+        kvirt_free[kvirt_free_count].base   = v;
+        kvirt_free[kvirt_free_count].npages = n;
+        kvirt_free_count++;
+    }
+    /* If free-list is full the virtual range is simply leaked —
+     * acceptable given KVIRT_FL_MAX=64 covers all realistic workloads. */
+}
+
+/* Temporary kmap pool: a fixed window of virtual pages at the top of the
+ * kernel virtual range, separate from the vmm_alloc_pages pool so that
+ * transient kmap slots can never collide with persistent allocations.
+ * KMAP_SLOTS must be a power of two; 16 slots is plenty since vmm_clone_page_dir
+ * only holds two kmaps at a time. */
+#define KMAP_BASE  0xCFF00000u   /* top of the 256MB kernel virtual range */
+#define KMAP_SLOTS 16
+
+static uint16_t kmap_used = 0;  /* bitmask of in-use slots */
+
+void *vmm_kmap(uint32_t phys)
+{
+    /* Find a free slot */
+    for (int i = 0; i < KMAP_SLOTS; i++) {
+        if (!(kmap_used & (1u << i))) {
+            kmap_used |= (1u << i);
+            uint32_t virt = KMAP_BASE + (uint32_t)i * PAGE_SIZE;
+            /* Map into whichever page directory is currently loaded (CR3),
+             * not the static kernel page_directory which may not be active. */
+            uint32_t cr3;
+            asm volatile("mov %%cr3, %0" : "=r"(cr3));
+            vmm_map_page_in(cr3, virt, phys, PTE_PRESENT | PTE_WRITE);
+            asm volatile("invlpg (%0)" : : "r"(virt) : "memory");
+            return (void *)virt;
+        }
+    }
+    panic("vmm_kmap: all slots in use");
+    return NULL;
+}
+
+void vmm_kunmap(void *virt)
+{
+    uint32_t v = (uint32_t)virt;
+    int slot = (int)((v - KMAP_BASE) / PAGE_SIZE);
+    if (slot < 0 || slot >= KMAP_SLOTS)
+        panic("vmm_kunmap: address not in kmap range");
+    uint32_t cr3;
+    asm volatile("mov %%cr3, %0" : "=r"(cr3));
+    vmm_unmap_page_in(cr3, v);
+    kmap_used &= ~(1u << slot);
 }
 
 uint32_t vmm_create_page_dir(void)
 {
-    uint32_t dir_frame = pmm_alloc_frame();
-
-    /* Identity-map the new frame so we can write to it. This is needed
-     * because pmm_alloc_frame() may return addresses beyond the
-     * initial 8MB identity-mapped region. */
-    vmm_map_page(dir_frame, dir_frame, PTE_PRESENT | PTE_WRITE);
-
+    /* Allocate from ZONE_LOW so the directory frame is within the
+     * identity-mapped region and directly accessible by physical address. */
+    uint32_t dir_frame = pmm_alloc_frame_zone(PMM_ZONE_LOW);
     uint32_t *dir = (uint32_t *)dir_frame;
-
-    /* Copy all PDEs from the kernel page directory. This shares
-     * kernel page tables by reference - any kernel mapping change
-     * is automatically visible in all task directories. */
     memcpy(dir, page_directory, PAGE_SIZE);
-
     return dir_frame;
 }
 
@@ -176,19 +255,20 @@ uint32_t vmm_clone_page_dir(uint32_t src_dir_phys)
     for (uint32_t pdi = user_pde_start; pdi < user_pde_end; pdi++) {
         if (!(src_dir[pdi] & PTE_PRESENT))
             continue;
+        if (!(src_dir[pdi] & PTE_USER))
+            continue;
 
+        /* src_pt is a kernel-allocated page table, so it's in ZONE_LOW and
+         * directly accessible. new_pt also from ZONE_LOW. User data frames
+         * (src_frame, new_frame) come from ZONE_ANY and need transient mapping. */
         uint32_t src_pt_phys = src_dir[pdi] & 0xFFFFF000;
         DBGK("vmm", "clone: pdi=%lu src_pt_phys=0x%lx\n", pdi, src_pt_phys);
-        vmm_map_page(src_pt_phys, src_pt_phys, PTE_PRESENT | PTE_WRITE);
         uint32_t *src_pt = (uint32_t *)src_pt_phys;
 
-        /* Allocate a new page table for the child */
-        uint32_t new_pt_phys = pmm_alloc_frame();
-        vmm_map_page(new_pt_phys, new_pt_phys, PTE_PRESENT | PTE_WRITE);
+        uint32_t new_pt_phys = pmm_alloc_frame_zone(PMM_ZONE_LOW);
         memset((void *)new_pt_phys, 0, PAGE_SIZE);
         uint32_t *new_pt = (uint32_t *)new_pt_phys;
 
-        /* Copy each present PTE, duplicating the underlying frame */
         for (uint32_t pti = 0; pti < 1024; pti++) {
             if (!(src_pt[pti] & PTE_PRESENT))
                 continue;
@@ -198,20 +278,14 @@ uint32_t vmm_clone_page_dir(uint32_t src_dir_phys)
 
             DBGK("vmm", "clone: pdi=%lu pti=%lu src_frame=0x%lx\n",
                  pdi, pti, src_frame);
-            /* Allocate a new frame and copy contents.
-             * src_frame may not be in the kernel identity map, so map it. */
             uint32_t new_frame = pmm_alloc_frame();
-            vmm_map_page(src_frame, src_frame, PTE_PRESENT | PTE_WRITE);
-            vmm_map_page(new_frame, new_frame, PTE_PRESENT | PTE_WRITE);
-            memcpy((void *)new_frame, (void *)src_frame, PAGE_SIZE);
-            vmm_unmap_page(new_frame);
-            vmm_unmap_page(src_frame);
-
+            void *src_kp = vmm_kmap(src_frame);
+            void *new_kp = vmm_kmap(new_frame);
+            memcpy(new_kp, src_kp, PAGE_SIZE);
+            vmm_kunmap(new_kp);
+            vmm_kunmap(src_kp);
             new_pt[pti] = new_frame | flags;
         }
-
-        vmm_unmap_page(src_pt_phys);
-        vmm_unmap_page(new_pt_phys);
 
         /* Install the new page table in the child directory */
         new_dir[pdi] = new_pt_phys | (src_dir[pdi] & 0xFFF);
@@ -225,7 +299,9 @@ void vmm_destroy_page_dir(uint32_t dir_phys)
     if (dir_phys == (uint32_t)page_directory)
         panic("vmm_destroy_page_dir: cannot destroy kernel page directory");
 
-    vmm_map_page(dir_phys, dir_phys, PTE_PRESENT | PTE_WRITE);
+    /* dir_phys is from ZONE_LOW — directly accessible. Page table frames are
+     * also from ZONE_LOW. User data frames pointed to by PTEs are from ZONE_ANY
+     * and don't need to be accessed here, only freed. */
     uint32_t *dir = (uint32_t *)dir_phys;
 
     for (int i = 0; i < 1024; i++) {
@@ -236,36 +312,28 @@ void vmm_destroy_page_dir(uint32_t dir_phys)
         if (dir[i] == page_directory[i])
             continue;
 
-        uint32_t dir_frame = dir[i] & 0xFFFFF000;
+        uint32_t dir_frame  = dir[i] & 0xFFFFF000;
         uint32_t kern_frame = page_directory[i] & 0xFFFFF000;
-
-        vmm_map_page(dir_frame, dir_frame, PTE_PRESENT | PTE_WRITE);
         uint32_t *pt = (uint32_t *)dir_frame;
 
         if ((page_directory[i] & PTE_PRESENT) && dir_frame == kern_frame) {
-            /* Same page table frame as kernel (just PDE flags differ, e.g.
-             * PTE_USER was promoted). Only free user-mapped PTEs, not the
-             * shared page table itself. */
+            /* Shared kernel page table — only free user-mapped PTEs */
             for (int j = 0; j < 1024; j++) {
-                if ((pt[j] & PTE_PRESENT) && (pt[j] & PTE_USER)) {
+                if ((pt[j] & PTE_PRESENT) && (pt[j] & PTE_USER))
                     pmm_free_frame(pt[j] & 0xFFFFF000);
-                    pt[j] = 0;
-                }
             }
-            vmm_unmap_page(dir_frame);
         } else {
-            /* Task-private page table - free all mapped frames and the
-             * table itself */
+            /* Task-private page table (from ZONE_LOW, directly accessible) —
+             * free user-mapped frames only; kernel frames are shared and
+             * must not be freed here. Then free the table itself. */
             for (int j = 0; j < 1024; j++) {
-                if (pt[j] & PTE_PRESENT)
+                if ((pt[j] & PTE_PRESENT) && (pt[j] & PTE_USER))
                     pmm_free_frame(pt[j] & 0xFFFFF000);
             }
-            vmm_unmap_page(dir_frame);
             pmm_free_frame(dir_frame);
         }
     }
 
-    vmm_unmap_page(dir_phys);
     pmm_free_frame(dir_phys);
 }
 
@@ -281,10 +349,8 @@ static void identity_map_range(uint32_t start, uint32_t end, uint32_t flags)
     start &= 0xFFFFF000;
     end = (end + PAGE_SIZE - 1) & 0xFFFFF000;
 
-    for (uint32_t addr = start; addr < end; addr += PAGE_SIZE) {
+    for (uint32_t addr = start; addr < end; addr += PAGE_SIZE)
         vmm_map_page(addr, addr, flags);
-        pmm_mark_used(addr);
-    }
 }
 
 void init_vmm(void)
@@ -292,18 +358,11 @@ void init_vmm(void)
     /* Zero the page directory */
     memset(page_directory, 0, sizeof(page_directory));
 
-    /* Mark the page directory itself as used */
-    pmm_mark_used((uint32_t)page_directory);
-
-    /* Identity-map the first 4MB (covers low memory, kernel, stack, VGA).
-     * The kernel loads at 1MB, heap starts at kernel_end + 1MB, so 4MB
-     * covers all of: BIOS data, kernel code/data/bss/stack, and most
-     * of the heap.
-     */
-    identity_map_range(0x00000000, 0x00400000, PTE_PRESENT | PTE_WRITE);
-
-    /* Identity-map 4-8MB. Covers the heap region (starts around 0x205000). */
-    identity_map_range(0x00400000, 0x00800000, PTE_PRESENT | PTE_WRITE);
+    /* Identity-map 0-16MB: covers kernel, stack, heap, VGA, and all of
+     * ZONE_LOW (0x100000-0x1000000). All structural frames (page dirs,
+     * page tables) are allocated from ZONE_LOW and must be directly
+     * accessible by physical address. */
+    identity_map_range(0x00000000, 0x01000000, PTE_PRESENT | PTE_WRITE);
 
     /* Identity-map the VBE framebuffer region if available.
      * Typically at 0xFD000000, roughly 3-4MB in size.
@@ -323,31 +382,30 @@ void init_vmm(void)
         }
     }
 
-    /* Also map the page directory and page table frames themselves.
-     * The page directory is in BSS (already covered by 0-8MB mapping).
-     * Page tables were allocated from pmm_alloc_frame() which returns
-     * frames in the 8MB+ range - those are identity-mapped because
-     * we access page tables at their physical address, and we mapped
-     * them before paging was enabled.
-     */
-
-    /* Pre-allocate page tables for the first 128MB of physical memory,
-     * plus the kernel virtual allocator region at 0xC0000000-0xC3FFFFFF
-     * (16 PDEs = 64MB, enough for back buffers and window backbuffers).
-     * Must be done before paging is enabled so PT frames are directly
-     * accessible by physical address and can be identity-mapped. */
+    /* Pre-allocate page tables for all managed physical memory, plus the
+     * kernel virtual allocator region at 0xC0000000-0xCFFFFFFF (64 PDEs =
+     * 256MB of kernel virtual space).
+     *
+     * Must be done before paging is enabled: PT frames are accessed at their
+     * physical address. PT frames come from ZONE_LOW which is within the
+     * identity-mapped range we just established above. */
     auto void prealloc_pt(uint32_t pd_index);
     auto void prealloc_pt(uint32_t pd_index) {
         if (!(page_directory[pd_index] & PTE_PRESENT)) {
-            uint32_t pt_frame = pmm_alloc_frame();
+            uint32_t pt_frame = pmm_alloc_frame_zone(PMM_ZONE_LOW);
             memset((void *)pt_frame, 0, PAGE_SIZE);
             page_directory[pd_index] = pt_frame | PTE_PRESENT | PTE_WRITE;
             vmm_map_page(pt_frame, pt_frame, PTE_PRESENT | PTE_WRITE);
         }
     }
-    for (uint32_t addr = 0; addr < 128 * 1024 * 1024; addr += 4 * 1024 * 1024)
+
+    /* Physical memory range: one PDE per 4MB, driven by pmm_total_frames() */
+    uint32_t phys_top = pmm_total_frames() * PAGE_SIZE;
+    for (uint32_t addr = 0; addr < phys_top; addr += 4 * 1024 * 1024)
         prealloc_pt(addr >> 22);
-    for (uint32_t pdi = 0xC0000000 >> 22; pdi < (0xC0000000 >> 22) + 16; pdi++)
+
+    /* Kernel virtual allocator range: 0xC0000000-0xCFFFFFFF (64 PDEs, 256MB) */
+    for (uint32_t pdi = 0xC0000000 >> 22; pdi < (0xC0000000 >> 22) + 64; pdi++)
         prealloc_pt(pdi);
 
     printk(MODULE "page directory at 0x%lx\n", (uint32_t)page_directory);

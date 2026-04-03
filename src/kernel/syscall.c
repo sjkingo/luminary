@@ -359,7 +359,10 @@ static int sys_exec(struct trap_frame *frame)
         return -1;
     }
 
-    return task_exec(elf_data, elf_size, frame, argc, kargv);
+    int r = task_exec(elf_data, elf_size, frame, argc, kargv);
+    if (r == 0)
+        cpu_reset_fault_counter();
+    return r;
 }
 
 static int sys_fork(struct trap_frame *frame)
@@ -411,6 +414,7 @@ static int sys_waitpid(struct trap_frame *frame)
 static int sys_exit_task(struct trap_frame *frame)
 {
     (void)frame;
+    cpu_reset_fault_counter();
     task_kill(running_task);
     __builtin_unreachable();
 }

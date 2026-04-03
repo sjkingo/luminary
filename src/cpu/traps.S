@@ -43,15 +43,16 @@ alltraps:
     movl TASK_PAGE_DIR_OFFSET(%eax), %ecx
     movl %ecx, %cr3
 
-    # load new task's ESP
-    movl TASK_ESP_OFFSET(%eax), %esp
-
-    # update TSS kernel stack for ring transitions
+    # update TSS kernel stack for ring transitions (before loading new ESP)
     movl TASK_STACK_BASE_OFFSET(%eax), %ecx
     addl $TASK_STACK_SIZE, %ecx
     pushl %ecx
     call tss_set_kernel_stack
     addl $4, %esp
+
+    # load new task's ESP (after all stack operations)
+    movl running_task, %eax
+    movl TASK_ESP_OFFSET(%eax), %esp
 
     # clear prev_task
     movl $0, prev_task
@@ -68,6 +69,5 @@ trapret:
 
     # throw away magic, trapno and err from the stack and return
     addl $12, %esp
-    sti
 
     iret

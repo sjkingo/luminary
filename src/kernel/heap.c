@@ -58,8 +58,8 @@ static struct slab_class classes[NUM_SLAB_CLASSES];
 #define MAX_OVERFLOW 64
 
 struct overflow_entry {
-    uint32_t phys;      /* base physical address of the first frame */
-    uint32_t nframes;   /* number of contiguous frames */
+    uint32_t virt;      /* base virtual address (from vmm_alloc_pages) */
+    uint32_t nframes;   /* number of frames allocated */
 };
 
 static struct overflow_entry overflow_table[MAX_OVERFLOW];
@@ -83,12 +83,14 @@ static int slab_grow(struct slab_class *cls)
     if (cls->n_pages >= MAX_SLABS_PER_CLASS)
         return 0;
 
-    uint32_t frame = pmm_alloc_frame(); /* panics on OOM */
-    vmm_map_page(frame, frame, PTE_PRESENT | PTE_WRITE);
-    memset((void *)frame, 0, PAGE_SIZE);
+    /* vmm_alloc_pages maps the frame into the kernel virtual range (0xC0000000+)
+     * so it never overlaps with user space virtual addresses. */
+    void *virt = vmm_alloc_pages(1);
+    if (!virt) return 0;
+    memset(virt, 0, PAGE_SIZE);
 
     struct slab_page *sp = &cls->pages[cls->n_pages++];
-    sp->phys    = frame;
+    sp->phys    = (uint32_t)virt;   /* field stores virtual addr; name kept for compat */
     sp->n_slots = PAGE_SIZE / cls->obj_size;
     sp->n_free  = sp->n_slots;
     memset(sp->bitmap, 0, sizeof(sp->bitmap)); /* all free */
@@ -131,7 +133,7 @@ void *kmalloc(uint32_t size)
         /* Find a free overflow slot */
         int slot = -1;
         for (int i = 0; i < MAX_OVERFLOW; i++) {
-            if (overflow_table[i].phys == 0) { slot = i; break; }
+            if (overflow_table[i].virt == 0) { slot = i; break; }
         }
         if (slot < 0) {
 #ifdef DEBUG
@@ -141,34 +143,22 @@ void *kmalloc(uint32_t size)
             return NULL;
         }
 
-        uint32_t first = pmm_alloc_frame(); /* panics on OOM */
-        vmm_map_page(first, first, PTE_PRESENT | PTE_WRITE);
-
-        for (uint32_t i = 1; i < nframes; i++) {
-            uint32_t f = pmm_alloc_frame();
-            if (f != first + i * PAGE_SIZE) {
-                /* Non-contiguous frames — can't satisfy the request.
-                 * Free what we managed to get and fail. */
-                pmm_free_frame(first);
-                for (uint32_t j = 1; j < i; j++)
-                    pmm_free_frame(first + j * PAGE_SIZE);
-                pmm_free_frame(f);
+        void *virt = vmm_alloc_pages(nframes);
+        if (!virt) {
 #ifdef DEBUG
-                printk(MODULE "%s:%d(%s) overflow alloc non-contiguous (size=%ld)\n",
-                       file, line, func, size);
+            printk(MODULE "%s:%d(%s) overflow alloc failed (size=%ld)\n",
+                   file, line, func, size);
 #endif
-                return NULL;
-            }
-            vmm_map_page(f, f, PTE_PRESENT | PTE_WRITE);
+            return NULL;
         }
 
-        overflow_table[slot].phys    = first;
+        overflow_table[slot].virt    = (uint32_t)virt;
         overflow_table[slot].nframes = nframes;
 #ifdef DEBUG
         printk(MODULE "%s:%d(%s) overflow alloc %ld frames at 0x%lx (size=%ld)\n",
-               file, line, func, nframes, first, size);
+               file, line, func, nframes, (uint32_t)virt, size);
 #endif
-        return (void *)first;
+        return virt;
     }
 
     struct slab_class *cls = &classes[ci];
@@ -216,10 +206,9 @@ void kfree(void *ptr)
 
     /* Check overflow table first */
     for (int i = 0; i < MAX_OVERFLOW; i++) {
-        if (overflow_table[i].phys == addr) {
-            for (uint32_t j = 0; j < overflow_table[i].nframes; j++)
-                pmm_free_frame(addr + j * PAGE_SIZE);
-            overflow_table[i].phys    = 0;
+        if (overflow_table[i].virt == addr) {
+            vmm_free_pages((void *)addr, overflow_table[i].nframes);
+            overflow_table[i].virt    = 0;
             overflow_table[i].nframes = 0;
 #ifdef DEBUG
             printk(MODULE "%s:%d(%s) overflow free at 0x%lx\n",

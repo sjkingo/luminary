@@ -131,7 +131,7 @@ void kernel_main(struct multiboot_info *mb, uint32_t start, uint32_t stack, uint
     print_startup_banner();
 
     /* physical and virtual memory */
-    init_pmm(mb_info->mem_upper);
+    init_pmm(mb_info, kernel_end);
     init_vmm();
 
     /* devices */
