@@ -185,21 +185,7 @@ next:
     if (picked != running_task) {
         prev_task = running_task;
         running_task = picked;
-#ifdef DEBUG
-        unsigned int now = (unsigned int)timekeeper.uptime_ms;
-        unsigned int ran = now - (unsigned int)prev_task->switched_in_ms;
-        printk("sched: pid %d (%s, %u ms) -> pid %d (%s)\n",
-            prev_task->pid, prev_task->name, ran,
-            running_task->pid, running_task->name);
-        running_task->switched_in_ms = now;
-#endif
     }
-#ifdef DEBUG
-    else {
-        printk("sched: pid %d (%s) continues\n",
-            picked->pid, picked->name);
-    }
-#endif
 }
 
 void init_sched(void)

@@ -57,3 +57,13 @@ char *strchr(const char *s, int c)
     }
     return (c == '\0') ? (char *)s : 0;
 }
+
+char *strncpy(char *dest, const char *src, int n)
+{
+    char *d = dest;
+    while (n-- > 0) {
+        *d = *src ? *src++ : '\0';
+        d++;
+    }
+    return dest;
+}

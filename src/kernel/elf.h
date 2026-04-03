@@ -46,9 +46,12 @@ struct elf32_phdr {
 #define PT_LOAD     1
 #define PF_W        2
 
+#define USER_STACK_PAGES 16   /* 64 KB of user stack */
+
 /* Load an ELF binary into a task's address space.
- * elf_data: pointer to the ELF file in memory
- * elf_size: size of the ELF file
- * page_dir: physical address of the task's page directory
- * Returns the entry point virtual address, or 0 on failure. */
-uint32_t elf_load(const void *elf_data, uint32_t elf_size, uint32_t page_dir);
+ * Allocates USER_STACK_PAGES pages of stack below USER_STACK_TOP.
+ * Pushes argc/argv onto the user stack (argv may be NULL if argc==0).
+ * Returns the initial stack pointer (with argc/argv set up) via *out_sp,
+ * and the entry point as the return value. Returns 0 on failure. */
+uint32_t elf_load(const void *elf_data, uint32_t elf_size, uint32_t page_dir,
+                  int argc, const char *const *argv, uint32_t *out_sp);

@@ -179,8 +179,8 @@ void *kmalloc(uint32_t size)
         void *ptr = slab_page_alloc(&cls->pages[i], cls->obj_size);
         if (ptr) {
 #ifdef DEBUG
-            printk(MODULE "%s:%d(%s) slab[%ld] alloc at 0x%lx (size=%ld)\n",
-                   file, line, func, cls->obj_size, (uint32_t)ptr, size);
+            printk_serial(MODULE "%s:%d(%s) slab[%ld] alloc at 0x%lx (size=%ld)\n",
+                          file, line, func, cls->obj_size, (uint32_t)ptr, size);
 #endif
             return ptr;
         }
@@ -189,7 +189,7 @@ void *kmalloc(uint32_t size)
     /* No free slot — grow the class */
     if (!slab_grow(cls)) {
 #ifdef DEBUG
-        printk(MODULE "%s:%d(%s) slab[%ld] grow failed (size=%ld)\n",
+        printk_serial(MODULE "%s:%d(%s) slab[%ld] grow failed (size=%ld)\n",
                file, line, func, cls->obj_size, size);
 #endif
         return NULL;
@@ -198,8 +198,8 @@ void *kmalloc(uint32_t size)
     /* Allocate from the newly added page */
     void *ptr = slab_page_alloc(&cls->pages[cls->n_pages - 1], cls->obj_size);
 #ifdef DEBUG
-    printk(MODULE "%s:%d(%s) slab[%ld] alloc (new page) at 0x%lx (size=%ld)\n",
-           file, line, func, cls->obj_size, (uint32_t)ptr, size);
+    printk_serial(MODULE "%s:%d(%s) slab[%ld] alloc (new page) at 0x%lx (size=%ld)\n",
+                  file, line, func, cls->obj_size, (uint32_t)ptr, size);
 #endif
     return ptr;
 }
@@ -258,7 +258,7 @@ void kfree(void *ptr)
             sp->bitmap[w] &= ~(1u << bit);
             sp->n_free++;
 #ifdef DEBUG
-            printk(MODULE "%s:%d(%s) slab[%ld] free slot %ld at 0x%lx\n",
+            printk_serial(MODULE "%s:%d(%s) slab[%ld] free slot %ld at 0x%lx\n",
                    file, line, func, cls->obj_size, slot, addr);
 #endif
             return;

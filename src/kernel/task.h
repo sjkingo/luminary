@@ -1,13 +1,16 @@
 #pragma once
 
+#include <stdbool.h>
+#include <stdint.h>
 #include "kernel/vfs.h"
+#include "cpu/traps.h"
 
 /* ── per-task open file descriptor table ─────────────────────────────────── */
 /* Stored inline in struct task to avoid heap allocation on task creation.   */
 
 /* A task to be scheduled in the system */
 struct task {
-    char *name;
+    char name[32];
     unsigned int pid;
     unsigned int created; /* ms since boot */
 
@@ -24,15 +27,19 @@ struct task {
     /* Open file descriptor table */
     struct vfs_fd fds[VFS_FD_MAX];
 
+    unsigned int ppid;          /* parent PID (0 if no parent) */
+    int          wait_pid;      /* pid this task is blocked waiting for (-1 = not waiting) */
+    bool         wait_done;     /* set true when the waited-on child has exited */
+
     struct task *prev, *next;
 };
 
 #define PID_IDLE                0
 #define PID_INIT                1
 #define TASK_STACK_SIZE         4096
-#define TASK_ESP_OFFSET         24  /* byte offset of esp in struct task */
-#define TASK_PAGE_DIR_OFFSET    28  /* byte offset of page_dir_phys in struct task */
-#define TASK_STACK_BASE_OFFSET  32  /* byte offset of stack_base in struct task */
+#define TASK_ESP_OFFSET         52  /* byte offset of esp in struct task */
+#define TASK_PAGE_DIR_OFFSET    56  /* byte offset of page_dir_phys in struct task */
+#define TASK_STACK_BASE_OFFSET  60  /* byte offset of stack_base in struct task */
 
 /* Initialise the task subsystem */
 void init_task(void);
@@ -61,3 +68,14 @@ void spawn_init(const void *elf_data, unsigned int elf_size);
  * currently running task, this function does not return.
  * If the killed task is init, it is respawned automatically. */
 void task_kill(struct task *t);
+
+/* Fork the current task: clone address space, return new task ptr.
+ * Child gets EAX=0 in its trap frame. Parent gets child PID returned. */
+struct task *task_fork(struct trap_frame *frame);
+
+/* Exec-in-place: replace the running task's address space with a new ELF.
+ * Frees old page directory, loads new ELF, resets trap frame.
+ * argc/argv are set up on the new user stack.
+ * Returns 0 on success, -1 on failure (task continues with old image on failure). */
+int task_exec(const void *elf_data, uint32_t elf_size, struct trap_frame *frame,
+              int argc, const char *const *argv);

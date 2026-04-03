@@ -15,6 +15,15 @@ extern struct kernel_time timekeeper;
 
 extern bool startup_complete;
 
+/* Debug logging macro. Usage: DBGK("elf", "loading segment %d\n", i)
+ * Compiles to nothing unless -DDEBUG is set.
+ * Output goes to serial only — does not clutter the framebuffer console. */
+#ifdef DEBUG
+#define DBGK(subsys, fmt, ...) printk_serial("DEBUG(" subsys "): " fmt, ##__VA_ARGS__)
+#else
+#define DBGK(subsys, fmt, ...) ((void)0)
+#endif
+
 #define panic(msg) (real_panic(msg, __FILE__, __LINE__, __func__))
 
 /* Kernel panic: print given message and halt the CPU */

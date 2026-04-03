@@ -130,11 +130,70 @@ uint32_t vmm_create_page_dir(void)
     return dir_frame;
 }
 
+uint32_t vmm_clone_page_dir(uint32_t src_dir_phys)
+{
+    /* Start with a fresh directory that inherits all kernel PDEs */
+    uint32_t new_dir_phys = vmm_create_page_dir();
+    uint32_t *src_dir = (uint32_t *)src_dir_phys;
+    uint32_t *new_dir = (uint32_t *)new_dir_phys;
+
+    /* Walk only the user-space PDE range */
+    uint32_t user_pde_start = USER_SPACE_START >> 22;
+    uint32_t user_pde_end   = USER_SPACE_END   >> 22;
+
+    for (uint32_t pdi = user_pde_start; pdi < user_pde_end; pdi++) {
+        if (!(src_dir[pdi] & PTE_PRESENT))
+            continue;
+
+        uint32_t src_pt_phys = src_dir[pdi] & 0xFFFFF000;
+        DBGK("vmm", "clone: pdi=%lu src_pt_phys=0x%lx\n", pdi, src_pt_phys);
+        vmm_map_page(src_pt_phys, src_pt_phys, PTE_PRESENT | PTE_WRITE);
+        uint32_t *src_pt = (uint32_t *)src_pt_phys;
+
+        /* Allocate a new page table for the child */
+        uint32_t new_pt_phys = pmm_alloc_frame();
+        vmm_map_page(new_pt_phys, new_pt_phys, PTE_PRESENT | PTE_WRITE);
+        memset((void *)new_pt_phys, 0, PAGE_SIZE);
+        uint32_t *new_pt = (uint32_t *)new_pt_phys;
+
+        /* Copy each present PTE, duplicating the underlying frame */
+        for (uint32_t pti = 0; pti < 1024; pti++) {
+            if (!(src_pt[pti] & PTE_PRESENT))
+                continue;
+
+            uint32_t src_frame = src_pt[pti] & 0xFFFFF000;
+            uint32_t flags     = src_pt[pti] & 0xFFF;
+
+            DBGK("vmm", "clone: pdi=%lu pti=%lu src_frame=0x%lx\n",
+                 pdi, pti, src_frame);
+            /* Allocate a new frame and copy contents.
+             * src_frame may not be in the kernel identity map, so map it. */
+            uint32_t new_frame = pmm_alloc_frame();
+            vmm_map_page(src_frame, src_frame, PTE_PRESENT | PTE_WRITE);
+            vmm_map_page(new_frame, new_frame, PTE_PRESENT | PTE_WRITE);
+            memcpy((void *)new_frame, (void *)src_frame, PAGE_SIZE);
+            vmm_unmap_page(new_frame);
+            vmm_unmap_page(src_frame);
+
+            new_pt[pti] = new_frame | flags;
+        }
+
+        vmm_unmap_page(src_pt_phys);
+        vmm_unmap_page(new_pt_phys);
+
+        /* Install the new page table in the child directory */
+        new_dir[pdi] = new_pt_phys | (src_dir[pdi] & 0xFFF);
+    }
+
+    return new_dir_phys;
+}
+
 void vmm_destroy_page_dir(uint32_t dir_phys)
 {
     if (dir_phys == (uint32_t)page_directory)
         panic("vmm_destroy_page_dir: cannot destroy kernel page directory");
 
+    vmm_map_page(dir_phys, dir_phys, PTE_PRESENT | PTE_WRITE);
     uint32_t *dir = (uint32_t *)dir_phys;
 
     for (int i = 0; i < 1024; i++) {
@@ -148,30 +207,33 @@ void vmm_destroy_page_dir(uint32_t dir_phys)
         uint32_t dir_frame = dir[i] & 0xFFFFF000;
         uint32_t kern_frame = page_directory[i] & 0xFFFFF000;
 
+        vmm_map_page(dir_frame, dir_frame, PTE_PRESENT | PTE_WRITE);
+        uint32_t *pt = (uint32_t *)dir_frame;
+
         if ((page_directory[i] & PTE_PRESENT) && dir_frame == kern_frame) {
             /* Same page table frame as kernel (just PDE flags differ, e.g.
              * PTE_USER was promoted). Only free user-mapped PTEs, not the
-             * shared page table itself. Also clear the PTE_USER flag we
-             * added to the kernel's PDE copy. */
-            uint32_t *pt = (uint32_t *)dir_frame;
+             * shared page table itself. */
             for (int j = 0; j < 1024; j++) {
                 if ((pt[j] & PTE_PRESENT) && (pt[j] & PTE_USER)) {
                     pmm_free_frame(pt[j] & 0xFFFFF000);
                     pt[j] = 0;
                 }
             }
+            vmm_unmap_page(dir_frame);
         } else {
             /* Task-private page table - free all mapped frames and the
              * table itself */
-            uint32_t *pt = (uint32_t *)dir_frame;
             for (int j = 0; j < 1024; j++) {
                 if (pt[j] & PTE_PRESENT)
                     pmm_free_frame(pt[j] & 0xFFFFF000);
             }
+            vmm_unmap_page(dir_frame);
             pmm_free_frame(dir_frame);
         }
     }
 
+    vmm_unmap_page(dir_phys);
     pmm_free_frame(dir_phys);
 }
 

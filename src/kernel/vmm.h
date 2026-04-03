@@ -26,3 +26,10 @@ void vmm_switch_page_dir(uint32_t dir_phys);
 /* Map/unmap pages in a specific page directory */
 void vmm_map_page_in(uint32_t dir_phys, uint32_t virt, uint32_t phys, uint32_t flags);
 void vmm_unmap_page_in(uint32_t dir_phys, uint32_t virt);
+
+/* Clone a page directory: deep-copy all user-space mappings (PDE indices
+ * covering USER_SPACE_START..USER_SPACE_END) into a new page directory.
+ * Each mapped user frame is copied to a fresh physical frame.
+ * Kernel PDEs are shared by reference as in vmm_create_page_dir().
+ * Returns physical address of the new page directory. */
+uint32_t vmm_clone_page_dir(uint32_t src_dir_phys);

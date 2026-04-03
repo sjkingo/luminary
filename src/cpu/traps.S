@@ -2,9 +2,9 @@
 
 #include "traps.h"
 
-#define TASK_ESP_OFFSET 24
-#define TASK_PAGE_DIR_OFFSET 28
-#define TASK_STACK_BASE_OFFSET 32
+#define TASK_ESP_OFFSET 52
+#define TASK_PAGE_DIR_OFFSET 56
+#define TASK_STACK_BASE_OFFSET 60
 #define TASK_STACK_SIZE 4096
 
 .section .text

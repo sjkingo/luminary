@@ -4,6 +4,7 @@
  * Return value placed in EAX of the trap frame.
  */
 
+#include <stdbool.h>
 #include "kernel/kernel.h"
 #include "kernel/syscall.h"
 #include "kernel/task.h"
@@ -302,7 +303,7 @@ static int sys_kill(struct trap_frame *frame)
     return -1;
 }
 
-static int sys_exec(struct trap_frame *frame)
+static int sys_spawn(struct trap_frame *frame)
 {
     /* EBX = pointer to path string in user space */
     const char *path = (const char *)frame->ebx;
@@ -311,13 +312,13 @@ static int sys_exec(struct trap_frame *frame)
     uint32_t elf_size = 0;
     const void *elf_data = initrd_get_file(path, &elf_size);
     if (!elf_data) {
-        printk("exec: '%s' not found in VFS\n", path);
+        printk("spawn: '%s' not found in VFS\n", path);
         return -1;
     }
 
     struct task *t = (struct task *)kmalloc(sizeof(struct task));
     if (!t) {
-        printk("exec: out of memory\n");
+        printk("spawn: out of memory\n");
         return -1;
     }
 
@@ -327,8 +328,91 @@ static int sys_exec(struct trap_frame *frame)
         if (*s == '/') name = s + 1;
 
     create_elf_task(t, (char *)name, 5, elf_data, elf_size);
-    printk("exec: spawned '%s' as pid %d\n", name, t->pid);
+    printk("spawn: spawned '%s' as pid %d\n", name, t->pid);
     return (int)t->pid;
+}
+
+static int sys_exec(struct trap_frame *frame)
+{
+    const char *path = (const char *)frame->ebx;
+    uint32_t argv_ptr = frame->ecx;   /* user pointer to char *argv[] (NULL-terminated) */
+
+    if (!user_access_ok(path, 1)) return -1;
+
+    /* Collect argv from user space */
+    static const char *kargv[32];
+    int argc = 0;
+
+    if (argv_ptr && user_access_ok((void *)argv_ptr, 4)) {
+        uint32_t *uargv = (uint32_t *)argv_ptr;
+        while (argc < 31 && uargv[argc] && user_access_ok((void *)uargv[argc], 1)) {
+            kargv[argc] = (const char *)uargv[argc];
+            argc++;
+        }
+    }
+    kargv[argc] = NULL;
+
+    uint32_t elf_size = 0;
+    const void *elf_data = initrd_get_file(path, &elf_size);
+    if (!elf_data) {
+        printk("exec: '%s' not found\n", path);
+        return -1;
+    }
+
+    return task_exec(elf_data, elf_size, frame, argc, kargv);
+}
+
+static int sys_fork(struct trap_frame *frame)
+{
+    struct task *child = task_fork(frame);
+    if (!child) return -1;
+    return (int)child->pid;
+}
+
+static int sys_waitpid(struct trap_frame *frame)
+{
+    int target_pid = (int)frame->ebx;
+    if (target_pid <= 0) return -1;
+
+    /* Verify the target is a child of the caller */
+    struct task *t = sched_queue;
+    bool found = false;
+    while (t) {
+        if ((int)t->pid == target_pid && (int)t->ppid == (int)running_task->pid) {
+            found = true;
+            break;
+        }
+        t = t->next;
+    }
+    if (!found) {
+        /* child may have already exited and been removed */
+        if (running_task->wait_done) {
+            running_task->wait_done = false;
+            return target_pid;
+        }
+        return -1;
+    }
+
+    /* Block until the child exits */
+    running_task->wait_pid  = target_pid;
+    running_task->wait_done = false;
+    running_task->prio_d    = SCHED_LEVEL_SUSP;
+
+    while (!running_task->wait_done) {
+        enable_interrupts();
+        asm volatile("hlt");
+        disable_interrupts();
+    }
+
+    running_task->wait_done = false;
+    return target_pid;
+}
+
+static int sys_exit_task(struct trap_frame *frame)
+{
+    (void)frame;
+    task_kill(running_task);
+    __builtin_unreachable();
 }
 
 /* ── VFS syscalls ─────────────────────────────────────────────────────────── */
@@ -511,8 +595,8 @@ void syscall_handler(struct trap_frame *frame)
     case SYS_MOUSE_GET:
         ret = sys_mouse_get(frame);
         break;
-    case SYS_EXEC:
-        ret = sys_exec(frame);
+    case SYS_SPAWN:
+        ret = sys_spawn(frame);
         break;
     case SYS_KILL:
         ret = sys_kill(frame);
@@ -546,6 +630,18 @@ void syscall_handler(struct trap_frame *frame)
         break;
     case SYS_MOUNT:
         ret = sys_mount(frame);
+        break;
+    case SYS_EXEC:
+        ret = sys_exec(frame);
+        break;
+    case SYS_FORK:
+        ret = sys_fork(frame);
+        break;
+    case SYS_WAITPID:
+        ret = sys_waitpid(frame);
+        break;
+    case SYS_EXIT_TASK:
+        ret = sys_exit_task(frame);
         break;
     default:
         printk("unknown syscall %d from pid %d\n",

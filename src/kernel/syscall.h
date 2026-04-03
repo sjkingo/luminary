@@ -24,7 +24,7 @@
 #define SYS_WIN_POLL_EVENT  13  /* (id, event_buf_ptr) -> 0 or 1 */
 #define SYS_MOUSE_GET       14  /* (mouse_state_buf_ptr) -> buttons<<16|1 or 0 */
 #define SYS_WIN_DRAW_RECT   15  /* (id, x, y) + w,h,color at uesp+4..12 */
-#define SYS_EXEC            16  /* exec(path) - spawn ELF from VFS path -> pid or -1 */
+#define SYS_SPAWN           16  /* spawn(path) - spawn ELF from VFS path -> pid or -1 */
 #define SYS_KILL            17  /* kill(pid) -> 0 on success, -1 if not found */
 #define SYS_YIELD           18  /* yield() - hlt and let scheduler run */
 #define SYS_WIN_GET_SIZE    19  /* (id, &w, &h) -> client w/h in pixels */
@@ -38,8 +38,12 @@
 #define SYS_READDIR         25  /* readdir(fd, dirent_ptr) -> 1 if entry, 0 if done, -1 err */
 #define SYS_STAT            26  /* stat(path, stat_ptr) -> 0 or -1 */
 #define SYS_MOUNT           27  /* mount() -> prints mount info, returns 0 */
+#define SYS_EXEC            28  /* exec(path, argv) - exec in-place, replace address space */
+#define SYS_FORK            29  /* fork() -> child PID in parent, 0 in child */
+#define SYS_WAITPID         30  /* waitpid(pid) -> pid on child exit, -1 on error */
+#define SYS_EXIT_TASK       31  /* exit_task() - kill calling task */
 
-#define SYS_MAX     27
+#define SYS_MAX     31
 
 /* Handle a syscall. Called from trap_handler when trapno == SYSCALL_VECTOR. */
 void syscall_handler(struct trap_frame *frame);

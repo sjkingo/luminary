@@ -1,4 +1,5 @@
 #include <stddef.h>
+#include <string.h>
 
 #include "kernel/kernel.h"
 #include "kernel/elf.h"
@@ -114,7 +115,8 @@ void create_task(struct task *t, char *name, int prio, void (*entry)(void))
      * timer interrupt calls sched() which reads sched_queue. */
     disable_interrupts();
 
-    t->name = name;
+    strncpy(t->name, name, sizeof(t->name) - 1);
+    t->name[sizeof(t->name) - 1] = '\0';
     t->pid = ++last_pid;
     t->created = timekeeper.uptime_ms;
 
@@ -126,6 +128,9 @@ void create_task(struct task *t, char *name, int prio, void (*entry)(void))
     t->prev = NULL;
     t->next = NULL;
     memset(t->fds, 0, sizeof(t->fds));
+    t->ppid      = 0;
+    t->wait_pid  = -1;
+    t->wait_done = false;
 
     setup_task_stack(t);
 
@@ -149,15 +154,14 @@ out:
     if (sched_queue == NULL)
         panic("BUG: head of sched_queue is empty");
 
-#ifdef DEBUG
-    printk("new_task: %s, pid=%d, created=%d, prio=%d\n", name, t->pid, t->created, prio);
-#endif
+    DBGK("task", "new_task: %s pid=%d prio=%d\n", name, t->pid, prio);
 }
 
 /* Build a synthetic trap frame for a user-mode task. When trapret runs iret,
  * the CPU sees ring 3 CS and pops SS:ESP from the frame, switching to the
- * user stack. entry_point is the virtual address to begin execution at. */
-static void setup_user_task_stack(struct task *t, uint32_t entry_point)
+ * user stack. entry_point is the virtual address to begin execution at.
+ * user_sp is the initial user-mode stack pointer (set up by elf_load). */
+static void setup_user_task_stack(struct task *t, uint32_t entry_point, uint32_t user_sp)
 {
     unsigned char *stack = (unsigned char *)kmalloc(TASK_STACK_SIZE);
     if (stack == NULL)
@@ -169,7 +173,7 @@ static void setup_user_task_stack(struct task *t, uint32_t entry_point)
 
     /* iret to ring 3 pops: EIP, CS, EFLAGS, ESP, SS (5 dwords) */
     *(--sp) = SEG_USER_DATA;             /* SS: user data segment */
-    *(--sp) = USER_STACK_TOP;            /* ESP: top of user stack */
+    *(--sp) = user_sp;                   /* ESP: initial user stack pointer */
     *(--sp) = 0x202;                     /* EFLAGS: IF=1 */
     *(--sp) = SEG_USER_CODE;             /* CS: user code segment */
     *(--sp) = entry_point;               /* EIP: user entry point */
@@ -205,7 +209,8 @@ void create_user_task(struct task *t, char *name, int prio,
 
     disable_interrupts();
 
-    t->name = name;
+    strncpy(t->name, name, sizeof(t->name) - 1);
+    t->name[sizeof(t->name) - 1] = '\0';
     t->pid = ++last_pid;
     t->created = timekeeper.uptime_ms;
     t->prio_s = prio;
@@ -215,6 +220,9 @@ void create_user_task(struct task *t, char *name, int prio,
     t->prev = NULL;
     t->next = NULL;
     memset(t->fds, 0, sizeof(t->fds));
+    t->ppid      = 0;
+    t->wait_pid  = -1;
+    t->wait_done = false;
 
     /* Allocate a physical frame for user code and copy it there */
     uint32_t code_frame = pmm_alloc_frame();
@@ -234,7 +242,7 @@ void create_user_task(struct task *t, char *name, int prio,
     vmm_map_page_in(t->page_dir_phys, USER_STACK_TOP - PAGE_SIZE, stack_frame,
                     PTE_PRESENT | PTE_WRITE | PTE_USER);
 
-    setup_user_task_stack(t, USER_SPACE_START);
+    setup_user_task_stack(t, USER_SPACE_START, USER_STACK_TOP);
 
     /* Insert into scheduler queue (same logic as create_task) */
     struct task *before = sched_queue;
@@ -255,10 +263,7 @@ out:
     if (sched_queue == NULL)
         panic("BUG: head of sched_queue is empty");
 
-#ifdef DEBUG
-    printk("new_user_task: %s, pid=%d, created=%d, prio=%d\n",
-           name, t->pid, t->created, prio);
-#endif
+    DBGK("task", "new_user_task: %s pid=%d prio=%d\n", name, t->pid, prio);
 }
 
 /* Helper to insert a task into the scheduler queue by priority */
@@ -287,7 +292,8 @@ void create_elf_task(struct task *t, char *name, int prio,
 
     disable_interrupts();
 
-    t->name = name;
+    strncpy(t->name, name, sizeof(t->name) - 1);
+    t->name[sizeof(t->name) - 1] = '\0';
     t->pid = ++last_pid;
     t->created = timekeeper.uptime_ms;
     t->prio_s = prio;
@@ -297,30 +303,25 @@ void create_elf_task(struct task *t, char *name, int prio,
     t->prev = NULL;
     t->next = NULL;
     memset(t->fds, 0, sizeof(t->fds));
+    t->ppid      = 0;
+    t->wait_pid  = -1;
+    t->wait_done = false;
 
-    /* Load the ELF into the task's address space */
-    uint32_t entry_point = elf_load(elf_data, elf_size, t->page_dir_phys);
+    /* Load the ELF into the task's address space (also allocates stack) */
+    uint32_t user_sp = 0;
+    uint32_t entry_point = elf_load(elf_data, elf_size, t->page_dir_phys,
+                                    0, NULL, &user_sp);
     if (entry_point == 0)
         panic("create_elf_task: ELF load failed");
 
-    /* Allocate a user stack */
-    uint32_t stack_frame = pmm_alloc_frame();
-    vmm_map_page(stack_frame, stack_frame, PTE_PRESENT | PTE_WRITE);
-    memset((void *)stack_frame, 0, PAGE_SIZE);
-    vmm_unmap_page(stack_frame);
-    vmm_map_page_in(t->page_dir_phys, USER_STACK_TOP - PAGE_SIZE, stack_frame,
-                    PTE_PRESENT | PTE_WRITE | PTE_USER);
-
-    setup_user_task_stack(t, entry_point);
+    setup_user_task_stack(t, entry_point, user_sp);
     insert_task_sorted(t, prio);
 
     if (sched_queue == NULL)
         panic("BUG: head of sched_queue is empty");
 
-#ifdef DEBUG
-    printk("new_elf_task: %s, pid=%d, entry=0x%lx, prio=%d\n",
-           name, t->pid, entry_point, prio);
-#endif
+    DBGK("task", "new_elf_task: %s pid=%d entry=0x%lx prio=%d\n",
+         name, t->pid, entry_point, prio);
 }
 
 void spawn_init(const void *elf_data, unsigned int elf_size)
@@ -377,6 +378,20 @@ void task_kill(struct task *t)
     if (t == &task_init)
         respawn_init();
 
+    /* Wake any task waiting for this pid */
+    {
+        unsigned int dead_pid = t->pid;
+        struct task *waiter = sched_queue;
+        while (waiter) {
+            if (waiter->wait_pid == (int)dead_pid) {
+                waiter->wait_pid  = -1;
+                waiter->wait_done = true;
+                waiter->prio_d    = waiter->prio_s; /* unsuspend */
+            }
+            waiter = waiter->next;
+        }
+    }
+
     /* if we killed the running task, force a context switch.
      * We pick a new task and jump directly to its saved state,
      * bypassing the normal scheduler path since the current
@@ -420,17 +435,142 @@ void task_kill(struct task *t)
     enable_interrupts();
 }
 
+struct task *task_fork(struct trap_frame *frame)
+{
+    struct task *child = (struct task *)kmalloc(sizeof(struct task));
+    if (!child) {
+        printk("fork: out of memory\n");
+        return NULL;
+    }
+
+    disable_interrupts();
+
+    /* Copy most fields from parent */
+    *child = *running_task;
+
+    child->pid    = ++last_pid;
+    child->ppid   = running_task->pid;
+    child->wait_pid  = -1;
+    child->wait_done = false;
+    child->prev   = NULL;
+    child->next   = NULL;
+
+    /* Deep-copy the address space */
+    child->page_dir_phys = vmm_clone_page_dir(running_task->page_dir_phys);
+
+    /* Allocate a new kernel stack and copy the current one */
+    uint8_t *kstack = (uint8_t *)kmalloc(TASK_STACK_SIZE);
+    if (!kstack) {
+        kfree(child);
+        enable_interrupts();
+        printk("fork: out of memory for kernel stack\n");
+        return NULL;
+    }
+    uint8_t *parent_kstack = (uint8_t *)running_task->stack_base;
+    memcpy(kstack, parent_kstack, TASK_STACK_SIZE);
+
+    child->stack_base = (unsigned int)kstack;
+
+    /* Use the current syscall trap frame as the saved ESP.
+     * running_task->esp is only updated on context switch, so it may be
+     * stale. The frame pointer IS the current kernel stack position. */
+    uint32_t parent_frame_esp = (uint32_t)frame;
+    uint32_t stack_offset = parent_frame_esp - running_task->stack_base;
+    child->esp = child->stack_base + stack_offset;
+
+    DBGK("task", "fork: parent frame_esp=0x%lx stack_base=0x%x offset=0x%lx\n",
+         parent_frame_esp, running_task->stack_base, stack_offset);
+    DBGK("task", "fork: child  esp=0x%x stack_base=0x%x\n",
+         child->esp, child->stack_base);
+
+    /* Set child's return value (EAX in trap frame) to 0.
+     * The trap frame is embedded in the kernel stack, so we
+     * find it at the same offset as in the parent's stack. */
+    struct trap_frame *child_frame = (struct trap_frame *)child->esp;
+    DBGK("task", "fork: child_frame->ds=0x%x magic=0x%x eax=0x%x\n",
+         child_frame->ds, child_frame->magic, child_frame->eax);
+    child_frame->eax = 0;
+
+    /* Insert child into scheduler after parent */
+    insert_task_sorted(child, child->prio_s);
+
+    enable_interrupts();
+
+    DBGK("task", "fork: pid %d -> child pid %d\n", running_task->pid, child->pid);
+    return child;
+}
+
+int task_exec(const void *elf_data, uint32_t elf_size, struct trap_frame *frame,
+              int argc, const char *const *argv)
+{
+    /* Capture task name from argv[0] before the address space is replaced.
+     * argv[0] is a user-space pointer valid in the current page directory. */
+    if (argc > 0 && argv[0]) {
+        /* Use basename: find last '/' */
+        const char *base = argv[0];
+        for (const char *p = argv[0]; *p; p++)
+            if (*p == '/')
+                base = p + 1;
+        strncpy(running_task->name, base, sizeof(running_task->name) - 1);
+        running_task->name[sizeof(running_task->name) - 1] = '\0';
+    }
+
+    /* Create a new page directory for the new image */
+    uint32_t new_dir = vmm_create_page_dir();
+
+    uint32_t new_sp = 0;
+    uint32_t entry = elf_load(elf_data, elf_size, new_dir, argc, argv, &new_sp);
+    if (entry == 0) {
+        vmm_destroy_page_dir(new_dir);
+        return -1;
+    }
+
+    /* Free the old address space */
+    uint32_t old_dir = running_task->page_dir_phys;
+
+    /* Switch to new address space before destroying the old one */
+    running_task->page_dir_phys = new_dir;
+    vmm_switch_page_dir(new_dir);
+
+    vmm_destroy_page_dir(old_dir);
+
+    /* Reset the trap frame for the new image.
+     * The frame is on the kernel stack - rewrite it in place. */
+    frame->eip    = entry;
+    frame->cs     = SEG_USER_CODE;
+    frame->eflags = 0x202;           /* IF=1 */
+    frame->uesp   = new_sp;
+    frame->uss    = SEG_USER_DATA;
+    frame->eax    = 0;
+    frame->ebx    = 0;
+    frame->ecx    = 0;
+    frame->edx    = 0;
+    frame->esi    = 0;
+    frame->edi    = 0;
+    frame->ebp    = 0;
+    frame->ds     = SEG_USER_DATA;
+
+    /* Update TSS kernel stack pointer */
+    tss_set_kernel_stack(running_task->stack_base + TASK_STACK_SIZE);
+
+    return 0;
+}
+
 void init_task(void)
 {
     /* hand-craft the first task (uses the boot stack) */
     memset(&idle_task, 0, sizeof(idle_task));
-    idle_task.name = "idle";
+    strncpy(idle_task.name, "idle", sizeof(idle_task.name) - 1);
+    idle_task.name[sizeof(idle_task.name) - 1] = '\0';
     idle_task.pid = PID_IDLE;
     idle_task.prio_s = idle_task.prio_d = SCHED_LEVEL_IDLE;
     idle_task.esp = 0;              /* filled when first switched out */
     idle_task.page_dir_phys = vmm_get_kernel_page_dir();
     idle_task.stack_base = 0;       /* boot stack, not from heap */
-    idle_task.entry = NULL;     /* already running */
+    idle_task.entry = NULL;         /* already running */
+    idle_task.ppid      = 0;
+    idle_task.wait_pid  = -1;
+    idle_task.wait_done = false;
     sched_queue = &idle_task;
     running_task = &idle_task;
 }

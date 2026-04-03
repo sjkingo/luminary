@@ -203,6 +203,26 @@ int printk(const char *format, ...)
         return print( 0, format, args );
 }
 
+/* Serial-only printk — used for DEBUG output so it doesn't clutter the
+ * framebuffer console. Formats into a stack buffer then emits each char
+ * to the serial port. Falls back to normal printk if serial is disabled. */
+int printk_serial(const char *format, ...)
+{
+    va_list args;
+    va_start(args, format);
+#ifdef USE_SERIAL
+    char buf[512];
+    char *p = buf;
+    int n = print(&p, format, args);
+    *p = '\0';
+    for (char *s = buf; *s; s++)
+        write_serial(*s);
+    return n;
+#else
+    return print(0, format, args);
+#endif
+}
+
 int sprintf(char *out, const char *format, ...)
 {
         va_list args;
