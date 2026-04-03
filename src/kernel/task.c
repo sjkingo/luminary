@@ -2,6 +2,7 @@
 #include <string.h>
 
 #include "kernel/kernel.h"
+#include "kernel/dev.h"
 #include "kernel/elf.h"
 #include "kernel/heap.h"
 #include "kernel/pmm.h"
@@ -128,6 +129,7 @@ void create_task(struct task *t, char *name, int prio, void (*entry)(void))
     t->prev = NULL;
     t->next = NULL;
     memset(t->fds, 0, sizeof(t->fds));
+    task_open_std_fds(t);
     t->ppid      = 0;
     t->wait_pid  = -1;
     t->wait_done = false;
@@ -220,6 +222,7 @@ void create_user_task(struct task *t, char *name, int prio,
     t->prev = NULL;
     t->next = NULL;
     memset(t->fds, 0, sizeof(t->fds));
+    task_open_std_fds(t);
     t->ppid      = 0;
     t->wait_pid  = -1;
     t->wait_done = false;
@@ -303,6 +306,7 @@ void create_elf_task(struct task *t, char *name, int prio,
     t->prev = NULL;
     t->next = NULL;
     memset(t->fds, 0, sizeof(t->fds));
+    task_open_std_fds(t);
     t->ppid      = 0;
     t->wait_pid  = -1;
     t->wait_done = false;

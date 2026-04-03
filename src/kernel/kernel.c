@@ -16,6 +16,7 @@
 #include "kernel/pmm.h"
 #include "kernel/vmm.h"
 #include "kernel/vfs.h"
+#include "kernel/dev.h"
 #include "kernel/initrd.h"
 #include "pci/pci.h"
 #include "version.h"
@@ -177,6 +178,7 @@ void kernel_main(struct multiboot_info *mb, uint32_t start, uint32_t stack, uint
     printk("initrd: cpio at 0x%lx - 0x%lx (%ld bytes)\n",
            initrd_mod->mod_start, initrd_mod->mod_end, initrd_size);
     initrd_init((const void *)initrd_mod->mod_start, initrd_size);
+    init_devfs();
 
     /* Load /bin/init from the VFS */
     uint32_t init_size = 0;

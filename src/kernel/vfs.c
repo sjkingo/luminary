@@ -92,12 +92,48 @@ struct vfs_node *vfs_lookup(const char *path)
 uint32_t vfs_read(struct vfs_node *node, uint32_t offset,
                   uint32_t len, void *buf)
 {
-    if (!node || !(node->flags & VFS_FILE) || !node->data) return 0;
+    if (!node) return 0;
+    if (node->flags & VFS_CHARDEV) {
+        if (!node->read_op) return 0;
+        return node->read_op(offset, len, buf);
+    }
+    if (!(node->flags & VFS_FILE) || !node->data) return 0;
     if (offset >= node->size) return 0;
     uint32_t avail = node->size - offset;
     if (len > avail) len = avail;
     memcpy(buf, node->data + offset, len);
     return len;
+}
+
+/* ── write ───────────────────────────────────────────────────────────────── */
+uint32_t vfs_write(struct vfs_node *node, uint32_t offset,
+                   uint32_t len, const void *buf)
+{
+    if (!node) return 0;
+    if (node->flags & VFS_CHARDEV) {
+        if (!node->write_op) return 0;
+        return node->write_op(offset, len, buf);
+    }
+    return 0; /* regular files are read-only */
+}
+
+/* ── tree helpers ─────────────────────────────────────────────────────────── */
+void vfs_add_child(struct vfs_node *parent, struct vfs_node *child)
+{
+    child->parent  = parent;
+    child->sibling = NULL;
+    if (!parent->children) {
+        parent->children = child;
+        return;
+    }
+    struct vfs_node *s = parent->children;
+    while (s->sibling) s = s->sibling;
+    s->sibling = child;
+}
+
+struct vfs_node *vfs_get_root(void)
+{
+    return vfs_root;
 }
 
 /* ── readdir ─────────────────────────────────────────────────────────────── */

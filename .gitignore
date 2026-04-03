@@ -1,11 +1,13 @@
 *.o
 *.d
+*.a
 *.swp
 *.elf
 core.*
 src/kernel.bin
 src/version.h
 src/cpu/vectors.S
+src/kernel/symtab_gen.c
 grub2/boot.iso
 initrd.img
 rootfs/

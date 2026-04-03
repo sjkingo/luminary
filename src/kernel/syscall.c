@@ -6,6 +6,7 @@
 
 #include <stdbool.h>
 #include "kernel/kernel.h"
+#include "kernel/dev.h"
 #include "kernel/syscall.h"
 #include "kernel/task.h"
 #include "kernel/sched.h"
@@ -47,9 +48,14 @@ static int sys_write(struct trap_frame *frame)
     if (!user_access_ok(buf, len) || len > 4096)
         return -1;
 
-    /* Print character by character (safe, no format string issues) */
-    for (unsigned int i = 0; i < len; i++)
-        printk("%c", buf[i]);
+    /* Route through fd 1 (stdout) if it is a chardev, else fallback to printk */
+    struct vfs_fd *vfd = &running_task->fds[1];
+    if (vfd->open && vfd->node && (vfd->node->flags & VFS_CHARDEV)) {
+        vfs_write(vfd->node, 0, len, buf);
+    } else {
+        for (unsigned int i = 0; i < len; i++)
+            printk("%c", buf[i]);
+    }
 
     return (int)len;
 }
@@ -114,10 +120,14 @@ static int sys_read(struct trap_frame *frame)
     if (!user_access_ok(buf, len) || len > 4096)
         return -1;
 
-    /* Loop: consume scroll sentinel keys without returning them to user space */
+    /* Route through fd 0 (stdin) if it is a chardev */
+    struct vfs_fd *vfd = &running_task->fds[0];
+    if (vfd->open && vfd->node && (vfd->node->flags & VFS_CHARDEV)) {
+        return (int)vfs_read(vfd->node, 0, len, buf);
+    }
+
+    /* Fallback: legacy blocking keyboard loop (reached only before init_devfs) */
     for (;;) {
-        /* While GUI windows are open, keyboard is owned by the compositor.
-         * Block here without consuming any input. */
         if (gui_has_windows()) {
             enable_interrupts();
             asm volatile("hlt");
@@ -126,24 +136,18 @@ static int sys_read(struct trap_frame *frame)
         }
 
         int n = keyboard_read(buf, len);
-
-        /* Filter out scroll sentinels and handle them in-kernel */
         int out = 0;
         for (int i = 0; i < n; i++) {
-            if (buf[i] == KEY_PGUP) {
+            if (buf[i] == KEY_PGUP)
                 fbdev_scroll_up();
-            } else if (buf[i] == KEY_PGDN) {
+            else if (buf[i] == KEY_PGDN)
                 fbdev_scroll_down();
-            } else {
+            else
                 buf[out++] = buf[i];
-            }
         }
-
         if (out > 0)
             return out;
 
-        /* Buffer empty - briefly enable interrupts so pending IRQs
-         * (keyboard, timer) can fire before we return to userspace. */
         enable_interrupts();
         asm volatile("hlt");
         disable_interrupts();
@@ -468,7 +472,7 @@ static int sys_read_fd(struct trap_frame *frame)
     if (!user_access_ok(buf, len)) return -1;
 
     struct vfs_fd *vfd = &running_task->fds[fd];
-    if (!(vfd->node->flags & VFS_FILE)) return -1;
+    if (!(vfd->node->flags & (VFS_FILE | VFS_CHARDEV))) return -1;
 
     uint32_t n = vfs_read(vfd->node, vfd->offset, len, buf);
     vfd->offset += n;
@@ -485,7 +489,10 @@ static int sys_lseek(struct trap_frame *frame)
     if (!running_task->fds[fd].open) return -1;
 
     struct vfs_fd *vfd = &running_task->fds[fd];
-    if (!(vfd->node->flags & VFS_FILE)) return -1;
+    if (!(vfd->node->flags & (VFS_FILE | VFS_CHARDEV))) return -1;
+
+    /* Chardevs are not seekable — report position 0 as a no-op */
+    if (vfd->node->flags & VFS_CHARDEV) return 0;
 
     uint32_t new_off;
     if (whence == 0)      new_off = offset;               /* SEEK_SET */

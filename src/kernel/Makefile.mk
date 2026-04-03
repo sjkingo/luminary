@@ -1,4 +1,5 @@
 KERNEL_OBJS +=  kernel/kernel.o \
+		kernel/dev.o \
 		kernel/elf.o \
 		kernel/gui.o \
 		kernel/heap.o \

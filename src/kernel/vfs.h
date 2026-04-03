@@ -6,6 +6,7 @@
 /* ── node type flags ─────────────────────────────────────────────────────── */
 #define VFS_FILE    0x01
 #define VFS_DIR     0x02
+#define VFS_CHARDEV 0x04    /* character device — I/O via read_op/write_op */
 
 /* ── maximum path/name lengths ───────────────────────────────────────────── */
 #define VFS_NAME_MAX  128
@@ -28,6 +29,10 @@ struct vfs_node {
 
     /* File data pointer (for initrd-backed files: pointer into cpio data) */
     const uint8_t *data;
+
+    /* Character device I/O ops — NULL for regular files */
+    uint32_t (*read_op)(uint32_t offset, uint32_t len, void *buf);
+    uint32_t (*write_op)(uint32_t offset, uint32_t len, const void *buf);
 
     /* Children (directories only): singly-linked list */
     struct vfs_node *children;  /* first child */
@@ -64,6 +69,17 @@ struct vfs_stat {
     uint8_t  type;   /* VFS_FILE or VFS_DIR */
 };
 int vfs_stat(const char *path, struct vfs_stat *out);
+
+/* Write up to len bytes to node at offset. Returns bytes written.
+ * Only meaningful for VFS_CHARDEV nodes; regular files are read-only. */
+uint32_t vfs_write(struct vfs_node *node, uint32_t offset,
+                   uint32_t len, const void *buf);
+
+/* Append child to parent's children list. Sets child->parent. */
+void vfs_add_child(struct vfs_node *parent, struct vfs_node *child);
+
+/* Return the current VFS root node. */
+struct vfs_node *vfs_get_root(void);
 
 /* Allocate a new node from the node pool (used by initrd). Returns NULL if
  * the pool is exhausted. */
