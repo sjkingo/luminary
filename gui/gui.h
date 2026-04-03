@@ -18,11 +18,14 @@
 #define SYS_WIN_POLL_EVENT  13
 #define SYS_MOUSE_GET       14
 #define SYS_WIN_DRAW_RECT   15
+#define SYS_WIN_GET_SIZE    19
+#define SYS_READ_NB         20
 
 /* ── event types ─────────────────────────────────────────────────────────── */
 #define GUI_EVENT_NONE      0
 #define GUI_EVENT_KEYPRESS  1
 #define GUI_EVENT_MOUSE_BTN 2
+#define GUI_EVENT_RESIZE    3   /* x=new client w, y=new client h */
 
 /* ── mouse button flags ──────────────────────────────────────────────────── */
 #define MOUSE_BTN_LEFT   1
@@ -172,4 +175,17 @@ static inline int win_poll_event(int id, struct gui_event *ev)
 static inline void mouse_get(struct mouse_state *ms)
 {
     _sc3(SYS_MOUSE_GET, (unsigned int)ms, 0, 0);
+}
+
+/* Get client area size of a window. Returns 0 on success. */
+static inline int win_get_size(int id, unsigned int *cw, unsigned int *ch)
+{
+    return _sc3(SYS_WIN_GET_SIZE, (unsigned int)id,
+                (unsigned int)cw, (unsigned int)ch);
+}
+
+/* Non-blocking keyboard read. Returns chars read (0 if none). */
+static inline int read_nb(char *buf, unsigned int len)
+{
+    return _sc3(SYS_READ_NB, (unsigned int)buf, len, 0);
 }

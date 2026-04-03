@@ -27,8 +27,10 @@
 #define SYS_EXEC            16  /* exec(module_index) - spawn ELF module as task -> pid or -1 */
 #define SYS_KILL            17  /* kill(pid) -> 0 on success, -1 if not found */
 #define SYS_YIELD           18  /* yield() - hlt and let scheduler run */
+#define SYS_WIN_GET_SIZE    19  /* (id, &w, &h) -> client w/h in pixels */
+#define SYS_READ_NB         20  /* read_nb(buf, len) - non-blocking keyboard read */
 
-#define SYS_MAX     18
+#define SYS_MAX     20
 
 /* Handle a syscall. Called from trap_handler when trapno == SYSCALL_VECTOR. */
 void syscall_handler(struct trap_frame *frame);

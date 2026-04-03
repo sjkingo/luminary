@@ -44,22 +44,42 @@ static int sys_exit(struct trap_frame *frame)
     printk("exit: running='%s'(pid %d) frame=0x%lx\n",
            running_task->name, running_task->pid, (uint32_t)frame);
     printk("  eax=%ld eip=0x%lx cs=0x%lx eflags=0x%lx\n",
-           frame->eax, frame->eip, frame->cs, frame->eflags);
+           (uint32_t)frame->eax, (uint32_t)frame->eip,
+           (uint32_t)frame->cs, (uint32_t)frame->eflags);
     printk("  magic=0x%lx (expect 0x%lx) trapno=%ld err=%ld\n",
-           frame->magic, (uint32_t)TRAP_MAGIC, frame->trapno, frame->err);
+           (uint32_t)frame->magic, (uint32_t)TRAP_MAGIC,
+           (uint32_t)frame->trapno, (uint32_t)frame->err);
     printk("  ebp=0x%lx esp=0x%lx ebx=0x%lx uesp=0x%lx\n",
-           frame->ebp, frame->esp, frame->ebx, frame->uesp);
+           (uint32_t)frame->ebp, (uint32_t)frame->esp,
+           (uint32_t)frame->ebx, (uint32_t)frame->uesp);
     /* dump all tasks */
     struct task *_t = sched_queue;
     while (_t) {
         printk("  task pid=%d '%s' stack=0x%lx..0x%lx saved_esp=0x%lx\n",
-               _t->pid, _t->name, _t->stack_base,
-               _t->stack_base + 4096, _t->esp);
+               _t->pid, _t->name, (uint32_t)_t->stack_base,
+               (uint32_t)(_t->stack_base + 4096), (uint32_t)_t->esp);
         _t = _t->next;
     }
     while (1)
         asm volatile("hlt");
     return 0; /* unreachable */
+}
+
+static int sys_win_get_size(struct trap_frame *frame)
+{
+    int id       = (int)frame->ebx;
+    uint32_t *pw = (uint32_t *)frame->ecx;
+    uint32_t *ph = (uint32_t *)frame->edx;
+    if (!pw || !ph) return -1;
+    return gui_window_get_size(id, pw, ph);
+}
+
+static int sys_read_nb(struct trap_frame *frame)
+{
+    char *buf = (char *)frame->ebx;
+    unsigned int len = frame->ecx;
+    if (!buf || len > 4096) return -1;
+    return keyboard_read(buf, len);
 }
 
 static int sys_yield(void)
@@ -80,6 +100,15 @@ static int sys_read(struct trap_frame *frame)
 
     /* Loop: consume scroll sentinel keys without returning them to user space */
     for (;;) {
+        /* While GUI windows are open, keyboard is owned by the compositor.
+         * Block here without consuming any input. */
+        if (gui_has_windows()) {
+            enable_interrupts();
+            asm volatile("hlt");
+            disable_interrupts();
+            continue;
+        }
+
         int n = keyboard_read(buf, len);
 
         /* Filter out scroll sentinels and handle them in-kernel */
@@ -350,6 +379,12 @@ void syscall_handler(struct trap_frame *frame)
         break;
     case SYS_YIELD:
         ret = sys_yield();
+        break;
+    case SYS_WIN_GET_SIZE:
+        ret = sys_win_get_size(frame);
+        break;
+    case SYS_READ_NB:
+        ret = sys_read_nb(frame);
         break;
     default:
         printk("unknown syscall %d from pid %d\n",

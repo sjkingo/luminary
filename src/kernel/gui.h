@@ -12,6 +12,7 @@
 #define GUI_EVENT_NONE      0
 #define GUI_EVENT_KEYPRESS  1
 #define GUI_EVENT_MOUSE_BTN 2   /* button press/release inside client area */
+#define GUI_EVENT_RESIZE    3   /* window was resized; x=new_w, y=new_h (client area) */
 
 struct gui_event {
     uint8_t  type;
@@ -32,6 +33,7 @@ struct window {
 
     /* Per-window backbuffer for the client area only (w × (h - TITLE_HEIGHT) pixels) */
     uint32_t   *backbuffer;     /* allocated from kernel frames, NULL if not ready */
+    uint32_t    bb_w, bb_h;     /* dimensions backbuffer was allocated at */
 
     bool        visible;
     bool        focused;
@@ -89,3 +91,6 @@ int  gui_window_poll_event(int id, struct gui_event *ev);
 
 /* Push an event into a window's queue (called from compositor/IRQ side) */
 void gui_window_push_event(struct window *w, struct gui_event *ev);
+
+/* Get current client area size of a window by ID. Returns 0 on success. */
+int  gui_window_get_size(int id, uint32_t *cw, uint32_t *ch);
