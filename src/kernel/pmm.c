@@ -38,6 +38,13 @@
 static uint32_t bitmap[MAX_FRAMES / 32];
 static uint32_t nframes;   /* total frames under management */
 
+/* CoW reference counts. Counts the number of owners of each frame.
+ * 0 = free (no owners). 1 = solely owned. 2+ = shared (CoW).
+ * pmm_alloc_frame_zone / pmm_alloc_contiguous initialise to 1 on allocation.
+ * vmm_clone_page_dir increments for each shared frame.
+ * vmm_destroy_page_dir decrements; frees the frame when it reaches 0. */
+static uint16_t refcounts[MAX_FRAMES];
+
 static inline void frame_set(uint32_t index)
 {
     bitmap[index / 32] |= (1u << (index % 32));
@@ -68,8 +75,10 @@ void pmm_mark_used(uint32_t addr)
 void pmm_free_frame(uint32_t addr)
 {
     uint32_t index = addr / PAGE_SIZE;
-    if (index < nframes)
+    if (index < nframes) {
         frame_clear(index);
+        refcounts[index] = 0;
+    }
 }
 
 /* General allocator: first-fit scan from ZONE_ANY_START upward.
@@ -90,6 +99,7 @@ uint32_t pmm_alloc_frame_zone(int zone)
         for (uint32_t i = end - 1; i >= start; i--) {
             if (!frame_test(i)) {
                 frame_set(i);
+                refcounts[i] = 1;
                 return i * PAGE_SIZE;
             }
             if (i == start) break; /* avoid unsigned wraparound */
@@ -106,6 +116,7 @@ uint32_t pmm_alloc_frame_zone(int zone)
             }
             if (!frame_test(i)) {
                 frame_set(i);
+                refcounts[i] = 1;
                 return i * PAGE_SIZE;
             }
         }
@@ -114,6 +125,7 @@ uint32_t pmm_alloc_frame_zone(int zone)
         for (uint32_t i = ZONE_LOW_START; i < end; i++) {
             if (!frame_test(i)) {
                 frame_set(i);
+                refcounts[i] = 1;
                 return i * PAGE_SIZE;
             }
         }
@@ -138,9 +150,11 @@ uint32_t pmm_alloc_contiguous(uint32_t n)
             if (run_len == 0) run_start = i;
             run_len++;
             if (run_len == n) {
-                /* Found a run — mark all frames used */
-                for (uint32_t j = run_start; j < run_start + n; j++)
+                /* Found a run — mark all frames used with refcount 1 */
+                for (uint32_t j = run_start; j < run_start + n; j++) {
                     frame_set(j);
+                    refcounts[j] = 1;
+                }
                 return run_start * PAGE_SIZE;
             }
         } else {
@@ -148,6 +162,27 @@ uint32_t pmm_alloc_contiguous(uint32_t n)
         }
     }
     return 0; /* not found */
+}
+
+void pmm_refcount_inc(uint32_t addr)
+{
+    uint32_t i = addr / PAGE_SIZE;
+    if (i < nframes && refcounts[i] < 0xFFFF)
+        refcounts[i]++;
+}
+
+uint32_t pmm_refcount_dec(uint32_t addr)
+{
+    uint32_t i = addr / PAGE_SIZE;
+    if (i < nframes && refcounts[i] > 0)
+        refcounts[i]--;
+    return (i < nframes) ? refcounts[i] : 0;
+}
+
+uint32_t pmm_refcount_get(uint32_t addr)
+{
+    uint32_t i = addr / PAGE_SIZE;
+    return (i < nframes) ? refcounts[i] : 0;
 }
 
 void init_pmm(struct multiboot_info *mb, uint32_t reserved_top)

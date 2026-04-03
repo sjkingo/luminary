@@ -344,6 +344,24 @@ static void respawn_init(void)
     task_init.pid = PID_INIT;
 }
 
+/* Stale kernel stack to free after switching away from a dying task.
+ * Set by task_kill when killing the running task; freed by
+ * sched_free_stale_stack() which is called from traps.S after the ESP
+ * switch, so we are safely on the new task's stack when kfree runs. */
+static void *stale_stack = NULL;
+
+/* Called from traps.S (after movl running_task->esp, %%esp) to free the
+ * old kernel stack of a just-killed task.  Must be a proper C function so
+ * the DEBUG kfree macro expands correctly. */
+void sched_free_stale_stack(void)
+{
+    if (stale_stack) {
+        void *p = stale_stack;
+        stale_stack = NULL;
+        kfree(p);
+    }
+}
+
 void task_kill(struct task *t)
 {
     if (t->pid == PID_IDLE)
@@ -355,7 +373,7 @@ void task_kill(struct task *t)
      * harmless on this single-core x86 kernel. */
     disable_interrupts();
 
-    printk("sched: removing '%s' (pid %d) from run queue\n", t->name, t->pid);
+    DBGK("sched", "removing '%s' (pid %d) from run queue\n", t->name, t->pid);
 
     /* unlink from scheduler queue */
     if (t->prev != NULL)
@@ -365,10 +383,6 @@ void task_kill(struct task *t)
 
     if (t->next != NULL)
         t->next->prev = t->prev;
-
-    /* free kernel stack */
-    if (t->stack_base != 0)
-        kfree((void *)t->stack_base);
 
     /* destroy task's page directory (frees user page tables and frames) */
     if (t->page_dir_phys != vmm_get_kernel_page_dir())
@@ -418,20 +432,32 @@ void task_kill(struct task *t)
         running_task = next;
 
         /* switch to the new task's address space and stack, then
-         * jump to trapret to restore its saved context */
+         * jump to trapret to restore its saved context.
+         * We must NOT free the dying task's kernel stack before switching
+         * ESP — a spurious/NMI interrupt between kfree and the movl would
+         * use the freed stack. Free it after we are on the new stack. */
+        uint32_t old_stack = t->stack_base;
+        t->stack_base = 0;
+
         vmm_switch_page_dir(running_task->page_dir_phys);
         tss_set_kernel_stack(running_task->stack_base + TASK_STACK_SIZE);
 
+        /* Queue the old stack for freeing — traps.S will call
+         * sched_free_stale_stack() after switching to the new ESP. */
+        stale_stack = (void *)old_stack;
+
         asm volatile(
             "movl %0, %%esp\n\t"
-            "jmp trapret\n\t"
+            "jmp sched_enter_trapret\n\t"
             :
             : "r"(running_task->esp)
         );
         __builtin_unreachable();
     }
 
-    /* Killed a different task — re-enable interrupts before returning. */
+    /* Killed a different task — free its stack and re-enable interrupts. */
+    if (t->stack_base != 0)
+        kfree((void *)t->stack_base);
     enable_interrupts();
 }
 

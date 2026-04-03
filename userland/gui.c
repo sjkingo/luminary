@@ -459,24 +459,28 @@ int main(int argc, char **argv)
         int any = 0;
 
         if (win1 >= 0 && win_poll_event(win1, &ev)) {
-            handle_win1_event(&ev);
-            any = 1;
+            if (ev.type == GUI_EVENT_CLOSE) { win1 = -1; }
+            else { handle_win1_event(&ev); any = 1; }
         }
 
         if (win2 >= 0 && win_poll_event(win2, &ev)) {
-            handle_win2_event(&ev);
-            any = 1;
+            if (ev.type == GUI_EVENT_CLOSE) { win2 = -1; }
+            else { handle_win2_event(&ev); any = 1; }
         }
 
         if (win3 >= 0 && win_poll_event(win3, &ev)) {
-            handle_win3_event(&ev);
-            any = 1;
+            if (ev.type == GUI_EVENT_CLOSE) { win3 = -1; }
+            else { handle_win3_event(&ev); any = 1; }
         }
 
         if (win4 >= 0 && win_poll_event(win4, &ev)) {
-            handle_win4_event(&ev);
-            any = 1;
+            if (ev.type == GUI_EVENT_CLOSE) { win4 = -1; }
+            else { handle_win4_event(&ev); any = 1; }
         }
+
+        /* Exit when all windows have been closed */
+        if (win1 < 0 && win2 < 0 && win3 < 0 && win4 < 0)
+            exit(0);
 
         /* Refresh all windows every 1s (also catches post-resize redraws) */
         unsigned int now = (unsigned int)uptime();

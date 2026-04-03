@@ -23,3 +23,7 @@ extern struct task *sched_queue;
 void sched(void);
 
 void init_sched(void);
+
+/* Free the stale kernel stack of a just-killed task.
+ * Called from traps.S after the ESP switch to the new task. */
+void sched_free_stale_stack(void);

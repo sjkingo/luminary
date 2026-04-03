@@ -21,6 +21,12 @@
 #include "kernel/pmm.h"
 #include "kernel/vmm.h"
 
+/* Flush TLB for a single page in the currently loaded page directory */
+static inline void tlb_flush(uint32_t virt)
+{
+    asm volatile("invlpg (%0)" : : "r"(virt) : "memory");
+}
+
 #define MODULE "vmm: "
 
 /* Page directory - statically allocated, page-aligned */
@@ -258,13 +264,11 @@ uint32_t vmm_clone_page_dir(uint32_t src_dir_phys)
         if (!(src_dir[pdi] & PTE_USER))
             continue;
 
-        /* src_pt is a kernel-allocated page table, so it's in ZONE_LOW and
-         * directly accessible. new_pt also from ZONE_LOW. User data frames
-         * (src_frame, new_frame) come from ZONE_ANY and need transient mapping. */
         uint32_t src_pt_phys = src_dir[pdi] & 0xFFFFF000;
         DBGK("vmm", "clone: pdi=%lu src_pt_phys=0x%lx\n", pdi, src_pt_phys);
         uint32_t *src_pt = (uint32_t *)src_pt_phys;
 
+        /* Allocate a private page table for the child (ZONE_LOW, directly accessible) */
         uint32_t new_pt_phys = pmm_alloc_frame_zone(PMM_ZONE_LOW);
         memset((void *)new_pt_phys, 0, PAGE_SIZE);
         uint32_t *new_pt = (uint32_t *)new_pt_phys;
@@ -273,18 +277,24 @@ uint32_t vmm_clone_page_dir(uint32_t src_dir_phys)
             if (!(src_pt[pti] & PTE_PRESENT))
                 continue;
 
-            uint32_t src_frame = src_pt[pti] & 0xFFFFF000;
-            uint32_t flags     = src_pt[pti] & 0xFFF;
+            uint32_t frame = src_pt[pti] & 0xFFFFF000;
+            uint32_t flags = src_pt[pti] & 0xFFF;
 
-            DBGK("vmm", "clone: pdi=%lu pti=%lu src_frame=0x%lx\n",
-                 pdi, pti, src_frame);
-            uint32_t new_frame = pmm_alloc_frame();
-            void *src_kp = vmm_kmap(src_frame);
-            void *new_kp = vmm_kmap(new_frame);
-            memcpy(new_kp, src_kp, PAGE_SIZE);
-            vmm_kunmap(new_kp);
-            vmm_kunmap(src_kp);
-            new_pt[pti] = new_frame | flags;
+            DBGK("vmm", "clone: pdi=%lu pti=%lu frame=0x%lx\n", pdi, pti, frame);
+
+            if (flags & PTE_WRITE) {
+                /* Writable page: mark both parent and child CoW, clear write bit.
+                 * Increment refcount to track the shared frame. */
+                flags = (flags & ~PTE_WRITE) | PTE_COW;
+                src_pt[pti] = frame | flags;
+                /* Flush parent's TLB entry so the write-protect takes effect */
+                uint32_t virt = (pdi << 22) | (pti << 12);
+                tlb_flush(virt);
+            }
+            /* Read-only pages (e.g. code) are shared as-is — no copy needed ever */
+
+            pmm_refcount_inc(frame);
+            new_pt[pti] = frame | flags;
         }
 
         /* Install the new page table in the child directory */
@@ -292,6 +302,48 @@ uint32_t vmm_clone_page_dir(uint32_t src_dir_phys)
     }
 
     return new_dir_phys;
+}
+
+int vmm_cow_fault(uint32_t dir_phys, uint32_t fault_addr)
+{
+    uint32_t pdi = fault_addr >> 22;
+    uint32_t pti = (fault_addr >> 12) & 0x3FF;
+
+    uint32_t *dir = (uint32_t *)dir_phys;
+    if (!(dir[pdi] & PTE_PRESENT))
+        return 0;
+
+    uint32_t *pt = (uint32_t *)(dir[pdi] & 0xFFFFF000);
+    if (!(pt[pti] & PTE_PRESENT))
+        return 0;
+    if (!(pt[pti] & PTE_COW))
+        return 0;
+
+    uint32_t old_frame = pt[pti] & 0xFFFFF000;
+    uint32_t flags     = pt[pti] & 0xFFF;
+
+    DBGK("vmm", "cow_fault: virt=0x%lx old_frame=0x%lx refcount=%lu\n",
+         fault_addr, old_frame, pmm_refcount_get(old_frame));
+
+    if (pmm_refcount_get(old_frame) == 1) {
+        /* Sole owner: just make it writable, no copy needed */
+        pt[pti] = old_frame | ((flags & ~PTE_COW) | PTE_WRITE);
+    } else {
+        /* Shared (refcount > 1): allocate new frame, copy content, remap.
+         * Release our reference to the old frame. */
+        uint32_t new_frame = pmm_alloc_frame();
+        void *old_kp = vmm_kmap(old_frame);
+        void *new_kp = vmm_kmap(new_frame);
+        memcpy(new_kp, old_kp, PAGE_SIZE);
+        vmm_kunmap(new_kp);
+        vmm_kunmap(old_kp);
+
+        pmm_refcount_dec(old_frame);
+        pt[pti] = new_frame | ((flags & ~PTE_COW) | PTE_WRITE);
+    }
+
+    tlb_flush(fault_addr & 0xFFFFF000);
+    return 1;
 }
 
 void vmm_destroy_page_dir(uint32_t dir_phys)
@@ -317,18 +369,24 @@ void vmm_destroy_page_dir(uint32_t dir_phys)
         uint32_t *pt = (uint32_t *)dir_frame;
 
         if ((page_directory[i] & PTE_PRESENT) && dir_frame == kern_frame) {
-            /* Shared kernel page table — only free user-mapped PTEs */
+            /* Shared kernel page table — only release user-mapped PTEs */
             for (int j = 0; j < 1024; j++) {
-                if ((pt[j] & PTE_PRESENT) && (pt[j] & PTE_USER))
-                    pmm_free_frame(pt[j] & 0xFFFFF000);
+                if ((pt[j] & PTE_PRESENT) && (pt[j] & PTE_USER)) {
+                    uint32_t frame = pt[j] & 0xFFFFF000;
+                    if (pmm_refcount_dec(frame) == 0)
+                        pmm_free_frame(frame);
+                }
             }
         } else {
             /* Task-private page table (from ZONE_LOW, directly accessible) —
-             * free user-mapped frames only; kernel frames are shared and
+             * release user-mapped frames only; kernel frames are shared and
              * must not be freed here. Then free the table itself. */
             for (int j = 0; j < 1024; j++) {
-                if ((pt[j] & PTE_PRESENT) && (pt[j] & PTE_USER))
-                    pmm_free_frame(pt[j] & 0xFFFFF000);
+                if ((pt[j] & PTE_PRESENT) && (pt[j] & PTE_USER)) {
+                    uint32_t frame = pt[j] & 0xFFFFF000;
+                    if (pmm_refcount_dec(frame) == 0)
+                        pmm_free_frame(frame);
+                }
             }
             pmm_free_frame(dir_frame);
         }

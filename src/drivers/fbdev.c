@@ -254,6 +254,13 @@ void writeline_fb(uint32_t row, char *str, uint32_t fgcolor,
     }
 }
 
+void fbdev_redraw(void)
+{
+    if (!fbdev_ready)
+        return;
+    redraw_all();
+}
+
 void fbdev_scroll_up(void)
 {
     if (!fbdev_ready)

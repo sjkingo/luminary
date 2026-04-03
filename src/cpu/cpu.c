@@ -9,6 +9,7 @@
 #include "kernel/symtab.h"
 #include "kernel/syscall.h"
 #include "kernel/task.h"
+#include "kernel/vmm.h"
 
 #ifdef USE_SERIAL
 #include "drivers/serial.h"
@@ -246,6 +247,15 @@ void trap_handler(struct trap_frame *frame)
     }
 
 exc_handler:
+    /* CoW write fault: handle silently before counting as an error */
+    if (frame->trapno == INT_PAGE_FAULT && (frame->err & 0x3) == 0x3) {
+        /* err bits: present=1, write=1 — could be a CoW page */
+        uint32_t fault_addr;
+        asm volatile("mov %%cr2, %0" : "=r"(fault_addr));
+        if (vmm_cow_fault(running_task->page_dir_phys, fault_addr))
+            goto out;
+    }
+
     consecutive_faults++;
     if (consecutive_faults > MAX_CONSECUTIVE_FAULTS) {
         printk("fault limit reached (%d consecutive faults)\n", consecutive_faults);
@@ -256,9 +266,9 @@ exc_handler:
 
     /* page fault: decode CR2 and error code bits */
     if (frame->trapno == INT_PAGE_FAULT) {
-        unsigned int fault_addr;
+        uint32_t fault_addr;
         asm volatile("mov %%cr2, %0" : "=r"(fault_addr));
-        printk("Page fault at 0x%x (err=0x%x)\n", fault_addr, frame->err);
+        printk("Page fault at 0x%lx (err=0x%lx)\n", fault_addr, (uint32_t)frame->err);
         if (!(frame->err & 0x1)) printk("  page not present\n");
         if (frame->err & 0x2)    printk("  write access\n");
         if (frame->err & 0x4)    printk("  user mode\n");
@@ -267,8 +277,8 @@ exc_handler:
     /* if the exception came from user mode (ring 3), kill the task
      * instead of panicking the kernel */
     if ((frame->cs & 0x3) == 3) {
-        printk("sched: killing '%s' (pid %d)\n",
-               running_task->name, running_task->pid);
+        DBGK("sched", "killing '%s' (pid %d)\n",
+             running_task->name, running_task->pid);
         disable_interrupts();
         task_kill(running_task);
         /* task_kill does not return when killing running_task */

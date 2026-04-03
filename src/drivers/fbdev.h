@@ -31,3 +31,7 @@ void writeline_fb(uint32_t row, char *str, uint32_t fgcolor, uint32_t bgcolor);
 /* Scroll the console view up/down through scrollback history */
 void fbdev_scroll_up(void);
 void fbdev_scroll_down(void);
+
+/* Repaint the entire console to the framebuffer from the scrollback ring.
+ * Call after the compositor clears the screen so the text console is restored. */
+void fbdev_redraw(void);

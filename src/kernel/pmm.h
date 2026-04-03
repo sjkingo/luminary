@@ -17,3 +17,10 @@ uint32_t pmm_alloc_contiguous(uint32_t n);       /* n contiguous frames from ZON
 void     pmm_free_frame(uint32_t addr);
 void     pmm_mark_used(uint32_t addr);           /* mark a frame as used */
 uint32_t pmm_total_frames(void);                 /* total managed frames */
+
+/* Reference counting for CoW: increment/decrement shared frame refcount.
+ * pmm_refcount_inc: mark a frame as shared (refcount becomes 2+).
+ * pmm_refcount_dec: decrement; returns new refcount. When 0, caller must free. */
+void     pmm_refcount_inc(uint32_t addr);
+uint32_t pmm_refcount_dec(uint32_t addr);
+uint32_t pmm_refcount_get(uint32_t addr);

@@ -22,6 +22,7 @@
 #include <stdarg.h>
 
 #include "drivers/fbdev.h"
+#include "kernel/kernel.h"
 
 /* VGA fallback */
 extern void putchar(int);
@@ -45,6 +46,7 @@ static void printchar(char **str, int c)
 #endif
     }
 }
+
 
 #define PAD_RIGHT 1
 #define PAD_ZERO 2
@@ -211,12 +213,40 @@ int printk_serial(const char *format, ...)
     va_list args;
     va_start(args, format);
 #ifdef USE_SERIAL
+    static int at_line_start = 1;
     char buf[512];
     char *p = buf;
     int n = print(&p, format, args);
     *p = '\0';
-    for (char *s = buf; *s; s++)
+    for (char *s = buf; *s; s++) {
+        if (at_line_start) {
+            /* emit [sss.mmm] prefix to serial */
+            unsigned long ms = timekeeper.uptime_ms;
+            unsigned long secs = ms / 1000;
+            unsigned long frac = ms % 1000;
+            char tbuf[16];
+            char *tp = tbuf;
+            /* format: '[' + secs + '.' + 3-digit frac + '] ' */
+            *tp++ = '[';
+            /* secs */
+            char sbuf[10]; int si = 0;
+            if (secs == 0) { sbuf[si++] = '0'; }
+            else { unsigned long v = secs; while (v) { sbuf[si++] = '0' + v % 10; v /= 10; } }
+            for (int j = si - 1; j >= 0; j--) *tp++ = sbuf[j];
+            *tp++ = '.';
+            /* frac — always 3 digits */
+            *tp++ = '0' + (frac / 100);
+            *tp++ = '0' + (frac / 10 % 10);
+            *tp++ = '0' + (frac % 10);
+            *tp++ = ']'; *tp++ = ' ';
+            for (char *t = tbuf; t < tp; t++)
+                write_serial(*t);
+            at_line_start = 0;
+        }
         write_serial(*s);
+        if (*s == '\n')
+            at_line_start = 1;
+    }
     return n;
 #else
     return print(0, format, args);

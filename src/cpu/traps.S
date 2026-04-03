@@ -7,6 +7,12 @@
 #define TASK_STACK_BASE_OFFSET 60
 #define TASK_STACK_SIZE 4096
 
+.section .bss
+.align 16
+sched_saved_esp:        .space 4
+                        .space 512      # scratch stack for sched_free_stale_stack call
+sched_scratch_stack_top:
+
 .section .text
 
 .globl alltraps
@@ -56,6 +62,20 @@ alltraps:
 
     # clear prev_task
     movl $0, prev_task
+
+    # fall through into sched_enter_trapret
+
+# Entry point for task_kill: ESP already points at the new task's trap frame.
+# Free the stale kernel stack on a private scratch stack so we don't corrupt
+# the trap frame, then restore ESP and fall into trapret.
+.globl sched_enter_trapret
+sched_enter_trapret:
+    # Save the new task's frame pointer, switch to scratch stack, call free,
+    # then restore frame pointer before restoring context.
+    movl %esp, sched_saved_esp
+    movl $sched_scratch_stack_top, %esp
+    call sched_free_stale_stack
+    movl sched_saved_esp, %esp
 
 .globl trapret
 trapret:

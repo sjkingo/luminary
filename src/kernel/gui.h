@@ -13,6 +13,7 @@
 #define GUI_EVENT_KEYPRESS  1
 #define GUI_EVENT_MOUSE_BTN 2   /* button press/release inside client area */
 #define GUI_EVENT_RESIZE    3   /* window was resized; x=new_w, y=new_h (client area) */
+#define GUI_EVENT_CLOSE     4   /* window was destroyed by the compositor */
 
 struct gui_event {
     uint8_t  type;

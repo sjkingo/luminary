@@ -24,7 +24,7 @@
 - PMM initialised from Multiboot memory map, supports up to 4GB (was 128MB)
 - Slab allocator (`kmalloc`/`kfree`): 8 size classes (32–4096 bytes), PMM-backed, with overflow path for large allocations via `vmm_alloc_pages`
 - Kernel symbol table (two-pass build): stack traces resolve addresses to `function (file:line)` for CPU exceptions
-- `fork()`/`exec()` with full address space copy (`vmm_clone_page_dir`)
+- `fork()`/`exec()` with copy-on-write address space cloning (`vmm_clone_page_dir`): writable pages marked CoW, read-only pages shared; refcounts track sharing
 
 ## What Luminary Needs
 

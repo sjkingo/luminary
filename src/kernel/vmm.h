@@ -6,6 +6,7 @@
 #define PTE_PRESENT   0x001
 #define PTE_WRITE     0x002
 #define PTE_USER      0x004
+#define PTE_COW       0x200   /* OS-reserved bit 9: copy-on-write page */
 
 /* Address space layout */
 #define USER_SPACE_START    0x01000000
@@ -37,9 +38,14 @@ void  vmm_free_pages(void *virt_base, uint32_t n);
 void *vmm_kmap(uint32_t phys);
 void  vmm_kunmap(void *virt);
 
-/* Clone a page directory: deep-copy all user-space mappings (PDE indices
- * covering USER_SPACE_START..USER_SPACE_END) into a new page directory.
- * Each mapped user frame is copied to a fresh physical frame.
- * Kernel PDEs are shared by reference as in vmm_create_page_dir().
+/* Clone a page directory using copy-on-write: shared frames are marked
+ * read-only + PTE_COW in both parent and child. Data is only copied on
+ * the first write to a shared page (handled by vmm_cow_fault).
  * Returns physical address of the new page directory. */
 uint32_t vmm_clone_page_dir(uint32_t src_dir_phys);
+
+/* Handle a CoW page fault: called from the page fault handler when a write
+ * fault occurs on a PTE_COW page. dir_phys is the faulting task's page
+ * directory; fault_addr is the faulting virtual address.
+ * Returns 1 if the fault was a valid CoW fault and was resolved, 0 otherwise. */
+int vmm_cow_fault(uint32_t dir_phys, uint32_t fault_addr);

@@ -970,9 +970,11 @@ void compositor_task(void)
         process_keyboard();
 
         if (compositor_quit) {
-            /* Clear screen and tear down */
+            /* Restore the framebuffer console: blank the screen first so the
+             * GUI is gone, then repaint the text console from its ring buffer. */
             if (fb_hw)
                 memset(fb_hw, 0, (uint32_t)fb_h * fb_pitch);
+            fbdev_redraw();
             compositor_quit  = false;
             compositor_dirty = false;
             scene_dirty      = true;
@@ -1187,7 +1189,15 @@ void gui_window_flip(int id)
 int gui_window_poll_event(int id, struct gui_event *ev)
 {
     struct window *win = find_window(id);
-    if (!win) return 0;
+    if (!win) {
+        /* Window was destroyed — deliver a CLOSE event once */
+        ev->type    = GUI_EVENT_CLOSE;
+        ev->key     = 0;
+        ev->x       = 0;
+        ev->y       = 0;
+        ev->buttons = 0;
+        return 1;
+    }
     if (win->ev_head == win->ev_tail) return 0;
     *ev = win->events[win->ev_tail];
     win->ev_tail = (win->ev_tail + 1) % GUI_EVENT_QUEUE_SIZE;

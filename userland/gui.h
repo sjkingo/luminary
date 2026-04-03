@@ -26,6 +26,7 @@
 #define GUI_EVENT_KEYPRESS  1
 #define GUI_EVENT_MOUSE_BTN 2
 #define GUI_EVENT_RESIZE    3   /* x=new client w, y=new client h */
+#define GUI_EVENT_CLOSE     4   /* window was destroyed by the compositor */
 
 /* ── mouse button flags ──────────────────────────────────────────────────── */
 #define MOUSE_BTN_LEFT   1
