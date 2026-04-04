@@ -186,7 +186,7 @@ static void cmd_cat(const char *arg)
     char buf[256];
     int n;
     while ((n = vfs_read(fd, buf, sizeof(buf))) > 0)
-        write(buf, (unsigned int)n);
+        write(1, buf, (unsigned int)n);
     vfs_close(fd);
 }
 
@@ -222,7 +222,9 @@ static void dispatch(char *cmd)
     } else if (strcmp(cmd, "getpid") == 0) {
         printf("%d\n", getpid());
     } else if (strcmp(cmd, "ps") == 0) {
-        ps();
+        char psbuf[1024];
+        int n = ps(psbuf, sizeof(psbuf));
+        if (n > 0) write(1, psbuf, (unsigned int)n);
     } else if (strcmp(cmd, "halt") == 0) {
         halt();
     } else if (strncmp(cmd, "kill ", 5) == 0) {
@@ -285,7 +287,7 @@ int main(int argc, char **argv)
     printf("Luminary shell\nType 'help' for commands.\n\n$ ");
 
     for (;;) {
-        if (read(&c, 1) == 0)
+        if (read(0, &c, 1) == 0)
             continue;
 
         if (c == '\n') {
@@ -297,12 +299,12 @@ int main(int argc, char **argv)
         } else if (c == '\b') {
             if (idx > 0) {
                 idx--;
-                write("\b \b", 3);
+                write(1, "\b \b", 3);
             }
         } else {
             if (idx < (int)(sizeof(cmd) - 1)) {
                 cmd[idx++] = c;
-                write(&c, 1);
+                write(1, &c, 1);
             }
         }
     }

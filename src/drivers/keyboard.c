@@ -133,3 +133,15 @@ int keyboard_read(char *buf, unsigned int len)
     }
     return (int)count;
 }
+
+static int kbd_owned = 0;
+
+void kbd_set_owner(int owned)
+{
+    kbd_owned = owned;
+}
+
+int kbd_is_owned(void)
+{
+    return kbd_owned;
+}

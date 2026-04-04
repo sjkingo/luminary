@@ -9,3 +9,9 @@
 void init_keyboard(void);
 void keyboard_irq_handler(void);
 int keyboard_read(char *buf, unsigned int len);
+
+/* Keyboard ownership: when owned (1), stdin_read_op yields without consuming
+ * input so all keystrokes go to the GUI compositor. Clear (0) to return
+ * keyboard to the shell. */
+void kbd_set_owner(int owned);
+int  kbd_is_owned(void);

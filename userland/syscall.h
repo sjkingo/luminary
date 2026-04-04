@@ -5,20 +5,27 @@
  * Return value in EAX. */
 
 #define SYS_NOP         0
-#define SYS_WRITE       1
-#define SYS_EXIT        2   /* debug halt - do not use in userland */
+#define SYS_EXIT_TASK   1   /* exit_task() - kill calling task */
 #define SYS_READ        3
-#define SYS_UPTIME      4
-#define SYS_GETPID      5
-#define SYS_HALT        6
-#define SYS_PS          7
+#define SYS_WRITE       4
+#define SYS_OPEN        5   /* open(path) -> fd or -1 */
+#define SYS_CLOSE       6   /* close(fd) -> 0 or -1 */
+#define SYS_PS          7   /* ps(buf, len) -> bytes written or -1 */
+#define SYS_WIN_CREATE      8
+#define SYS_WIN_DESTROY     9
+#define SYS_WIN_FILL_RECT   10
+#define SYS_WIN_DRAW_TEXT   11
+#define SYS_WIN_FLIP        12
+#define SYS_WIN_POLL_EVENT  13
+#define SYS_MOUSE_GET       14
+#define SYS_WIN_DRAW_RECT   15
+#define SYS_WIN_GET_SIZE    19
+#define SYS_GETPID      20  /* getpid() -> pid */
+#define SYS_HALT        21  /* halt() - shut down */
+#define SYS_UPTIME      22  /* uptime() -> ms */
 #define SYS_SPAWN       16  /* spawn(path) -> pid or -1 */
 #define SYS_KILL        17  /* kill(pid) -> 0 or -1 */
 #define SYS_YIELD       18  /* yield() - give up CPU slice */
-/* VFS syscalls */
-#define SYS_OPEN        21  /* open(path) -> fd or -1 */
-#define SYS_CLOSE       22  /* close(fd) -> 0 or -1 */
-#define SYS_READ_FD     23  /* read_fd(fd, buf, len) -> bytes or -1 */
 #define SYS_LSEEK       24  /* lseek(fd, offset, whence) -> offset or -1 */
 #define SYS_READDIR     25  /* readdir(fd, dirent_ptr) -> 1/0/-1 */
 #define SYS_STAT        26  /* stat(path, stat_ptr) -> 0/-1 */
@@ -26,11 +33,13 @@
 #define SYS_EXEC        28  /* exec(path, argv) - exec in-place -> 0 or -1 */
 #define SYS_FORK        29  /* fork() -> child PID in parent, 0 in child */
 #define SYS_WAITPID     30  /* waitpid(pid) -> pid on child exit, -1 on error */
-#define SYS_EXIT_TASK   31  /* exit_task() - kill calling task */
+#define SYS_PIPE        32  /* pipe(int fds[2]) -> 0 or -1 */
+#define SYS_DUP2        33  /* dup2(oldfd, newfd) -> newfd or -1 */
 
 /* VFS node type flags (must match kernel/vfs.h) */
-#define VFS_FILE 0x01
-#define VFS_DIR  0x02
+#define VFS_FILE    0x01
+#define VFS_DIR     0x02
+#define VFS_CHARDEV 0x04
 
 /* struct vfs_dirent (must match kernel/vfs.h layout) */
 #define VFS_NAME_MAX 128
@@ -88,9 +97,9 @@ static inline int syscall3(int num, unsigned int a, unsigned int b, unsigned int
     return ret;
 }
 
-static inline int write(const char *buf, unsigned int len)
+static inline int write(int fd, const char *buf, unsigned int len)
 {
-    return syscall2(SYS_WRITE, (unsigned int)buf, len);
+    return syscall3(SYS_WRITE, (unsigned int)fd, (unsigned int)buf, len);
 }
 
 static inline __attribute__((noreturn)) void exit(int code)
@@ -100,9 +109,9 @@ static inline __attribute__((noreturn)) void exit(int code)
     for (;;);
 }
 
-static inline int read(char *buf, unsigned int len)
+static inline int read(int fd, char *buf, unsigned int len)
 {
-    return syscall2(SYS_READ, (unsigned int)buf, len);
+    return syscall3(SYS_READ, (unsigned int)fd, (unsigned int)buf, len);
 }
 
 static inline int uptime(void)
@@ -121,9 +130,9 @@ static inline void halt(void)
     for (;;);
 }
 
-static inline int ps(void)
+static inline int ps(char *buf, unsigned int len)
 {
-    return syscall0(SYS_PS);
+    return syscall2(SYS_PS, (unsigned int)buf, len);
 }
 
 /* spawn: launch ELF by VFS path as a new task, returns new pid or -1 */
@@ -173,7 +182,7 @@ static inline int vfs_close(int fd)
 
 static inline int vfs_read(int fd, void *buf, unsigned int len)
 {
-    return syscall3(SYS_READ_FD, (unsigned int)fd, (unsigned int)buf, len);
+    return syscall3(SYS_READ, (unsigned int)fd, (unsigned int)buf, len);
 }
 
 static inline int vfs_lseek(int fd, unsigned int offset, int whence)
@@ -194,4 +203,16 @@ static inline int vfs_stat(const char *path, struct vfs_stat *st)
 static inline int mount(void)
 {
     return syscall0(SYS_MOUNT);
+}
+
+/* pipe: creates a pipe; fds[0]=read end, fds[1]=write end */
+static inline int pipe(int fds[2])
+{
+    return syscall1(SYS_PIPE, (unsigned int)fds);
+}
+
+/* dup2: duplicate oldfd onto newfd; closes newfd first if open */
+static inline int dup2(int oldfd, int newfd)
+{
+    return syscall2(SYS_DUP2, (unsigned int)oldfd, (unsigned int)newfd);
 }

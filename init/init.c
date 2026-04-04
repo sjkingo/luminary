@@ -15,12 +15,12 @@ static unsigned int mystrlen(const char *s)
 
 static void puts(const char *s)
 {
-    write(s, mystrlen(s));
+    write(1, s, mystrlen(s));
 }
 
 static void putch(char c)
 {
-    write(&c, 1);
+    write(1, &c, 1);
 }
 
 static int mystrcmp(const char *a, const char *b)
@@ -248,7 +248,7 @@ static void cmd_cat(const char *arg)
     char buf[256];
     int n;
     while ((n = vfs_read(fd, buf, sizeof(buf))) > 0)
-        write(buf, (unsigned int)n);
+        write(1, buf, (unsigned int)n);
     vfs_close(fd);
 }
 
@@ -292,7 +292,9 @@ static void dispatch(char *cmd)
         putu((unsigned int)getpid());
         putch('\n');
     } else if (mystrcmp(cmd, "ps") == 0) {
-        ps();
+        char psbuf[512];
+        int n = ps(psbuf, sizeof(psbuf));
+        if (n > 0) write(1, psbuf, (unsigned int)n);
     } else if (mystrcmp(cmd, "halt") == 0) {
         halt();
     } else if (mystrncmp(cmd, "kill ", 5) == 0) {
@@ -345,7 +347,7 @@ void _start(void)
     puts("$ ");
 
     for (;;) {
-        if (read(&c, 1) == 0)
+        if (read(0, &c, 1) == 0)
             continue;
 
         if (c == '\n') {
@@ -362,7 +364,7 @@ void _start(void)
         } else {
             if (idx < (int)(sizeof(cmd) - 1)) {
                 cmd[idx++] = c;
-                write(&c, 1);
+                write(1, &c, 1);
             }
         }
     }

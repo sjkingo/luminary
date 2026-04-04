@@ -13,7 +13,7 @@
 - ELF32 loader
 - CPIO initrd, VFS layer, path-based file access
 - fork/exec/waitpid process model
-- Syscall interface (`int 0x80`, 31 syscalls)
+- Syscall interface (`int 0x80`, 33 syscalls)
 - PS/2 keyboard driver with ring buffer
 - PS/2 mouse driver (IRQ12, absolute position tracking)
 - GUI compositor: three-buffer rendering, window management, drag, resize, close, statusbar/taskbar, focus-follows-mouse, resize cursor sprites, console window
@@ -25,6 +25,8 @@
 - Slab allocator (`kmalloc`/`kfree`): 8 size classes (32–4096 bytes), PMM-backed, with overflow path for large allocations via `vmm_alloc_pages`
 - Kernel symbol table (two-pass build): stack traces resolve addresses to `function (file:line)` for CPU exceptions
 - `fork()`/`exec()` with copy-on-write address space cloning (`vmm_clone_page_dir`): writable pages marked CoW, read-only pages shared; refcounts track sharing
+- Character device abstraction (`VFS_CHARDEV`): `/dev/stdin`, `/dev/stdout`, `/dev/stderr` as VFS nodes; `read(fd,buf,len)`/`write(fd,buf,len)` dispatch through fd table; fds 0/1/2 pre-opened on every task
+- Anonymous pipes (`pipe()`/`dup2()`): 4KB ring buffer, up to 16 concurrent pipes, blocking read/write with EOF and broken-pipe semantics; enables shell I/O redirection
 
 ## What Luminary Needs
 

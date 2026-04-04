@@ -13,7 +13,6 @@
 #include "kernel/kernel.h"
 #include "kernel/vfs.h"
 #include "kernel/task.h"
-#include "kernel/gui.h"
 #include "cpu/x86.h"
 #include "drivers/keyboard.h"
 #include "drivers/fbdev.h"
@@ -26,7 +25,7 @@ struct vfs_node *dev_stderr = NULL;
 /* ── chardev ops ─────────────────────────────────────────────────────────── */
 
 /* Blocking keyboard read — exact semantics as the old sys_read inner loop.
- * Yields while the GUI compositor owns the keyboard.
+ * Yields while the keyboard is owned by the GUI compositor.
  * Filters Page Up/Down sentinels for in-kernel scrollback. */
 static uint32_t stdin_read_op(uint32_t offset, uint32_t len, void *buf)
 {
@@ -34,9 +33,9 @@ static uint32_t stdin_read_op(uint32_t offset, uint32_t len, void *buf)
     char *cbuf = (char *)buf;
 
     for (;;) {
-        /* While GUI windows are open, keyboard is owned by the compositor.
-         * Block here without consuming any input. */
-        if (gui_has_windows()) {
+        /* While the GUI compositor owns the keyboard, block without consuming
+         * any input so keystrokes route to the compositor. */
+        if (kbd_is_owned()) {
             enable_interrupts();
             asm volatile("hlt");
             disable_interrupts();

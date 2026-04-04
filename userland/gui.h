@@ -19,7 +19,6 @@
 #define SYS_MOUSE_GET       14
 #define SYS_WIN_DRAW_RECT   15
 #define SYS_WIN_GET_SIZE    19
-#define SYS_READ_NB         20
 
 /* ── event types ─────────────────────────────────────────────────────────── */
 #define GUI_EVENT_NONE      0
@@ -185,8 +184,3 @@ static inline int win_get_size(int id, unsigned int *cw, unsigned int *ch)
                 (unsigned int)cw, (unsigned int)ch);
 }
 
-/* Non-blocking keyboard read. Returns chars read (0 if none). */
-static inline int read_nb(char *buf, unsigned int len)
-{
-    return _sc3(SYS_READ_NB, (unsigned int)buf, len, 0);
-}

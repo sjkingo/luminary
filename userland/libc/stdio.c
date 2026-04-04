@@ -12,10 +12,11 @@
 
 static void _write(const char *buf, unsigned int len)
 {
+    /* SYS_WRITE: EAX=4, EBX=fd(1), ECX=buf, EDX=len */
     __asm__ volatile(
         "int $0x80"
         :
-        : "a"(1), "b"(buf), "c"(len)
+        : "a"(4), "b"(1), "c"(buf), "d"(len)
         : "memory"
     );
 }

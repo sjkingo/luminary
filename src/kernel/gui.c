@@ -1128,6 +1128,10 @@ int gui_window_create(int32_t x, int32_t y, uint32_t w, uint32_t h,
     slot->focused = true;
 
 
+    /* Take keyboard ownership on first window */
+    if (!win_list->next)
+        kbd_set_owner(1);
+
     gui_wake_scene();
     return slot->id;
 }
@@ -1149,6 +1153,8 @@ void gui_window_destroy(int id)
         win_list->focused = true;
         gui_wake_scene();
     } else {
+        /* Release keyboard ownership when last window closes */
+        kbd_set_owner(0);
         compositor_quit = true;
         compositor_dirty = true;
     }

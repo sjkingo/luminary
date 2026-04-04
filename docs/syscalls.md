@@ -12,13 +12,12 @@ Userspace macros (in `userland/syscall.h` and `userland/gui.h`):
 | # | Name | Args | Returns | Description |
 |---|------|------|---------|-------------|
 | 0 | SYS_NOP | — | 0 | No-op |
-| 1 | SYS_WRITE | EBX=buf, ECX=len | len | Write bytes to kernel console |
-| 2 | SYS_EXIT | — | — | Halt with debug dump (legacy) |
-| 3 | SYS_READ | EBX=buf, ECX=len | bytes read | Blocking keyboard read; yields without consuming while GUI windows open |
-| 4 | SYS_UPTIME | — | ms | System uptime in milliseconds |
-| 5 | SYS_GETPID | — | pid | Current task PID |
-| 6 | SYS_HALT | — | — | Shut down the machine |
-| 7 | SYS_PS | — | 0 | Print process list to console |
+| 1 | SYS_EXIT_TASK | — | — | Kill calling task (normal process exit) |
+| 3 | SYS_READ | EBX=fd, ECX=buf, EDX=len | bytes read or -1 | Read from fd; blocks on chardev (stdin) until data available |
+| 4 | SYS_WRITE | EBX=fd, ECX=buf, EDX=len | len or -1 | Write bytes to fd (chardev only; use fd 1 for stdout) |
+| 5 | SYS_OPEN | EBX=path | fd or -1 | Open VFS path |
+| 6 | SYS_CLOSE | EBX=fd | 0 or -1 | Close fd |
+| 7 | SYS_PS | EBX=buf, ECX=len | bytes written or -1 | Format process list (PID/PRIO/NAME) into userland buffer |
 | 8 | SYS_WIN_CREATE | EBX=x, ECX=y, EDX=w, [uesp+0]=h, [uesp+4]=title | id or -1 | Create window |
 | 9 | SYS_WIN_DESTROY | EBX=id | 0 | Destroy window |
 | 10 | SYS_WIN_FILL_RECT | EBX=id, ECX=x, EDX=y, [uesp+0]=w, [uesp+4]=h, [uesp+8]=color | 0 | Fill rect in window backbuffer |
@@ -31,10 +30,9 @@ Userspace macros (in `userland/syscall.h` and `userland/gui.h`):
 | 17 | SYS_KILL | EBX=pid | 0 or -1 | Kill task by PID |
 | 18 | SYS_YIELD | — | 0 | Yield CPU (hlt) |
 | 19 | SYS_WIN_GET_SIZE | EBX=id, ECX=&w, EDX=&h | 0 | Get client area dimensions |
-| 20 | SYS_READ_NB | EBX=buf, ECX=len | bytes read | Non-blocking keyboard read |
-| 21 | SYS_OPEN | EBX=path | fd or -1 | Open VFS path |
-| 22 | SYS_CLOSE | EBX=fd | 0 or -1 | Close fd |
-| 23 | SYS_READ_FD | EBX=fd, ECX=buf, EDX=len | bytes or -1 | Read from fd |
+| 20 | SYS_GETPID | — | pid | Current task PID |
+| 21 | SYS_HALT | — | — | Shut down the machine |
+| 22 | SYS_UPTIME | — | ms | System uptime in milliseconds |
 | 24 | SYS_LSEEK | EBX=fd, ECX=offset, EDX=whence | new offset or -1 | Seek within fd |
 | 25 | SYS_READDIR | EBX=fd, ECX=dirent_ptr | 1, 0, or -1 | Read next directory entry |
 | 26 | SYS_STAT | EBX=path, ECX=stat_ptr | 0 or -1 | Stat a path |
@@ -42,12 +40,17 @@ Userspace macros (in `userland/syscall.h` and `userland/gui.h`):
 | 28 | SYS_EXEC | EBX=path, ECX=argv | 0 or -1 | exec in-place: replace address space with ELF at path |
 | 29 | SYS_FORK | — | child pid or 0 | Fork current task; child gets 0 |
 | 30 | SYS_WAITPID | EBX=pid | pid or -1 | Block until child exits |
-| 31 | SYS_EXIT_TASK | — | — | Kill calling task (normal process exit) |
+| 32 | SYS_PIPE | EBX=int[2] ptr | 0 or -1 | Create pipe; fills fds[0]=read end, fds[1]=write end |
+| 33 | SYS_DUP2 | EBX=oldfd, ECX=newfd | newfd or -1 | Duplicate oldfd onto newfd; closes newfd first if open |
 
 ## Notes
 
-- **SYS_EXIT (2)** is the legacy halt-with-dump. Use **SYS_EXIT_TASK (31)** for normal task exit.
+- Use **SYS_EXIT_TASK (1)** for normal task exit.
 - **SYS_EXEC (28)** replaces the calling task's address space in-place. On failure, the task continues with its original image.
 - **SYS_SPAWN (16)** creates a new independent task (no parent relationship). For fork+exec with wait, use SYS_FORK + SYS_EXEC + SYS_WAITPID.
-- **SYS_READ (3)** blocks and yields without consuming keyboard input while `gui_has_windows()` is true — all keyboard input routes to the GUI compositor in that case.
+- **SYS_READ (3)** routes through the fd table. For fd 0 (stdin chardev), it blocks until keyboard input is available and yields without consuming while the keyboard is owned by the GUI (`kbd_is_owned()`).
+- **SYS_WRITE (4)** routes through the fd table. For fd 1/2 (stdout/stderr chardevs), it writes to the framebuffer console. Regular file fds return -1 (read-only kernel).
+- **SYS_PS (7)** formats the process list as "PID  PRIO  NAME\n" entries into a userland-supplied buffer. Returns bytes written (not counting the null terminator), or -1 on error.
+- **SYS_PIPE (32)** allocates a 4KB ring buffer shared between two chardev VFS nodes. Up to 16 concurrent pipes. The read end blocks when empty (until data arrives or write end closes). The write end blocks when full (until space is available or read end closes).
+- **SYS_DUP2 (33)** is the standard mechanism for I/O redirection: `dup2(pipe_fds[0], 0)` redirects stdin to a pipe read end. Inherited across `fork()`; preserved across `exec()`.
 - Extra stack args are at `[uesp+0]`, `[uesp+4]`, `[uesp+8]` — note offset 0, not +4, because they are pushed before `int $0x80` and ESP points to the first pushed value.

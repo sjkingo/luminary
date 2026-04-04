@@ -7,6 +7,7 @@
 #include <stdbool.h>
 #include "kernel/kernel.h"
 #include "kernel/dev.h"
+#include "kernel/pipe.h"
 #include "kernel/syscall.h"
 #include "kernel/task.h"
 #include "kernel/sched.h"
@@ -41,50 +42,27 @@ static int sys_nop(void)
 
 static int sys_write(struct trap_frame *frame)
 {
-    /* EBX = buffer pointer, ECX = length */
-    const char *buf = (const char *)frame->ebx;
-    unsigned int len = frame->ecx;
+    /* EBX = fd, ECX = buffer pointer, EDX = length */
+    int fd = (int)frame->ebx;
+    const char *buf = (const char *)frame->ecx;
+    unsigned int len = frame->edx;
 
-    if (!user_access_ok(buf, len) || len > 4096)
-        return -1;
+    if (fd < 0 || fd >= VFS_FD_MAX) return -1;
+    if (!user_access_ok(buf, len) || len > 4096) return -1;
 
-    /* Route through fd 1 (stdout) if it is a chardev, else fallback to printk */
-    struct vfs_fd *vfd = &running_task->fds[1];
-    if (vfd->open && vfd->node && (vfd->node->flags & VFS_CHARDEV)) {
+    struct vfs_fd *vfd = &running_task->fds[fd];
+    if (!vfd->open || !vfd->node) return -1;
+
+    if (vfd->node->flags & VFS_CHARDEV) {
         vfs_write(vfd->node, 0, len, buf);
     } else {
-        for (unsigned int i = 0; i < len; i++)
-            printk("%c", buf[i]);
+        /* Regular file — read-only in this kernel */
+        return -1;
     }
 
     return (int)len;
 }
 
-static int sys_exit(struct trap_frame *frame)
-{
-    printk("exit: running='%s'(pid %d) frame=0x%lx\n",
-           running_task->name, running_task->pid, (uint32_t)frame);
-    printk("  eax=%ld eip=0x%lx cs=0x%lx eflags=0x%lx\n",
-           (uint32_t)frame->eax, (uint32_t)frame->eip,
-           (uint32_t)frame->cs, (uint32_t)frame->eflags);
-    printk("  magic=0x%lx (expect 0x%lx) trapno=%ld err=%ld\n",
-           (uint32_t)frame->magic, (uint32_t)TRAP_MAGIC,
-           (uint32_t)frame->trapno, (uint32_t)frame->err);
-    printk("  ebp=0x%lx esp=0x%lx ebx=0x%lx uesp=0x%lx\n",
-           (uint32_t)frame->ebp, (uint32_t)frame->esp,
-           (uint32_t)frame->ebx, (uint32_t)frame->uesp);
-    /* dump all tasks */
-    struct task *_t = sched_queue;
-    while (_t) {
-        printk("  task pid=%d '%s' stack=0x%lx..0x%lx saved_esp=0x%lx\n",
-               _t->pid, _t->name, (uint32_t)_t->stack_base,
-               (uint32_t)(_t->stack_base + 4096), (uint32_t)_t->esp);
-        _t = _t->next;
-    }
-    while (1)
-        asm volatile("hlt");
-    return 0; /* unreachable */
-}
 
 static int sys_win_get_size(struct trap_frame *frame)
 {
@@ -96,13 +74,6 @@ static int sys_win_get_size(struct trap_frame *frame)
     return gui_window_get_size(id, pw, ph);
 }
 
-static int sys_read_nb(struct trap_frame *frame)
-{
-    char *buf = (char *)frame->ebx;
-    unsigned int len = frame->ecx;
-    if (!user_access_ok(buf, len) || len > 4096) return -1;
-    return keyboard_read(buf, len);
-}
 
 static int sys_yield(void)
 {
@@ -114,44 +85,25 @@ static int sys_yield(void)
 
 static int sys_read(struct trap_frame *frame)
 {
-    char *buf = (char *)frame->ebx;
-    unsigned int len = frame->ecx;
+    /* EBX = fd, ECX = buffer pointer, EDX = length */
+    int fd = (int)frame->ebx;
+    char *buf = (char *)frame->ecx;
+    unsigned int len = frame->edx;
 
-    if (!user_access_ok(buf, len) || len > 4096)
-        return -1;
+    if (fd < 0 || fd >= VFS_FD_MAX) return -1;
+    if (!user_access_ok(buf, len) || len > 4096) return -1;
 
-    /* Route through fd 0 (stdin) if it is a chardev */
-    struct vfs_fd *vfd = &running_task->fds[0];
-    if (vfd->open && vfd->node && (vfd->node->flags & VFS_CHARDEV)) {
-        return (int)vfs_read(vfd->node, 0, len, buf);
+    struct vfs_fd *vfd = &running_task->fds[fd];
+    if (!vfd->open || !vfd->node) return -1;
+
+    if (vfd->node->flags & (VFS_FILE | VFS_CHARDEV)) {
+        uint32_t n = vfs_read(vfd->node, vfd->offset, len, buf);
+        if (!(vfd->node->flags & VFS_CHARDEV))
+            vfd->offset += n;
+        return (int)n;
     }
 
-    /* Fallback: legacy blocking keyboard loop (reached only before init_devfs) */
-    for (;;) {
-        if (gui_has_windows()) {
-            enable_interrupts();
-            asm volatile("hlt");
-            disable_interrupts();
-            continue;
-        }
-
-        int n = keyboard_read(buf, len);
-        int out = 0;
-        for (int i = 0; i < n; i++) {
-            if (buf[i] == KEY_PGUP)
-                fbdev_scroll_up();
-            else if (buf[i] == KEY_PGDN)
-                fbdev_scroll_down();
-            else
-                buf[out++] = buf[i];
-        }
-        if (out > 0)
-            return out;
-
-        enable_interrupts();
-        asm volatile("hlt");
-        disable_interrupts();
-    }
+    return -1;
 }
 
 static int sys_uptime(void)
@@ -172,15 +124,31 @@ static int sys_halt(void)
     return 0; /* unreachable */
 }
 
-static int sys_ps(void)
+static int sys_ps(struct trap_frame *frame)
 {
+    /* EBX = buf, ECX = buflen — format process list into userland buffer */
+    char *buf = (char *)frame->ebx;
+    unsigned int buflen = (unsigned int)frame->ecx;
+
+    if (!user_access_ok(buf, buflen) || buflen == 0) return -1;
+
+    unsigned int pos = 0;
+    char tmp[64];
+
+    /* Header */
+    const char *hdr = "PID  PRIO  NAME\n";
+    unsigned int i = 0;
+    while (hdr[i] && pos < buflen - 1) buf[pos++] = hdr[i++];
+
     struct task *t = sched_queue;
-    printk("PID  PRIO     NAME\n");
-    while (t != NULL) {
-        printk("%-4d %-8d %s\n", t->pid, t->prio_s, t->name);
+    while (t && pos < buflen - 1) {
+        int n = sprintf(tmp, "%-4d %-5d %s\n", t->pid, t->prio_s, t->name);
+        for (int j = 0; j < n && pos < buflen - 1; j++)
+            buf[pos++] = tmp[j];
         t = t->next;
     }
-    return 0;
+    buf[pos] = '\0';
+    return (int)pos;
 }
 
 /* ── GUI syscall helpers ─────────────────────────────────────────────────── */
@@ -456,28 +424,59 @@ static int sys_close(struct trap_frame *frame)
     int fd = (int)frame->ebx;
     if (fd < 0 || fd >= VFS_FD_MAX) return -1;
     if (!running_task->fds[fd].open) return -1;
+    struct vfs_node *node = running_task->fds[fd].node;
     running_task->fds[fd].open = false;
     running_task->fds[fd].node = NULL;
+    if (node) pipe_notify_close(node);
     return 0;
 }
 
-static int sys_read_fd(struct trap_frame *frame)
+static int sys_pipe(struct trap_frame *frame)
 {
-    int      fd  = (int)frame->ebx;
-    void    *buf = (void *)frame->ecx;
-    uint32_t len = frame->edx;
+    /* EBX = pointer to int[2] in user space: [0]=read_fd, [1]=write_fd */
+    int *fds = (int *)frame->ebx;
+    if (!user_access_ok(fds, sizeof(int) * 2)) return -1;
 
-    if (fd < 0 || fd >= VFS_FD_MAX) return -1;
-    if (!running_task->fds[fd].open) return -1;
-    if (!user_access_ok(buf, len)) return -1;
+    struct vfs_node *rnode, *wnode;
+    if (pipe_create(&rnode, &wnode) < 0) return -1;
 
-    struct vfs_fd *vfd = &running_task->fds[fd];
-    if (!(vfd->node->flags & (VFS_FILE | VFS_CHARDEV))) return -1;
+    int rfd = fd_alloc(rnode);
+    if (rfd < 0) return -1;
+    int wfd = fd_alloc(wnode);
+    if (wfd < 0) {
+        running_task->fds[rfd].open = false;
+        running_task->fds[rfd].node = NULL;
+        return -1;
+    }
 
-    uint32_t n = vfs_read(vfd->node, vfd->offset, len, buf);
-    vfd->offset += n;
-    return (int)n;
+    fds[0] = rfd;
+    fds[1] = wfd;
+    return 0;
 }
+
+static int sys_dup2(struct trap_frame *frame)
+{
+    /* EBX = oldfd, ECX = newfd */
+    int oldfd = (int)frame->ebx;
+    int newfd = (int)frame->ecx;
+
+    if (oldfd < 0 || oldfd >= VFS_FD_MAX) return -1;
+    if (newfd < 0 || newfd >= VFS_FD_MAX) return -1;
+    if (!running_task->fds[oldfd].open) return -1;
+    if (oldfd == newfd) return newfd;
+
+    /* Close newfd if open */
+    if (running_task->fds[newfd].open) {
+        struct vfs_node *old = running_task->fds[newfd].node;
+        running_task->fds[newfd].open = false;
+        running_task->fds[newfd].node = NULL;
+        if (old) pipe_notify_close(old);
+    }
+
+    running_task->fds[newfd] = running_task->fds[oldfd];
+    return newfd;
+}
+
 
 static int sys_lseek(struct trap_frame *frame)
 {
@@ -564,9 +563,6 @@ void syscall_handler(struct trap_frame *frame)
     case SYS_WRITE:
         ret = sys_write(frame);
         break;
-    case SYS_EXIT:
-        ret = sys_exit(frame);
-        break;
     case SYS_READ:
         ret = sys_read(frame);
         break;
@@ -580,7 +576,7 @@ void syscall_handler(struct trap_frame *frame)
         ret = sys_halt();
         break;
     case SYS_PS:
-        ret = sys_ps();
+        ret = sys_ps(frame);
         break;
     case SYS_WIN_CREATE:
         ret = sys_win_create(frame);
@@ -618,17 +614,11 @@ void syscall_handler(struct trap_frame *frame)
     case SYS_WIN_GET_SIZE:
         ret = sys_win_get_size(frame);
         break;
-    case SYS_READ_NB:
-        ret = sys_read_nb(frame);
-        break;
     case SYS_OPEN:
         ret = sys_open(frame);
         break;
     case SYS_CLOSE:
         ret = sys_close(frame);
-        break;
-    case SYS_READ_FD:
-        ret = sys_read_fd(frame);
         break;
     case SYS_LSEEK:
         ret = sys_lseek(frame);
@@ -653,6 +643,12 @@ void syscall_handler(struct trap_frame *frame)
         break;
     case SYS_EXIT_TASK:
         ret = sys_exit_task(frame);
+        break;
+    case SYS_PIPE:
+        ret = sys_pipe(frame);
+        break;
+    case SYS_DUP2:
+        ret = sys_dup2(frame);
         break;
     default:
         printk("unknown syscall %d from pid %d\n",
