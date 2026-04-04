@@ -446,15 +446,45 @@ static void dispatch(char *line)
     if (*line == '\0' || *line == '#') return;
     run_pipeline(line);
 }
+static void run_script(const char *path)
+{
+    static char sbuf[4096];
+    int fd = open(path, O_RDONLY);
+    if (fd < 0) { printf("sh: %s: not found\n", path); return; }
+    int n = read(fd, sbuf, sizeof(sbuf) - 1);
+    vfs_close(fd);
+    if (n <= 0) return;
+    sbuf[n] = '\0';
+
+    char *p = sbuf;
+    while (*p) {
+        char *line = p;
+        while (*p && *p != '\n') p++;
+        int has_more = (*p == '\n');
+        *p = '\0';
+        /* skip shebang on first line */
+        if (line[0] != '#')
+            dispatch(line);
+        if (!has_more) break;
+        p++;
+    }
+}
+
 int main(int argc, char **argv)
 {
-    (void)argc; (void)argv;
+    getcwd(cwd, sizeof(cwd));
+
+    if (argc >= 2) {
+        char resolved[256];
+        resolve_path(argv[1], resolved, sizeof(resolved));
+        run_script(resolved);
+        return 0;
+    }
 
     static char cmd[256];
     int idx = 0;
     char c;
 
-    getcwd(cwd, sizeof(cwd));
     printf("Luminary shell\nType 'help' for commands.\n\n%s $ ", cwd);
 
     for (;;) {

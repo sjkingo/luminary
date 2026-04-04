@@ -1,2 +1,4 @@
+#!/bin/sh
+echo "Starting GUI.."
 wallpaper /usr/share/wallpaper/moon.bmp
 term

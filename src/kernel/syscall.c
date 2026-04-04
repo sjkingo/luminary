@@ -336,6 +336,42 @@ static int sys_kill(struct trap_frame *frame)
 
 static const char *resolve_path(const char *upath, char *out_buf);
 
+/* Parse a shebang line "#!interpreter [arg]" from the first line of data.
+ * Writes NUL-terminated interpreter path into interp_buf (size interp_sz)
+ * and optional argument into arg_buf (size arg_sz); arg_buf[0]=='\0' if none.
+ * Returns 1 if a shebang was found, 0 otherwise. */
+static int parse_shebang(const char *data, uint32_t size,
+                          char *interp_buf, uint32_t interp_sz,
+                          char *arg_buf,    uint32_t arg_sz)
+{
+    if (size < 2 || data[0] != '#' || data[1] != '!')
+        return 0;
+
+    const char *p = data + 2;
+    const char *end = data + size;
+
+    /* skip optional spaces after #! */
+    while (p < end && (*p == ' ' || *p == '\t')) p++;
+
+    /* read interpreter path */
+    uint32_t n = 0;
+    while (p < end && *p != ' ' && *p != '\t' && *p != '\n' && *p != '\r' && n < interp_sz - 1)
+        interp_buf[n++] = *p++;
+    interp_buf[n] = '\0';
+    if (n == 0) return 0;
+
+    /* skip spaces between interpreter and optional arg */
+    while (p < end && (*p == ' ' || *p == '\t')) p++;
+
+    /* read optional arg */
+    n = 0;
+    while (p < end && *p != ' ' && *p != '\t' && *p != '\n' && *p != '\r' && n < arg_sz - 1)
+        arg_buf[n++] = *p++;
+    arg_buf[n] = '\0';
+
+    return 1;
+}
+
 static int sys_exec(struct trap_frame *frame)
 {
     char resolved[VFS_PATH_MAX];
@@ -362,6 +398,47 @@ static int sys_exec(struct trap_frame *frame)
     if (!elf_data) {
         printk("exec: '%s' not found\n", path);
         return -1;
+    }
+
+    /* Shebang: if file starts with #!, exec the interpreter with the script
+     * path prepended. argv becomes: [interp, arg?, script, original argv[1]...] */
+    static char shebang_interp[VFS_PATH_MAX];
+    static char shebang_arg[128];
+    static char shebang_script[VFS_PATH_MAX];
+    if (parse_shebang((const char *)elf_data, elf_size,
+                      shebang_interp, sizeof(shebang_interp),
+                      shebang_arg,    sizeof(shebang_arg))) {
+        /* resolve interpreter */
+        char interp_resolved[VFS_PATH_MAX];
+        if (!vfs_resolve("/", shebang_interp, interp_resolved)) {
+            printk("exec: shebang interpreter '%s' not found\n", shebang_interp);
+            return -1;
+        }
+        uint32_t interp_size = 0;
+        const void *interp_data = initrd_get_file(interp_resolved, &interp_size);
+        if (!interp_data) {
+            printk("exec: shebang interpreter '%s' not found\n", interp_resolved);
+            return -1;
+        }
+
+        /* build new argv: [interp, arg?, script, original_argv[1]...] */
+        static const char *sargv[32];
+        int sargc = 0;
+        sargv[sargc++] = shebang_interp;
+        if (shebang_arg[0])
+            sargv[sargc++] = shebang_arg;
+        /* script path: copy resolved into shebang_script so it lives in static storage */
+        memcpy(shebang_script, resolved, strlen(resolved) + 1);
+        sargv[sargc++] = shebang_script;
+        /* append original argv[1..] (skip argv[0] which was the script name) */
+        for (int i = 1; i < argc && sargc < 31; i++)
+            sargv[sargc++] = kargv[i];
+        sargv[sargc] = NULL;
+
+        int r = task_exec(interp_data, interp_size, frame, sargc, sargv);
+        if (r == 0)
+            cpu_reset_fault_counter();
+        return r;
     }
 
     int r = task_exec(elf_data, elf_size, frame, argc, kargv);
