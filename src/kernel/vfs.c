@@ -58,7 +58,6 @@ static struct vfs_node *vfs_root = NULL;
 void vfs_set_root(struct vfs_node *root)
 {
     vfs_root = root;
-    printk(MODULE "root mounted\n");
 }
 
 /* ── path resolution ─────────────────────────────────────────────────────── */

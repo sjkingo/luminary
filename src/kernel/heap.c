@@ -134,28 +134,22 @@ void *kmalloc(uint32_t size)
             if (overflow_table[i].virt == 0) { slot = i; break; }
         }
         if (slot < 0) {
-#ifdef DEBUG
-            DBGK("heap", "%s:%d(%s) overflow table full (size=%ld)\n",
-                 file, line, func, size);
-#endif
+            DBGK("%s:%d(%s) overflow table full (size=%ld)\n",
+                 path_basename(file), line, func, size);
             return NULL;
         }
 
         void *virt = vmm_alloc_pages(nframes);
         if (!virt) {
-#ifdef DEBUG
-            DBGK("heap", "%s:%d(%s) overflow alloc failed (size=%ld)\n",
-                 file, line, func, size);
-#endif
+            DBGK("%s:%d(%s) overflow alloc failed (size=%ld)\n",
+                 path_basename(file), line, func, size);
             return NULL;
         }
 
         overflow_table[slot].virt    = (uint32_t)virt;
         overflow_table[slot].nframes = nframes;
-#ifdef DEBUG
-        DBGK("heap", "%s:%d(%s) overflow alloc %ld frames at 0x%lx (size=%ld)\n",
-             file, line, func, nframes, (uint32_t)virt, size);
-#endif
+        DBGK("%s:%d(%s) overflow alloc %ld frames at 0x%lx (size=%ld)\n",
+             path_basename(file), line, func, nframes, (uint32_t)virt, size);
         return virt;
     }
 
@@ -166,29 +160,23 @@ void *kmalloc(uint32_t size)
         if (cls->pages[i].n_free == 0) continue;
         void *ptr = slab_page_alloc(&cls->pages[i], cls->obj_size);
         if (ptr) {
-#ifdef DEBUG
-            DBGK("heap", "%s:%d(%s) slab[%ld] alloc at 0x%lx (size=%ld)\n",
-                 file, line, func, cls->obj_size, (uint32_t)ptr, size);
-#endif
+            DBGK("%s:%d(%s) slab[%ld] alloc at 0x%lx (size=%ld)\n",
+                 path_basename(file), line, func, cls->obj_size, (uint32_t)ptr, size);
             return ptr;
         }
     }
 
     /* No free slot — grow the class */
     if (!slab_grow(cls)) {
-#ifdef DEBUG
-        DBGK("heap", "%s:%d(%s) slab[%ld] grow failed (size=%ld)\n",
-             file, line, func, cls->obj_size, size);
-#endif
+        DBGK("%s:%d(%s) slab[%ld] grow failed (size=%ld)\n",
+             path_basename(file), line, func, cls->obj_size, size);
         return NULL;
     }
 
     /* Allocate from the newly added page */
     void *ptr = slab_page_alloc(&cls->pages[cls->n_pages - 1], cls->obj_size);
-#ifdef DEBUG
-    DBGK("heap", "%s:%d(%s) slab[%ld] alloc (new page) at 0x%lx (size=%ld)\n",
-         file, line, func, cls->obj_size, (uint32_t)ptr, size);
-#endif
+    DBGK("%s:%d(%s) slab[%ld] alloc (new page) at 0x%lx (size=%ld)\n",
+         path_basename(file), line, func, cls->obj_size, (uint32_t)ptr, size);
     return ptr;
 }
 
@@ -208,10 +196,8 @@ void kfree(void *ptr)
             vmm_free_pages((void *)addr, overflow_table[i].nframes);
             overflow_table[i].virt    = 0;
             overflow_table[i].nframes = 0;
-#ifdef DEBUG
-            DBGK("heap", "%s:%d(%s) overflow free at 0x%lx\n",
-                 file, line, func, addr);
-#endif
+            DBGK("%s:%d(%s) overflow free at 0x%lx\n",
+                 path_basename(file), line, func, addr);
             return;
         }
     }
@@ -227,27 +213,21 @@ void kfree(void *ptr)
             uint32_t slot = (addr - sp->phys) / cls->obj_size;
             /* Validate alignment */
             if (sp->phys + slot * cls->obj_size != addr) {
-#ifdef DEBUG
-                DBGK("heap", "%s:%d(%s) misaligned pointer 0x%lx\n",
-                     file, line, func, addr);
-#endif
+                DBGK("%s:%d(%s) misaligned pointer 0x%lx\n",
+                     path_basename(file), line, func, addr);
                 panic("kfree: misaligned pointer");
             }
             uint32_t w   = slot / 32;
             uint32_t bit = slot % 32;
             if (!(sp->bitmap[w] & (1u << bit))) {
-#ifdef DEBUG
-                DBGK("heap", "%s:%d(%s) double free at 0x%lx\n",
-                     file, line, func, addr);
-#endif
+                DBGK("%s:%d(%s) double free at 0x%lx\n",
+                     path_basename(file), line, func, addr);
                 panic("kfree: double free");
             }
             sp->bitmap[w] &= ~(1u << bit);
             sp->n_free++;
-#ifdef DEBUG
-            DBGK("heap", "%s:%d(%s) slab[%ld] free slot %ld at 0x%lx\n",
-                 file, line, func, cls->obj_size, slot, addr);
-#endif
+            DBGK("%s:%d(%s) slab[%ld] free slot %ld at 0x%lx\n",
+                 path_basename(file), line, func, cls->obj_size, slot, addr);
             return;
         }
     }

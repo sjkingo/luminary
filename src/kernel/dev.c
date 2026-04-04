@@ -140,7 +140,7 @@ void init_devfs(void)
     dev_stderr->write_op = stdout_write_op;
     vfs_add_child(dev_dir, dev_stderr);
 
-    printk("devfs: /dev/stdin, /dev/stdout, /dev/stderr ready\n");
+    printk("devfs: devfs mounted at /dev\n");
 }
 
 /* ── task_open_std_fds ───────────────────────────────────────────────────── */

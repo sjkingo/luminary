@@ -87,21 +87,27 @@ static int tokenise(char *line, char *argv[], int argv_max)
     char *p = line;
 
     while (*p && argc < argv_max) {
+        /* skip whitespace */
         while (*p == ' ' || *p == '\t') p++;
         if (*p == '\0') break;
 
-        argv[argc++] = p;
+        /* Collect token in-place: dst writes stripped chars, src reads raw */
+        char *tok = p;
+        char *dst = p;
+        char quote = 0;
 
-        while (*p && *p != ' ' && *p != '\t') {
-            if (*p == '\'') {
-                p++;
-                while (*p && *p != '\'') p++;
-                if (*p == '\'') p++;
+        while (*p) {
+            if (quote) {
+                if (*p == quote) { quote = 0; p++; }
+                else             { *dst++ = *p++; }
             } else {
-                p++;
+                if (*p == ' ' || *p == '\t') { p++; break; }
+                if (*p == '\'' || *p == '"') { quote = *p++; }
+                else                         { *dst++ = *p++; }
             }
         }
-        if (*p) { *p = '\0'; p++; }
+        *dst = '\0';
+        argv[argc++] = tok;
     }
     argv[argc] = (char *)0;
     return argc;
@@ -233,9 +239,9 @@ static int split_pipe(char *line, char *segs[], int max_segs)
     segs[n++] = p;
 
     while (*p && n < max_segs) {
-        if (*p == '\'') {
-            p++;
-            while (*p && *p != '\'') p++;
+        if (*p == '\'' || *p == '"') {
+            char q = *p++;
+            while (*p && *p != q) p++;
             if (*p) p++;
         } else if (*p == '|') {
             *p++ = '\0';

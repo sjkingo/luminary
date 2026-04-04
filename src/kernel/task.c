@@ -19,15 +19,22 @@ _Static_assert(offsetof(struct task, page_dir_phys) == TASK_PAGE_DIR_OFFSET,
                "TASK_PAGE_DIR_OFFSET does not match struct layout");
 _Static_assert(offsetof(struct task, stack_base) == TASK_STACK_BASE_OFFSET,
                "TASK_STACK_BASE_OFFSET does not match struct layout");
+_Static_assert(offsetof(struct task, stack_hwm) == TASK_STACK_HWM_OFFSET,
+               "TASK_STACK_HWM_OFFSET does not match struct layout");
 
 _Static_assert(TASK_STACK_SIZE % PAGE_SIZE == 0,
                "TASK_STACK_SIZE must be a multiple of PAGE_SIZE");
+
+/* Magic value written to the bottom word of every kernel stack.
+ * Checked in kstack_free and dump_trap_frame to detect overflow. */
+#define KSTACK_CANARY  0xDEADC0DEu
 
 /* Allocate a kernel stack with a guard page immediately below it.
  * Layout: [guard page (unmapped)] [TASK_STACK_SIZE bytes (usable)]
  * Returns a pointer to the first usable byte (i.e. stack_base).
  * The guard page sits at stack_base - PAGE_SIZE; overflowing the stack
- * triggers a page fault rather than silently corrupting adjacent data. */
+ * triggers a page fault rather than silently corrupting adjacent data.
+ * A canary word is written at stack_base[0] to detect near-overflow. */
 static uint8_t *kstack_alloc(void)
 {
     uint32_t total_pages = (TASK_STACK_SIZE / PAGE_SIZE) + 1; /* +1 for guard */
@@ -36,7 +43,10 @@ static uint8_t *kstack_alloc(void)
         return NULL;
     /* Unmap the first page to make it a guard page */
     vmm_unmap_page((uint32_t)alloc);
-    return alloc + PAGE_SIZE;
+    uint8_t *base = alloc + PAGE_SIZE;
+    /* Write canary at the bottom of the usable stack */
+    *(uint32_t *)base = KSTACK_CANARY;
+    return base;
 }
 
 /* Free a kernel stack previously allocated with kstack_alloc.
@@ -47,6 +57,9 @@ static void kstack_free(uint8_t *stack_base)
 {
     if (!stack_base)
         return;
+    if (*(uint32_t *)stack_base != KSTACK_CANARY)
+        printk("WARN: kernel stack canary overwritten at 0x%lx — stack overflow!\n",
+               (uint32_t)stack_base);
     uint32_t total_pages = (TASK_STACK_SIZE / PAGE_SIZE) + 1;
     vmm_free_pages((void *)((uint32_t)stack_base - PAGE_SIZE), total_pages);
 }
@@ -81,6 +94,7 @@ static void setup_task_stack(struct task *t)
         panic("setup_task_stack: kstack_alloc failed");
 
     t->stack_base = (unsigned int)stack;
+    t->stack_hwm  = (unsigned int)(stack + TASK_STACK_SIZE); /* start at top, grows down */
 
     /* Start at the top of the allocated stack */
     unsigned int *sp = (unsigned int *)(stack + TASK_STACK_SIZE);
@@ -188,7 +202,7 @@ out:
     if (sched_queue == NULL)
         panic("BUG: head of sched_queue is empty");
 
-    DBGK("task", "new_task: %s pid=%d prio=%d\n", name, t->pid, prio);
+    DBGK("new_task: %s pid=%d prio=%d\n", name, t->pid, prio);
 }
 
 /* Build a synthetic trap frame for a user-mode task. When trapret runs iret,
@@ -299,7 +313,7 @@ out:
     if (sched_queue == NULL)
         panic("BUG: head of sched_queue is empty");
 
-    DBGK("task", "new_user_task: %s pid=%d prio=%d\n", name, t->pid, prio);
+    DBGK("new_user_task: %s pid=%d prio=%d\n", name, t->pid, prio);
 }
 
 /* Helper to insert a task into the scheduler queue by priority */
@@ -359,7 +373,7 @@ void create_elf_task(struct task *t, char *name, int prio,
     if (sched_queue == NULL)
         panic("BUG: head of sched_queue is empty");
 
-    DBGK("task", "new_elf_task: %s pid=%d entry=0x%lx prio=%d\n",
+    DBGK("new_elf_task: %s pid=%d entry=0x%lx prio=%d\n",
          name, t->pid, entry_point, prio);
 }
 
@@ -542,6 +556,7 @@ struct task *task_fork(struct trap_frame *frame)
     memcpy(kstack, parent_kstack, TASK_STACK_SIZE);
 
     child->stack_base = (unsigned int)kstack;
+    child->stack_hwm  = (unsigned int)(kstack + TASK_STACK_SIZE);
 
     /* Use the current syscall trap frame as the saved ESP.
      * running_task->esp is only updated on context switch, so it may be
@@ -561,7 +576,7 @@ struct task *task_fork(struct trap_frame *frame)
 
     enable_interrupts();
 
-    DBGK("task", "fork: pid %d -> child pid %d\n", running_task->pid, child->pid);
+    DBGK("fork: pid %d -> child pid %d\n", running_task->pid, child->pid);
     return child;
 }
 

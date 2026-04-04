@@ -49,3 +49,7 @@ uint32_t vmm_clone_page_dir(uint32_t src_dir_phys);
  * directory; fault_addr is the faulting virtual address.
  * Returns 1 if the fault was a valid CoW fault and was resolved, 0 otherwise. */
 int vmm_cow_fault(uint32_t dir_phys, uint32_t fault_addr);
+
+/* Identify what memory region a virtual address belongs to.
+ * Writes a human-readable description into buf (null-terminated). */
+void vmm_describe_addr(uint32_t addr, char *buf, uint32_t buflen);

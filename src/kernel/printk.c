@@ -217,9 +217,15 @@ int printk_serial(const char *format, ...)
     va_start(args, format);
 
     if (in_use) {
-        /* Re-entrant call (interrupt during serial print): emit directly,
-         * no timestamp, to avoid clobbering the in-progress buffer. */
-        print(0, format, args);
+        /* Re-entrant call (interrupt during serial print): format into a
+         * small stack buffer and emit to serial only — never the framebuffer. */
+        char rbuf[128];
+        char *rp = rbuf;
+        print(&rp, format, args);
+        *rp = '\0';
+        for (char *s = rbuf; *s; s++)
+            write_serial(*s);
+        va_end(args);
         return 0;
     }
     in_use = 1;
@@ -227,6 +233,11 @@ int printk_serial(const char *format, ...)
     char *p = buf;
     int n = print(&p, format, args);
     *p = '\0';
+
+    /* Emit atomically: save/disable interrupts so a context switch cannot
+     * interleave another task's serial output mid-line. */
+    uint32_t eflags;
+    asm volatile("pushf\n\tpop %0\n\tcli" : "=r"(eflags));
 
     for (char *s = buf; *s; s++) {
         if (at_line_start) {
@@ -256,6 +267,8 @@ int printk_serial(const char *format, ...)
     }
 
     in_use = 0;
+    if (eflags & (1u << 9))
+        asm volatile("sti");
     return n;
 }
 

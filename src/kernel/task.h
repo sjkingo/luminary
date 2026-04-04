@@ -22,6 +22,7 @@ struct task {
     unsigned int esp;           /* saved stack pointer */
     unsigned int page_dir_phys; /* physical address of task's page directory */
     unsigned int stack_base;    /* base of allocated stack (for kfree) */
+    unsigned int stack_hwm;     /* lowest ESP seen (high-water mark of usage) */
     void (*entry)(void);        /* entry point for new tasks */
 
     /* Open file descriptor table */
@@ -42,10 +43,11 @@ struct task {
 
 #define PID_IDLE                0
 #define PID_INIT                1
-#define TASK_STACK_SIZE         8192
+#define TASK_STACK_SIZE         16384
 #define TASK_ESP_OFFSET         52  /* byte offset of esp in struct task */
 #define TASK_PAGE_DIR_OFFSET    56  /* byte offset of page_dir_phys in struct task */
 #define TASK_STACK_BASE_OFFSET  60  /* byte offset of stack_base in struct task */
+#define TASK_STACK_HWM_OFFSET   64  /* byte offset of stack_hwm in struct task */
 
 /* Initialise the task subsystem */
 void init_task(void);

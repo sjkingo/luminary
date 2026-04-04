@@ -2,12 +2,12 @@
 #include "drivers/vbe.h"
 #include "drivers/fbdev.h"
 #include "kernel/kernel.h"
-#include "fonts/vga8x16.h"
+#include "fonts/ctrld16r.h"
 
 #define MODULE "fbdev: "
 
 /* Solarized Dark palette */
-#define SOL_BASE03  rgb(  0,  26,  33)   /* background: darker than base03 (#001a21), same hue */
+#define SOL_BASE03  rgb( 30,  30,  50)   /* background */
 #define SOL_BASE0   rgb(147, 161, 161)   /* foreground: base1 (emphasized content) */
 
 struct fbdev_console {
@@ -69,7 +69,7 @@ static void clear_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h)
     }
 }
 
-static void drawglyph(uint8_t *glyph, uint32_t x, uint32_t y, uint32_t fgcolor)
+static void drawglyph(const uint8_t *glyph, uint32_t x, uint32_t y, uint32_t fgcolor)
 {
     uint32_t b = 0;
     for (uint32_t j = 0; j < CONSOLE_FONT_HEIGHT; j++) {

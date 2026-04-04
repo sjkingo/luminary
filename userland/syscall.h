@@ -45,6 +45,8 @@
 #define SYS_GETPPID     37  /* getppid() -> parent PID, 0 if no parent */
 #define SYS_MKDIR       38  /* mkdir(path) -> 0 or -1 */
 #define SYS_UNLINK      39  /* unlink(path) -> 0 or -1 */
+#define SYS_GUI_SET_BG              40  /* gui_set_bg(pixels, w, h) -> 0 or -1 */
+#define SYS_GUI_SET_DESKTOP_COLOR   41  /* gui_set_desktop_color(r, g, b) -> 0 */
 
 #define WNOHANG         1   /* waitpid flag: return -1 immediately if child hasn't exited */
 
@@ -276,4 +278,19 @@ static inline int mkdir(const char *path)
 static inline int unlink(const char *path)
 {
     return syscall1(SYS_UNLINK, (unsigned int)path);
+}
+
+/* gui_set_bg: set desktop background from 32-bit ARGB pixel buffer.
+ * pixels must be w*h uint32_t values. Kernel copies the data.
+ * Returns 0 on success, -1 on failure. */
+static inline int gui_set_bg(const unsigned int *pixels, unsigned int w, unsigned int h)
+{
+    return syscall3(SYS_GUI_SET_BG, (unsigned int)pixels, w, h);
+}
+
+/* gui_set_desktop_color: set the letterbox/desktop fill colour (r, g, b in 0-255).
+ * Takes effect immediately; persists until changed. */
+static inline int gui_set_desktop_color(unsigned int r, unsigned int g, unsigned int b)
+{
+    return syscall3(SYS_GUI_SET_DESKTOP_COLOR, r, g, b);
 }

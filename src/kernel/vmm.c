@@ -153,6 +153,7 @@ void *vmm_alloc_pages(uint32_t n)
     uint32_t virt_base;
     if (best < KVIRT_FL_MAX) {
         virt_base = kvirt_free[best].base;
+        uint32_t entry_end = kvirt_free[best].base + kvirt_free[best].npages * PAGE_SIZE;
         if (kvirt_free[best].npages == n) {
             /* Exact fit: remove entry */
             kvirt_free[best] = kvirt_free[--kvirt_free_count];
@@ -161,6 +162,10 @@ void *vmm_alloc_pages(uint32_t n)
             kvirt_free[best].base   += n * PAGE_SIZE;
             kvirt_free[best].npages -= n;
         }
+        /* Keep kvirt_next above the end of this recycled range so the bump
+         * allocator never hands out an address that is already in use. */
+        if (entry_end > kvirt_next)
+            kvirt_next = entry_end;
     } else {
         /* Bump allocator */
         virt_base = kvirt_next;
@@ -173,6 +178,8 @@ void *vmm_alloc_pages(uint32_t n)
         if (!frame) return NULL;
         vmm_map_page(virt_base + i * PAGE_SIZE, frame, PTE_PRESENT | PTE_WRITE);
     }
+    DBGK("alloc_pages %ld pages -> 0x%lx-0x%lx (hwm 0x%lx)\n",
+         n, virt_base, virt_base + n * PAGE_SIZE, kvirt_next);
     return (void *)virt_base;
 }
 
@@ -220,6 +227,8 @@ restart:
         printk("vmm: free-list full, losing virtual range 0x%lx (%ld pages)\n",
                new_base, new_npages);
     }
+    DBGK("free_pages %ld pages @ 0x%lx (coalesced to 0x%lx+%ld, hwm 0x%lx)\n",
+         n, v, new_base, new_npages, kvirt_next);
 }
 
 /* Temporary kmap pool: a fixed window of virtual pages at the top of the
@@ -262,6 +271,35 @@ void vmm_kunmap(void *virt)
     asm volatile("mov %%cr3, %0" : "=r"(cr3));
     vmm_unmap_page_in(cr3, v);
     kmap_used &= ~(1u << slot);
+}
+
+/* Describe a kernel virtual address in terms of known regions.
+ * Useful in fault handlers to give context without reading a map file. */
+void vmm_describe_addr(uint32_t addr, char *buf, uint32_t buflen)
+{
+    (void)buflen;
+    if (addr < KVIRT_BASE) {
+        sprintf(buf, "user/physical (0x%lx)", addr);
+        return;
+    }
+    if (addr >= KMAP_BASE && addr < KMAP_BASE + KMAP_SLOTS * PAGE_SIZE) {
+        uint32_t slot = (addr - KMAP_BASE) / PAGE_SIZE;
+        sprintf(buf, "kmap slot %ld (transient, 0x%lx)", slot, addr);
+        return;
+    }
+    for (uint32_t i = 0; i < kvirt_free_count; i++) {
+        uint32_t base = kvirt_free[i].base;
+        uint32_t end  = base + kvirt_free[i].npages * PAGE_SIZE;
+        if (addr >= base && addr < end) {
+            sprintf(buf, "kvirt free [0x%lx-0x%lx) (0x%lx)", base, end, addr);
+            return;
+        }
+    }
+    if (addr < kvirt_next) {
+        sprintf(buf, "kvirt alloc (0x%lx, below hwm 0x%lx)", addr, kvirt_next);
+        return;
+    }
+    sprintf(buf, "kvirt unalloc (0x%lx, above hwm 0x%lx)", addr, kvirt_next);
 }
 
 uint32_t vmm_create_page_dir(void)
@@ -346,7 +384,7 @@ int vmm_cow_fault(uint32_t dir_phys, uint32_t fault_addr)
     uint32_t old_frame = pt[pti] & 0xFFFFF000;
     uint32_t flags     = pt[pti] & 0xFFF;
 
-    DBGK("vmm", "cow_fault: virt=0x%lx old_frame=0x%lx refcount=%lu\n",
+    DBGK("cow_fault: virt=0x%lx old_frame=0x%lx refcount=%lu\n",
          fault_addr, old_frame, pmm_refcount_get(old_frame));
 
     if (pmm_refcount_get(old_frame) == 1) {
@@ -501,5 +539,4 @@ void init_vmm(void)
     cr0 |= 0x80000000;
     asm volatile("mov %0, %%cr0" : : "r"(cr0));
 
-    printk(MODULE "paging enabled\n");
 }

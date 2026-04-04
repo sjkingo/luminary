@@ -54,13 +54,14 @@ static void print_defines(void)
 /* Print a fancy startup banner */
 static void print_startup_banner(void)
 {
-    printk("  ..---..    ");
+    printk("\n");
+    printk("  ..---..    \n");
+    printk(" /       \\  ");
     if (!fbdev_is_ready())
         set_color(COLOR_LIGHT_BLUE, COLOR_BLACK);
-    printk("Luminary OS\n");
+    printk(" Luminary OS\n");
     if (!fbdev_is_ready())
         reset_color();
-    printk(" /       \\  \n");
     printk("|         |  \n");
     printk("|         |  Built with: ");
     print_defines();
@@ -68,15 +69,8 @@ static void print_startup_banner(void)
     printk(" \\  \\~/  /   Built at: %s %s\n", __DATE__, __TIME__);
     printk("  `, Y ,'    Kernel loaded at 0x%lx -> 0x%lx (%ld KB)\n", kernel_start, kernel_end, (kernel_end-kernel_start)/1024);
     printk("   |_|_|     \n");
-    printk("   |===|     ");
-    printk("%d MB memory available\n", mem_available());
-    printk("    \\_/      ");
-    {
-        struct multiboot_mod_entry *mods = (struct multiboot_mod_entry *)mb_info->mods_addr;
-        const char *tag = (mb_info->mods_count > 0 && mods[0].string)
-                          ? (const char *)mods[0].string : "(none)";
-        printk("initrd: %s\n", tag);
-    }
+    printk("   |===|     %d MB memory available\n", mem_available());
+    printk("    \\_/      \n");
     printk("\n");
 }
 
@@ -176,9 +170,9 @@ void kernel_main(struct multiboot_info *mb, uint32_t start, uint32_t stack, uint
     }
 
     uint32_t initrd_size = initrd_mod->mod_end - initrd_mod->mod_start;
-    printk("initrd: cpio at 0x%lx - 0x%lx (%ld bytes)\n",
-           initrd_mod->mod_start, initrd_mod->mod_end, initrd_size);
-    initrd_init((const void *)initrd_mod->mod_start, initrd_size);
+    uint32_t initrd_files = initrd_init((const void *)initrd_mod->mod_start, initrd_size);
+    printk("initrd: rootfs mounted at / from initrd (%ld bytes in %ld files)\n",
+           initrd_size, initrd_files);
     init_devfs();
 
     /* Load /bin/init from the VFS */

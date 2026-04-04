@@ -135,10 +135,8 @@ static struct vfs_node *find_or_create(struct vfs_node *parent, const char *name
 
 /* ── public entry point ──────────────────────────────────────────────────── */
 
-void initrd_init(const void *data, uint32_t size)
+uint32_t initrd_init(const void *data, uint32_t size)
 {
-    printk(MODULE "parsing cpio at 0x%lx (%ld bytes)\n",
-           (uint32_t)data, size);
 
     /* Create root directory node */
     struct vfs_node *root = vfs_alloc_node();
@@ -238,8 +236,8 @@ void initrd_init(const void *data, uint32_t size)
         cur += next_offset;
     }
 
-    printk(MODULE "mounted %ld files at /\n", file_count);
     vfs_set_root(root);
+    return file_count;
 }
 
 /* Look up a file by absolute path and return pointer + size.

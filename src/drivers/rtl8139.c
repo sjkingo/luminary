@@ -40,38 +40,32 @@ void rtl8139_init(struct pci_device_location *loc)
 
     /* Confirm bus mastering is now enabled */
     r = pci_read_field(pci_id, PCI_CONFIG_COMMAND, 4);
-    if (r & (1 << 2)) {
-        printk(MODULE "bus mastering is enabled\n");
-    } else {
+    if (!(r & (1 << 2)))
         panic(MODULE "could not enable bus mastering");
-    }
 
     /* Set up interrupts */
     irq = pci_read_field(pci_id, PCI_INTERRUPT_LINE, 1);
-    printk(MODULE "interrupt line at %x\n", irq);
     // TODO
 
     /* Read I/O base address */
     uint32_t bar0 = pci_read_field(pci_id, PCI_BAR0, 4);
-    uint32_t bar1 = pci_read_field(pci_id, PCI_BAR1, 4);
     if (bar0 & 0x00000001) {
 	iobase = bar0 & 0xFFFFFFFC;
     } else {
 	panic(MODULE "could not get I/O base address after bus mastering enabled");
     }
-    printk(MODULE "iobase: 0x%lx\n", iobase);
 
     /* Read MAC address */
     for (int i = 0; i < 6; ++i) {
         mac[i] = inb(iobase + RTL_PORT_MAC + i);
     }
-    printk(MODULE "mac address %02x:%02x:%02x:%02x:%02x:%02x\n", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
 
     /* Enable and reset the chip */
     outb(iobase + RTL_PORT_CONFIG, 0x0);
     outb(iobase + RTL_PORT_CMD, 0x10);
     while ((inb(iobase + RTL_PORT_CMD) & 0x10) != 0);
-    printk(MODULE "device is ready\n");
+    printk(MODULE "mac %02x:%02x:%02x:%02x:%02x:%02x, ready\n",
+           mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
 
     /* Enable interrupts for the chip */
     outb_16(iobase + RTL_PORT_IMR, 0x0005); // Tx OK and Rx OK

@@ -27,7 +27,7 @@
 #include "drivers/mouse.h"
 #include "drivers/keyboard.h"
 #include "cpu/x86.h"
-#include "fonts/vga8x16.h"
+#include "fonts/ctrld16r.h"
 
 /* ── framebuffer geometry (filled by init_gui from VBE) ─────────────────── */
 static char    *fb;            /* draw target: points to back during compose, fb_hw otherwise */
@@ -75,6 +75,8 @@ static uint32_t prev_cursor_y = 0xFFFFFFFF;
 static struct window *drag_win    = NULL;
 static int32_t        drag_off_x  = 0;
 static int32_t        drag_off_y  = 0;
+static int32_t        drag_prev_x = 0;   /* window position at last drag frame */
+static int32_t        drag_prev_y = 0;
 
 /* ── resize state ────────────────────────────────────────────────────────── */
 #define RESIZE_EDGE_NONE   0
@@ -184,7 +186,10 @@ static int cursor_type = CURSOR_TYPE_NORMAL;
 static struct window *hovered_win = NULL;
 
 /* ── colour palette ──────────────────────────────────────────────────────── */
-#define COL_DESKTOP     rgb(30,  30,  50)
+#define COL_DESKTOP     rgb(0,   0,   0)
+
+/* Runtime desktop fill colour — 0 means use COL_DESKTOP */
+static uint32_t desktop_color = 0;
 #define COL_TITLEBAR    rgb(60,  90, 160)
 #define COL_TITLEBAR_UF rgb(80,  80,  80)   /* unfocused */
 #define COL_TITLE_TEXT  rgb(255,255,255)
@@ -396,10 +401,134 @@ static void bb_draw_text(struct window *w, uint32_t x, uint32_t y,
  * Compositing
  * ═══════════════════════════════════════════════════════════════════════════ */
 
-/* Draw the desktop background */
+/* Desktop background image (optional). Set via gui_set_bg().
+ *
+ * Both bg_raw and bg_scaled are pre-allocated at init_gui() time so that
+ * gui_set_bg() (called from the syscall handler) never needs to do a large
+ * kernel heap allocation at runtime.  Runtime large kmalloc/vmm_alloc_pages
+ * calls from syscall context displace the VMM bump pointer into ranges
+ * already occupied by kernel stacks, corrupting them.
+ *
+ * bg_raw_valid / bg_scaled_valid replace NULL-pointer checks.
+ *
+ * bg_raw must hold the largest image the wallpaper tool can send.
+ * wallpaper.c caps at MAX_W=1280, MAX_H=1092 — match those here. */
+#define BG_RAW_MAX_W   1280u
+#define BG_RAW_MAX_H   1092u
+static uint32_t *bg_raw       = NULL;   /* pre-allocated, BG_RAW_MAX_W×BG_RAW_MAX_H */
+static bool      bg_raw_valid = false;  /* true when bg_raw holds new pixels */
+static uint32_t  bg_raw_w     = 0;
+static uint32_t  bg_raw_h     = 0;
+static uint32_t  bg_raw_nframes = 0;
+
+static uint32_t *bg_scaled       = NULL;  /* pre-allocated, screen-sized */
+static bool      bg_scaled_valid = false;
+static uint32_t  bg_dst_x  = 0;
+static uint32_t  bg_dst_y  = 0;
+static uint32_t  bg_dst_w  = 0;
+static uint32_t  bg_dst_h  = 0;
+static uint32_t  bg_scaled_nframes = 0;
+
+/* Called from syscall handler — must not do heavy work. */
+void gui_set_bg(const uint32_t *pixels, uint32_t w, uint32_t h)
+{
+    bg_raw_valid    = false;
+    bg_scaled_valid = false;
+    bg_dst_w = bg_dst_h = 0;
+
+    if (!pixels || w == 0 || h == 0 || !bg_raw) { gui_wake_scene(); return; }
+
+    uint32_t nbytes = w * h * sizeof(uint32_t);
+    uint32_t capacity = bg_raw_nframes * PAGE_SIZE;
+    if (nbytes > capacity) { gui_wake_scene(); return; }
+
+    memcpy(bg_raw, pixels, nbytes);
+    bg_raw_w     = w;
+    bg_raw_h     = h;
+    bg_raw_valid = true;
+    gui_wake_scene();
+}
+
+/* Called from compositor task — interrupts enabled, safe for heavy work. */
+static void bg_scale_pending(void)
+{
+    if (!bg_raw_valid) return;
+
+    uint32_t w = bg_raw_w, h = bg_raw_h;
+
+    /* Compute letterbox destination rectangle.
+     * Fill the screen on one axis, preserve aspect ratio on the other.
+     * If the scaled dimension exceeds the screen (e.g. near-square image on
+     * a landscape screen), clamp to screen size and centre-crop. */
+    uint32_t dst_x, dst_y, dst_w, dst_h;
+    uint32_t full_w, full_h;   /* unclipped scaled size for source sampling */
+    if (w * fb_h > h * fb_w) {
+        full_h = fb_h; full_w = w * fb_h / h;
+    } else {
+        full_w = fb_w; full_h = h * fb_w / w;
+    }
+
+    dst_w = full_w < fb_w ? full_w : fb_w;
+    dst_h = full_h < fb_h ? full_h : fb_h;
+    dst_x = dst_w < fb_w ? (fb_w - dst_w) / 2 : 0;
+    dst_y = dst_h < fb_h ? (fb_h - dst_h) / 2 : 0;
+
+    /* x_off/y_off: where in the full scaled image our cropped window starts */
+    uint32_t x_off = (full_w - dst_w) / 2;
+    uint32_t y_off = (full_h - dst_h) / 2;
+
+    if (!bg_scaled || dst_w * dst_h * sizeof(uint32_t) > bg_scaled_nframes * PAGE_SIZE)
+        return;
+
+    /* Enable interrupts during the scale loop so the timer IRQ fires
+     * normally — this loop takes ~10ms and would otherwise stall everything. */
+    enable_interrupts();
+    for (uint32_t y = 0; y < dst_h; y++) {
+        uint32_t src_y = (y + y_off) * h / full_h;
+        uint32_t *dst_row = bg_scaled + y * dst_w;
+        for (uint32_t x = 0; x < dst_w; x++)
+            dst_row[x] = bg_raw[src_y * w + (x + x_off) * w / full_w];
+    }
+    disable_interrupts();
+
+    bg_raw_valid    = false;
+    bg_dst_x = dst_x; bg_dst_y = dst_y;
+    bg_dst_w = dst_w; bg_dst_h = dst_h;
+    bg_scaled_valid = true;
+}
+
+void gui_set_desktop_color(uint32_t r, uint32_t g, uint32_t b)
+{
+    desktop_color = rgb(r & 0xFF, g & 0xFF, b & 0xFF);
+    gui_wake_scene();
+}
+
+/* Draw the desktop background — straight blit, no division */
 static void draw_desktop(void)
 {
-    fb_fill_rect(0, 0, fb_w, fb_h, COL_DESKTOP);
+    uint32_t fill = desktop_color ? desktop_color : COL_DESKTOP;
+
+    if (!bg_scaled_valid) {
+        fb_fill_rect(0, 0, fb_w, fb_h, fill);
+        return;
+    }
+
+    /* Fill letterbox bars */
+    if (bg_dst_y > 0)
+        fb_fill_rect(0, 0, fb_w, bg_dst_y, fill);
+    if (bg_dst_y + bg_dst_h < fb_h)
+        fb_fill_rect(0, (int32_t)(bg_dst_y + bg_dst_h), fb_w, fb_h - bg_dst_y - bg_dst_h, fill);
+    if (bg_dst_x > 0)
+        fb_fill_rect(0, (int32_t)bg_dst_y, bg_dst_x, bg_dst_h, fill);
+    if (bg_dst_x + bg_dst_w < fb_w)
+        fb_fill_rect((int32_t)(bg_dst_x + bg_dst_w), (int32_t)bg_dst_y, fb_w - bg_dst_x - bg_dst_w, bg_dst_h, fill);
+
+    /* Blit pre-scaled rows directly to framebuffer */
+    for (uint32_t y = 0; y < bg_dst_h; y++) {
+        uint32_t *src_row = bg_scaled + y * bg_dst_w;
+        uint32_t *dst_row = (uint32_t *)(fb + (bg_dst_y + y) * fb_pitch + bg_dst_x * fb_bpp);
+        memcpy(dst_row, src_row, bg_dst_w * sizeof(uint32_t));
+    }
 }
 
 /* Draw one window chrome + blit its backbuffer to the framebuffer */
@@ -534,9 +663,22 @@ static inline void blit_rows(uint32_t y_start, uint32_t y_end)
 /* scene_dirty: set when windows/desktop need full redraw (not just cursor) */
 static bool scene_dirty = true;
 
+/* During drag/resize, track the row band that needs blitting to hw so we can
+ * skip the full-screen back→hw memcpy. Set whenever scene_dirty is set from
+ * the drag/resize handlers. Reset to invalid (top > bottom) otherwise. */
+static uint32_t drag_blit_top    = 0;
+static uint32_t drag_blit_bottom = 0;  /* 0 means: do full blit */
+
 /* Full composite: draw clean scene into back, blit to hw, draw cursor on hw */
 static void composite(void)
 {
+    /* Scale any pending raw bg image — deferred from syscall handler to here
+     * so the ~1M-iteration loop runs in the compositor task (interrupts on). */
+    if (bg_raw_valid) {
+        bg_scale_pending();
+        scene_dirty = true;
+    }
+
     if (scene_dirty) {
         /* Full scene redraw into back (no cursor — back stays clean) */
         draw_desktop();
@@ -556,10 +698,16 @@ static void composite(void)
         draw_statusbar();
         scene_dirty = false;
 
-        /* Blit clean back → hw, then draw cursor directly on hw */
-        if (back && fb_hw && back != fb_hw)
-            memcpy(fb_hw, back, (uint32_t)fb_h * fb_pitch);
-        draw_cursor();
+        if (back && fb_hw && back != fb_hw) {
+            if (drag_blit_bottom > drag_blit_top) {
+                /* Drag/resize: only blit the rows that moved */
+                blit_rows(drag_blit_top, drag_blit_bottom);
+            } else {
+                memcpy(fb_hw, back, (uint32_t)fb_h * fb_pitch);
+                draw_cursor();
+            }
+        }
+        drag_blit_top = drag_blit_bottom = 0;
     } else {
         /* Partial update: dirty windows and/or cursor movement.
          * back stays clean (no cursor). blit_rows copies back→hw and
@@ -809,9 +957,31 @@ static void process_mouse(void)
 
         /* ── active drag ── */
         if (drag_win && (ev.buttons & MOUSE_BTN_LEFT)) {
-            drag_win->x = (int32_t)px - drag_off_x;
-            drag_win->y = (int32_t)py - drag_off_y;
-            scene_dirty = true;
+            int32_t new_x = (int32_t)px - drag_off_x;
+            int32_t new_y = (int32_t)py - drag_off_y;
+            if (new_x != drag_win->x || new_y != drag_win->y) {
+                /* Row band = union of old and new window rects */
+                int32_t top = drag_prev_y < new_y ? drag_prev_y : new_y;
+                int32_t bot_old = drag_prev_y + (int32_t)drag_win->h;
+                int32_t bot_new = new_y       + (int32_t)drag_win->h;
+                int32_t bot = bot_old > bot_new ? bot_old : bot_new;
+                uint32_t utop = (top < 0) ? 0 : (uint32_t)top;
+                uint32_t ubot = (bot < 0) ? 0 : (uint32_t)bot;
+                if (ubot > fb_h) ubot = fb_h;
+                /* Accumulate across multiple drag frames between composites */
+                if (drag_blit_bottom == 0 && drag_blit_top == 0) {
+                    drag_blit_top    = utop;
+                    drag_blit_bottom = ubot;
+                } else {
+                    if (utop < drag_blit_top)    drag_blit_top    = utop;
+                    if (ubot > drag_blit_bottom) drag_blit_bottom = ubot;
+                }
+                drag_win->x = new_x;
+                drag_win->y = new_y;
+                drag_prev_x = new_x;
+                drag_prev_y = new_y;
+                scene_dirty = true;
+            }
         }
 
         /* ── active resize ── */
@@ -833,6 +1003,20 @@ static void process_mouse(void)
 
             if (nx != resize_win->x || ny != resize_win->y ||
                 (uint32_t)nw != resize_win->w || (uint32_t)nh != resize_win->h) {
+                /* Row band: union of old and new rects */
+                int32_t rtop = resize_win->y < ny ? resize_win->y : ny;
+                int32_t rbot_old = resize_win->y + (int32_t)resize_win->h;
+                int32_t rbot_new = ny + nh;
+                int32_t rbot = rbot_old > rbot_new ? rbot_old : rbot_new;
+                uint32_t utop = rtop < 0 ? 0 : (uint32_t)rtop;
+                uint32_t ubot = rbot < 0 ? 0 : (uint32_t)rbot;
+                if (ubot > fb_h) ubot = fb_h;
+                if (drag_blit_bottom == 0 && drag_blit_top == 0) {
+                    drag_blit_top = utop; drag_blit_bottom = ubot;
+                } else {
+                    if (utop < drag_blit_top)    drag_blit_top    = utop;
+                    if (ubot > drag_blit_bottom) drag_blit_bottom = ubot;
+                }
                 resize_win->x = nx;
                 resize_win->y = ny;
                 resize_win->w = (uint32_t)nw;
@@ -904,6 +1088,8 @@ static void process_mouse(void)
                     drag_win   = hit;
                     drag_off_x = (int32_t)px - hit->x;
                     drag_off_y = (int32_t)py - hit->y;
+                    drag_prev_x = hit->x;
+                    drag_prev_y = hit->y;
                 } else {
                     /* Click in client area */
                     int32_t ca_x = hit->x + GUI_BORDER;
@@ -1250,30 +1436,30 @@ static void gui_start_compositor(void)
         uint32_t back_size = (uint32_t)fb_h * fb_pitch;
         memset(back, 0, back_size);
         fb = back;
-        DBGK("gui", "back buffer at 0x%lx (%ld KB)\n",
+        DBGK("back buffer at 0x%lx (%ld KB)\n",
              (uint32_t)back, back_size / 1024);
     } else {
-        DBGK("gui", "no back buffer, drawing direct\n");
+        DBGK("no back buffer, drawing direct\n");
     }
 
     static struct task comp_task;
     create_task(&comp_task, "compositor", 9, compositor_task);
     compositor_task_ptr = &comp_task;
 
-    DBGK("gui", "compositor started (%ldx%ld %d bpp)\n",
+    DBGK("compositor started (%ldx%ld %d bpp)\n",
          (uint32_t)fb_w, (uint32_t)fb_h, fb_depth);
 }
 
 void init_gui(void)
 {
     if (!fbdev_is_ready()) {
-        DBGK("gui", "no framebuffer, GUI disabled\n");
+        DBGK("no framebuffer, GUI disabled\n");
         return;
     }
 
     struct vbe_mode_info_struct *mode = vbe_get_mode_info();
     if (!mode) {
-        DBGK("gui", "no VBE mode info, GUI disabled\n");
+        DBGK("no VBE mode info, GUI disabled\n");
         return;
     }
 
@@ -1298,13 +1484,32 @@ void init_gui(void)
                          PTE_PRESENT | PTE_WRITE);
         back = (char *)first;
         back_nframes = nframes;
-        DBGK("gui", "back buffer reserved at 0x%lx (%ld KB)\n",
+        DBGK("back buffer reserved at 0x%lx (%ld KB)\n",
              first, back_size / 1024);
     } else {
         back = NULL;
         back_nframes = 0;
-        DBGK("gui", "back buffer: pmm_alloc_contiguous failed, GUI degraded\n");
+        DBGK("back buffer: pmm_alloc_contiguous failed, GUI degraded\n");
     }
+
+    /* Pre-allocate bg_raw and bg_scaled at init time so gui_set_bg() never
+     * needs to call vmm_alloc_pages() at runtime.  vmm_alloc_pages is safe
+     * here because init_gui() is called before any kernel stacks are
+     * allocated (kvirt_next = 0xC0000000), so these large allocations land
+     * well below any stack.
+     *
+     * bg_raw  — sized for the maximum input image (BG_RAW_MAX_W × BG_RAW_MAX_H).
+     * bg_scaled — sized for the screen (fb_w × fb_h), the maximum output size. */
+    uint32_t raw_size    = BG_RAW_MAX_W * BG_RAW_MAX_H * sizeof(uint32_t);
+    uint32_t raw_frames  = (raw_size + PAGE_SIZE - 1) / PAGE_SIZE;
+    uint32_t scl_size    = (uint32_t)fb_w * (uint32_t)fb_h * sizeof(uint32_t);
+    uint32_t scl_frames  = (scl_size + PAGE_SIZE - 1) / PAGE_SIZE;
+
+    bg_raw = (uint32_t *)vmm_alloc_pages(raw_frames);
+    bg_raw_nframes = bg_raw ? raw_frames : 0;
+
+    bg_scaled = (uint32_t *)vmm_alloc_pages(scl_frames);
+    bg_scaled_nframes = bg_scaled ? scl_frames : 0;
 
     memset(win_pool, 0, sizeof(win_pool));
     win_list = NULL;
@@ -1313,6 +1518,6 @@ void init_gui(void)
     /* Register cleanup hook so task_kill destroys our windows automatically */
     task_death_hook = gui_destroy_windows_for_pid;
 
-    DBGK("gui", "subsystem ready (%ldx%ld %d bpp)\n",
+    DBGK("subsystem ready (%ldx%ld %d bpp)\n",
          (uint32_t)fb_w, (uint32_t)fb_h, fb_depth);
 }

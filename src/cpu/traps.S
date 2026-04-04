@@ -5,12 +5,13 @@
 #define TASK_ESP_OFFSET 52
 #define TASK_PAGE_DIR_OFFSET 56
 #define TASK_STACK_BASE_OFFSET 60
-#define TASK_STACK_SIZE 8192
+#define TASK_STACK_HWM_OFFSET 64
+#define TASK_STACK_SIZE 16384
 
 .section .bss
 .align 16
 sched_saved_esp:        .space 4
-                        .space 512      # scratch stack for sched_free_stale_stack call
+                        .space 4096     # scratch stack for sched_free_stale_stack call
 sched_scratch_stack_top:
 
 .section .text
@@ -30,6 +31,15 @@ alltraps:
     movw %ax, %es
     movw %ax, %fs
     movw %ax, %gs
+
+    # update stack high-water mark (lowest ESP seen = most stack used)
+    movl running_task, %eax
+    testl %eax, %eax
+    jz .Lhwm_skip
+    cmpl %esp, TASK_STACK_HWM_OFFSET(%eax)   # if current esp < hwm, update
+    jbe .Lhwm_skip
+    movl %esp, TASK_STACK_HWM_OFFSET(%eax)
+.Lhwm_skip:
 
     # call the C handler with pointer to trap frame
     pushl %esp

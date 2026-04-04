@@ -97,15 +97,21 @@ static int sys_read(struct trap_frame *frame)
     unsigned int len = frame->edx;
 
     if (fd < 0 || fd >= VFS_FD_MAX) return -1;
-    if (!user_access_ok(buf, len) || len > 4096) return -1;
 
     struct vfs_fd *vfd = &running_task->fds[fd];
     if (!vfd->open || !vfd->node) return -1;
 
-    if (vfd->node->flags & (VFS_FILE | VFS_CHARDEV)) {
+    /* Chardevs: cap at 4096 to limit blocking reads */
+    if (vfd->node->flags & VFS_CHARDEV) {
+        if (!user_access_ok(buf, len) || len > 4096) return -1;
         uint32_t n = vfs_read(vfd->node, vfd->offset, len, buf);
-        if (!(vfd->node->flags & VFS_CHARDEV))
-            vfd->offset += n;
+        return (int)n;
+    }
+
+    if (vfd->node->flags & VFS_FILE) {
+        if (!user_access_ok(buf, len) || len > 65536) return -1;
+        uint32_t n = vfs_read(vfd->node, vfd->offset, len, buf);
+        vfd->offset += n;
         return (int)n;
     }
 
@@ -496,18 +502,30 @@ static int sys_open(struct trap_frame *frame)
 
     struct vfs_node *node;
 
-    if (do_creat || do_trunc) {
-        /* Create or truncate: need write access */
+    if (do_trunc) {
+        /* Truncate (always creates/resets the file) */
         node = vfs_creat(path);
         if (!node) return -1;
+    } else if (do_creat) {
+        /* Create only if missing; do not truncate existing file */
+        node = vfs_lookup(path);
+        if (!node) {
+            node = vfs_creat(path);
+            if (!node) return -1;
+        }
+        if (accmode != O_RDONLY && !(node->flags & VFS_CHARDEV) && !node->writable)
+            return -1;
     } else {
         node = vfs_lookup(path);
         if (!node) return -1;
         if (accmode != O_RDONLY && !(node->flags & VFS_CHARDEV) && !node->writable)
-            return -1; /* read-only initrd file, write access denied */
+            return -1;
     }
 
-    return fd_alloc(node, do_append);
+    int fd = fd_alloc(node, do_append);
+    if (fd >= 0 && do_append)
+        running_task->fds[fd].offset = node->size;
+    return fd;
 }
 
 static int sys_close(struct trap_frame *frame)
@@ -641,7 +659,8 @@ static int sys_mount(struct trap_frame *frame)
     (void)frame;
     /* Print VFS mount information to the kernel console */
     printk("mount:\n");
-    printk("  / (initrd, cpio, rw — volatile)\n");
+    printk("  /     initrd  cpio  rw\n");
+    printk("  /dev  devfs         rw\n");
     return 0;
 }
 
@@ -694,6 +713,27 @@ static int sys_unlink(struct trap_frame *frame)
     const char *path = resolve_path((const char *)frame->ebx, resolved);
     if (!path) return -1;
     return vfs_unlink(path);
+}
+
+static int sys_gui_set_bg(struct trap_frame *frame)
+{
+    /* EBX = pixel buffer ptr, ECX = width, EDX = height */
+    const uint32_t *pixels = (const uint32_t *)frame->ebx;
+    uint32_t w = frame->ecx;
+    uint32_t h = frame->edx;
+
+    if (w == 0 || h == 0 || !user_access_ok(pixels, w * h * sizeof(uint32_t)))
+        return -1;
+
+    gui_set_bg(pixels, w, h);
+    return 0;
+}
+
+static int sys_gui_set_desktop_color(struct trap_frame *frame)
+{
+    /* EBX = r, ECX = g, EDX = b (0–255 each) */
+    gui_set_desktop_color(frame->ebx & 0xFF, frame->ecx & 0xFF, frame->edx & 0xFF);
+    return 0;
 }
 
 /* ── dispatch ─────────────────────────────────────────────────────────────── */
@@ -813,6 +853,12 @@ void syscall_handler(struct trap_frame *frame)
         break;
     case SYS_UNLINK:
         ret = sys_unlink(frame);
+        break;
+    case SYS_GUI_SET_BG:
+        ret = sys_gui_set_bg(frame);
+        break;
+    case SYS_GUI_SET_DESKTOP_COLOR:
+        ret = sys_gui_set_desktop_color(frame);
         break;
     default:
         printk("unknown syscall %d from pid %d\n",

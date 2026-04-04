@@ -145,11 +145,11 @@ void init_cpu(void)
 }
 
 /* Walk the kernel call stack from ebp, printing up to max_frames entries.
- * Stops when EBP is 0 or outside the kernel code range. */
-static void stack_trace_from(uint32_t ebp, int max_frames)
+ * Stops when EBP is 0 or outside the kernel code range.
+ * stack_base and stack_top are the task's kernel stack bounds (for depth annotation). */
+static void stack_trace_from(uint32_t ebp, int max_frames,
+                              uint32_t stack_base, uint32_t stack_top)
 {
-    /* Kernel text lives from 0x100000 up to ~0xC0000000.
-     * We use a conservative upper bound to avoid chasing garbage. */
     printk("Kernel stack trace:\n");
     for (int i = 0; i < max_frames && ebp != 0; i++) {
         uint32_t *frame = (uint32_t *)ebp;
@@ -159,12 +159,27 @@ static void stack_trace_from(uint32_t ebp, int max_frames)
             break;
 
         const struct ksym *sym = ksym_lookup(ret_eip);
-        if (sym)
-            printk("  #%d 0x%08lx in %s\n", i, ret_eip, sym->name);
-        else
-            printk("  #%d 0x%08lx in ???\n", i, ret_eip);
+        if (stack_base && stack_top && ebp >= stack_base && ebp < stack_top) {
+            uint32_t depth = stack_top - ebp;
+            if (sym)
+                printk("  #%d 0x%08lx in %s [+%ld B from top]\n", i, ret_eip, sym->name, depth);
+            else
+                printk("  #%d 0x%08lx in ??? [+%ld B from top]\n", i, ret_eip, depth);
+        } else {
+            if (sym)
+                printk("  #%d 0x%08lx in %s\n", i, ret_eip, sym->name);
+            else
+                printk("  #%d 0x%08lx in ???\n", i, ret_eip);
+        }
 
         ebp = frame[0];
+    }
+    if (stack_base && stack_top) {
+        uint32_t hwm = running_task ? running_task->stack_hwm : 0;
+        if (hwm && hwm >= stack_base && hwm < stack_top)
+            printk("  stack hwm: %ld / %ld bytes used (%ld%%)\n",
+                   stack_top - hwm, stack_top - stack_base,
+                   (stack_top - hwm) * 100 / (stack_top - stack_base));
     }
 }
 
@@ -180,7 +195,7 @@ void dump_trap_frame(struct trap_frame *frame)
                running_task->name, running_task->pid,
                frame->trapno, VECTOR_NAME(frame->trapno), frame->eip);
     else
-        printk("Unhandled exception: %d (%s) at %08x\n",
+        printk("Unhandled exception: %d (%s) at %08x (iret)\n",
                frame->trapno, VECTOR_NAME(frame->trapno), frame->eip);
     printk("ERR=%04x IP=%04x:%08x SP=%04x:%08x GDT=%08x IDT=%08x\n", frame->err,
             frame->cs, frame->eip, frame->ds, frame->esp, (unsigned int)&gptr, (unsigned int)&iptr);
@@ -189,7 +204,6 @@ void dump_trap_frame(struct trap_frame *frame)
     printk("DS=%04x CS=%04x EFLAGS=[ ", frame->ds, frame->cs);
     for (int i = 0; i < 22; i++) {
         if (i == 1 || i == 3 || i == 5 || (i >= 12 && i <= 18)) {
-            // reserved or obseleted
             printk("-");
             continue;
         }
@@ -200,19 +214,42 @@ void dump_trap_frame(struct trap_frame *frame)
         }
     }
     printk(" ] PE=%d PG=%d\n", in_protected_mode(), is_paging_enabled());
+
+    /* Stack context for the running task */
+    uint32_t stk_base = 0, stk_top = 0;
+    if (running_task) {
+        stk_base = running_task->stack_base;
+        stk_top  = stk_base + TASK_STACK_SIZE;
+        uint32_t esp0 = tss.esp0;
+        uint32_t used = stk_top > frame->esp ? stk_top - frame->esp : 0;
+        uint32_t hwm_used = running_task->stack_hwm ?
+                            stk_top - running_task->stack_hwm : 0;
+        printk("STACK base=0x%lx top=0x%lx esp0=0x%lx cur_used=%ld hwm_used=%ld/%ld (%ld%%)\n",
+               stk_base, stk_top, esp0,
+               used, hwm_used, (uint32_t)TASK_STACK_SIZE,
+               hwm_used * 100 / TASK_STACK_SIZE);
+
+        /* Check canary */
+        if (stk_base) {
+            uint32_t canary = *(volatile uint32_t *)stk_base;
+            if (canary != 0xDEADC0DEu)
+                printk("CANARY OVERWRITTEN at 0x%lx (was 0x%lx) -- stack overflow!\n",
+                       stk_base, canary);
+            else
+                printk("canary OK\n");
+        }
+    }
     printk("\n");
 
     /* For kernel-mode exceptions, walk the kernel EBP chain.
      * For user-mode exceptions, walk the kernel stack we're currently on
      * (frame->ebp is the user EBP which is meaningless here). */
     if ((frame->cs & 0x3) != 3) {
-        /* Kernel exception: EBP saved in pushal is the kernel EBP */
-        stack_trace_from(frame->ebp, 16);
+        stack_trace_from(frame->ebp, 16, stk_base, stk_top);
     } else {
-        /* User exception: walk from our own EBP to show kernel path to fault */
         uint32_t cur_ebp;
         asm volatile("mov %%ebp, %0" : "=r"(cur_ebp));
-        stack_trace_from(cur_ebp, 16);
+        stack_trace_from(cur_ebp, 16, stk_base, stk_top);
     }
     printk("\n");
 }
@@ -264,7 +301,10 @@ exc_handler:
     if (frame->trapno == INT_PAGE_FAULT) {
         uint32_t fault_addr;
         asm volatile("mov %%cr2, %0" : "=r"(fault_addr));
-        printk("Page fault at 0x%lx (err=0x%lx)\n", fault_addr, (uint32_t)frame->err);
+        char addr_desc[80];
+        vmm_describe_addr(fault_addr, addr_desc, sizeof(addr_desc));
+        printk("Page fault at 0x%lx (err=0x%lx) [%s]\n",
+               fault_addr, (uint32_t)frame->err, addr_desc);
         if (!(frame->err & 0x1)) printk("  page not present\n");
         if (frame->err & 0x2)    printk("  write access\n");
         if (frame->err & 0x4)    printk("  user mode\n");
@@ -273,7 +313,7 @@ exc_handler:
     /* if the exception came from user mode (ring 3), kill the task
      * instead of panicking the kernel */
     if ((frame->cs & 0x3) == 3) {
-        DBGK("sched", "killing '%s' (pid %d)\n",
+        DBGK("killing '%s' (pid %d)\n",
              running_task->name, running_task->pid);
         disable_interrupts();
         task_kill(running_task);

@@ -101,3 +101,12 @@ int  gui_window_get_size(int id, uint32_t *cw, uint32_t *ch);
 
 /* Destroy all windows owned by pid. Called via task_death_hook. */
 void gui_destroy_windows_for_pid(uint32_t pid);
+
+/* Set the desktop background from a 32-bit ARGB pixel buffer.
+ * The kernel copies the data — caller may free its buffer after return.
+ * Passing NULL clears the background (reverts to solid colour). */
+void gui_set_bg(const uint32_t *pixels, uint32_t w, uint32_t h);
+
+/* Set the letterbox/desktop fill colour used when no image covers that area.
+ * r, g, b in 0–255. Persists until changed. Default (0,0,0) = black. */
+void gui_set_desktop_color(uint32_t r, uint32_t g, uint32_t b);

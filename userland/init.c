@@ -14,7 +14,7 @@ int main(int argc, char **argv)
         if (pid == 0) {
             /* child: become the shell */
             char *sh_argv[] = { INIT_CHILD, (char *)0 };
-            printf("init: starting " INIT_CHILD "\n");
+            printf("init: starting " INIT_CHILD " as pid %d\n\n", getpid());
             execv(INIT_CHILD, sh_argv);
             exit(1);
         } else if (pid > 0) {
