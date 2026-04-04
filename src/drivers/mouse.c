@@ -88,8 +88,11 @@ static void ps2_flush(void)
         inb(MOUSE_DATA_PORT);
 }
 
-void init_mouse(void)
+void init_mouse(uint32_t w, uint32_t h)
 {
+    screen_w = w;
+    screen_h = h;
+
     mouse_buf.head = 0;
     mouse_buf.tail = 0;
     packet_idx = 0;

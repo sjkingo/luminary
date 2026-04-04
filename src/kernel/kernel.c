@@ -138,7 +138,10 @@ void kernel_main(struct multiboot_info *mb, uint32_t start, uint32_t stack, uint
     /* devices */
     init_cpu();
     init_keyboard();
-    init_mouse();
+    {
+        struct vbe_mode_info_struct *vbe = vbe_get_mode_info();
+        init_mouse(vbe ? vbe->width : 1280, vbe ? vbe->height : 960);
+    }
     init_pci();
 
     // higher level startup

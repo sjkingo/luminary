@@ -20,7 +20,7 @@ extern uint32_t mouse_y;
 /* Last known button state (MOUSE_BTN_* flags) */
 extern uint8_t mouse_buttons;
 
-void init_mouse(void);
+void init_mouse(uint32_t w, uint32_t h);
 void mouse_irq_handler(void);
 
 /* Non-blocking read. Returns 1 if an event was available, 0 if not. */
