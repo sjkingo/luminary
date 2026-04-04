@@ -49,4 +49,12 @@
 
 6. **Pipe no-refcount**: `write_closed`/`read_closed` are single flags, not reference counts. Closing any fd pointing to a pipe end sets the flag even if other fds hold the same end open (e.g. after `fork()`). Workaround: do not close unused pipe ends after `fork()`. Fix requires per-node refcounting.
 
+7. **VFS node pool is non-reclaimable**: `vfs_alloc_node()` is a bump allocator (`node_pool_used` only increments). Nodes are never returned to the pool — not for closed pipe ends, not for anything. 512 nodes is sufficient for the current workload (initrd tree + /dev nodes + 16 pipes × 2 = ~300 nodes max), but there is no reclaim path if the pool is exhausted.
+
+8. **`user_access_ok` integer overflow**: The check `addr + len - 1 >= USER_SPACE_END` overflows if `len` is close to `UINT32_MAX`. In practice this is blocked upstream by `len > 4096`/`len > 65536` guards in `sys_read`/`sys_write`, but callers that omit the guard (e.g. future syscalls) would be vulnerable to a wrap-around that bypasses the bounds check.
+
+9. **RTL8139 interrupts enabled with no handler**: `init_rtl8139()` enables NIC interrupts (IMR register) but the IRQ handler is a stub (`// TODO`). Network interrupts will fire and be silently dropped by the PIC spurious-IRQ path. No packet I/O is possible.
+
+10. **`vmm_free_pages` silently leaks virtual ranges when free-list is full**: The kernel virtual allocator free-list holds at most 64 entries (`KVIRT_FL_MAX`). If the list is full when `vmm_free_pages()` is called, the freed virtual range is silently discarded and that address space is permanently lost. Current workload stays well under 64 concurrent allocations.
+
 5. **`struct task` offset constants**: `TASK_ESP_OFFSET`, `TASK_PAGE_DIR_OFFSET`, `TASK_STACK_BASE_OFFSET` in `task.h` must match the actual byte layout of `struct task`. Verified with `_Static_assert(offsetof(...))`. If `struct task` is modified, update both the constants and the corresponding defines in `cpu/traps.S`. A `cpu/traps.o: kernel/task.h` dependency in the Makefile ensures `traps.S` is rebuilt when `task.h` changes.
