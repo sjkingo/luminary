@@ -22,11 +22,11 @@
 #include <stdarg.h>
 
 #include "drivers/fbdev.h"
+#include "drivers/serial.h"
 #include "kernel/kernel.h"
 
 /* VGA fallback */
 extern void putchar(int);
-extern void write_serial(char);
 
 static void printchar(char **str, int c)
 {
@@ -202,17 +202,32 @@ int printk(const char *format, ...)
 }
 
 /* Serial-only printk — used for DEBUG output so it doesn't clutter the
- * framebuffer console. Formats into a stack buffer then emits each char
- * to the serial port. Falls back to normal printk if serial is disabled. */
+ * framebuffer console. Formats into a static buffer then emits each char
+ * to the serial port. The static buffer is protected by a re-entrancy flag:
+ * if a timer interrupt fires while we are mid-format, the re-entrant call
+ * emits characters directly (no timestamp prefix) to avoid overwriting the
+ * in-progress buffer. */
 int printk_serial(const char *format, ...)
 {
+    static char buf[512];
+    static int at_line_start = 1;
+    static int in_use = 0;
+
     va_list args;
     va_start(args, format);
-    static int at_line_start = 1;
-    char buf[512];
+
+    if (in_use) {
+        /* Re-entrant call (interrupt during serial print): emit directly,
+         * no timestamp, to avoid clobbering the in-progress buffer. */
+        print(0, format, args);
+        return 0;
+    }
+    in_use = 1;
+
     char *p = buf;
     int n = print(&p, format, args);
     *p = '\0';
+
     for (char *s = buf; *s; s++) {
         if (at_line_start) {
             /* emit [sss.mmm] prefix to serial */
@@ -221,15 +236,12 @@ int printk_serial(const char *format, ...)
             unsigned long frac = ms % 1000;
             char tbuf[16];
             char *tp = tbuf;
-            /* format: '[' + secs + '.' + 3-digit frac + '] ' */
             *tp++ = '[';
-            /* secs */
             char sbuf[10]; int si = 0;
             if (secs == 0) { sbuf[si++] = '0'; }
             else { unsigned long v = secs; while (v) { sbuf[si++] = '0' + v % 10; v /= 10; } }
             for (int j = si - 1; j >= 0; j--) *tp++ = sbuf[j];
             *tp++ = '.';
-            /* frac — always 3 digits */
             *tp++ = '0' + (frac / 100);
             *tp++ = '0' + (frac / 10 % 10);
             *tp++ = '0' + (frac % 10);
@@ -242,6 +254,8 @@ int printk_serial(const char *format, ...)
         if (*s == '\n')
             at_line_start = 1;
     }
+
+    in_use = 0;
     return n;
 }
 

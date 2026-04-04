@@ -41,7 +41,7 @@ struct task {
 
 #define PID_IDLE                0
 #define PID_INIT                1
-#define TASK_STACK_SIZE         4096
+#define TASK_STACK_SIZE         8192
 #define TASK_ESP_OFFSET         52  /* byte offset of esp in struct task */
 #define TASK_PAGE_DIR_OFFSET    56  /* byte offset of page_dir_phys in struct task */
 #define TASK_STACK_BASE_OFFSET  60  /* byte offset of stack_base in struct task */

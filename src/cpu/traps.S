@@ -5,7 +5,7 @@
 #define TASK_ESP_OFFSET 52
 #define TASK_PAGE_DIR_OFFSET 56
 #define TASK_STACK_BASE_OFFSET 60
-#define TASK_STACK_SIZE 4096
+#define TASK_STACK_SIZE 8192
 
 .section .bss
 .align 16

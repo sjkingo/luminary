@@ -49,6 +49,10 @@ static void putpixel(uint32_t x, uint32_t y, uint32_t color)
 
 static void clear_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h)
 {
+    if (x >= console.width || y >= console.height) return;
+    if (x + w > console.width)  w = console.width - x;
+    if (y + h > console.height) h = console.height - y;
+
     uint32_t color = SOL_BASE03;
     uint8_t b0 = color & 0xFF;
     uint8_t b1 = (color >> 8) & 0xFF;
@@ -107,6 +111,7 @@ static uint32_t logical_to_ring(uint32_t logical)
 static void draw_cursor(void)
 {
     if (console.ring_used == 0) return;
+    if (console.cur_col >= console.cols) return;
     uint32_t screen_row = (console.ring_used <= console.rows)
                           ? (console.ring_used - 1)
                           : (console.rows - 1);
@@ -127,6 +132,7 @@ static void draw_cursor(void)
 static void erase_cursor(void)
 {
     if (console.ring_used == 0) return;
+    if (console.cur_col >= console.cols) return;
     uint32_t screen_row = (console.ring_used <= console.rows)
                           ? (console.ring_used - 1)
                           : (console.rows - 1);

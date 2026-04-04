@@ -20,6 +20,37 @@ _Static_assert(offsetof(struct task, page_dir_phys) == TASK_PAGE_DIR_OFFSET,
 _Static_assert(offsetof(struct task, stack_base) == TASK_STACK_BASE_OFFSET,
                "TASK_STACK_BASE_OFFSET does not match struct layout");
 
+_Static_assert(TASK_STACK_SIZE % PAGE_SIZE == 0,
+               "TASK_STACK_SIZE must be a multiple of PAGE_SIZE");
+
+/* Allocate a kernel stack with a guard page immediately below it.
+ * Layout: [guard page (unmapped)] [TASK_STACK_SIZE bytes (usable)]
+ * Returns a pointer to the first usable byte (i.e. stack_base).
+ * The guard page sits at stack_base - PAGE_SIZE; overflowing the stack
+ * triggers a page fault rather than silently corrupting adjacent data. */
+static uint8_t *kstack_alloc(void)
+{
+    uint32_t total_pages = (TASK_STACK_SIZE / PAGE_SIZE) + 1; /* +1 for guard */
+    uint8_t *alloc = (uint8_t *)vmm_alloc_pages(total_pages);
+    if (!alloc)
+        return NULL;
+    /* Unmap the first page to make it a guard page */
+    vmm_unmap_page((uint32_t)alloc);
+    return alloc + PAGE_SIZE;
+}
+
+/* Free a kernel stack previously allocated with kstack_alloc.
+ * stack_base is the value returned by kstack_alloc (first usable byte).
+ * vmm_free_pages skips pmm_free_frame for unmapped pages (phys == 0),
+ * so passing the guard page's virtual address is safe. */
+static void kstack_free(uint8_t *stack_base)
+{
+    if (!stack_base)
+        return;
+    uint32_t total_pages = (TASK_STACK_SIZE / PAGE_SIZE) + 1;
+    vmm_free_pages((void *)((uint32_t)stack_base - PAGE_SIZE), total_pages);
+}
+
 /* last PID allocated to a task */
 static unsigned int last_pid = PID_IDLE;
 
@@ -45,9 +76,9 @@ static void task_wrapper(void)
 /* Build a synthetic interrupt frame on a new stack so trapret can start the task */
 static void setup_task_stack(struct task *t)
 {
-    unsigned char *stack = (unsigned char *)kmalloc(TASK_STACK_SIZE);
+    unsigned char *stack = kstack_alloc();
     if (stack == NULL)
-        panic("setup_task_stack: kmalloc failed");
+        panic("setup_task_stack: kstack_alloc failed");
 
     t->stack_base = (unsigned int)stack;
 
@@ -166,9 +197,9 @@ out:
  * user_sp is the initial user-mode stack pointer (set up by elf_load). */
 static void setup_user_task_stack(struct task *t, uint32_t entry_point, uint32_t user_sp)
 {
-    unsigned char *stack = (unsigned char *)kmalloc(TASK_STACK_SIZE);
+    unsigned char *stack = kstack_alloc();
     if (stack == NULL)
-        panic("setup_user_task_stack: kmalloc failed");
+        panic("setup_user_task_stack: kstack_alloc failed");
 
     t->stack_base = (unsigned int)stack;
 
@@ -370,9 +401,9 @@ static void *stale_stack = NULL;
 void sched_free_stale_stack(void)
 {
     if (stale_stack) {
-        void *p = stale_stack;
+        uint8_t *p = stale_stack;
         stale_stack = NULL;
-        kfree(p);
+        kstack_free(p);
     }
 }
 
@@ -480,7 +511,7 @@ void task_kill(struct task *t)
 
     /* Killed a different task — free its stack and re-enable interrupts. */
     if (t->stack_base != 0)
-        kfree((void *)t->stack_base);
+        kstack_free((uint8_t *)t->stack_base);
     enable_interrupts();
 }
 
@@ -507,7 +538,7 @@ struct task *task_fork(struct trap_frame *frame)
     /* Allocate the child's kernel stack BEFORE cloning the page directory,
      * so the new slab mapping is in the kernel page directory at clone time
      * and the child's copy inherits it. */
-    uint8_t *kstack = (uint8_t *)kmalloc(TASK_STACK_SIZE);
+    uint8_t *kstack = kstack_alloc();
     if (!kstack) {
         kfree(child);
         enable_interrupts();
