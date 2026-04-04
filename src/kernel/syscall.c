@@ -48,19 +48,24 @@ static int sys_write(struct trap_frame *frame)
     unsigned int len = frame->edx;
 
     if (fd < 0 || fd >= VFS_FD_MAX) return -1;
-    if (!user_access_ok(buf, len) || len > 4096) return -1;
+    if (!user_access_ok(buf, len) || len > 65536) return -1;
 
     struct vfs_fd *vfd = &running_task->fds[fd];
     if (!vfd->open || !vfd->node) return -1;
 
     if (vfd->node->flags & VFS_CHARDEV) {
         vfs_write(vfd->node, 0, len, buf);
-    } else {
-        /* Regular file — read-only in this kernel */
-        return -1;
+        return (int)len;
     }
 
-    return (int)len;
+    if ((vfd->node->flags & VFS_FILE) && vfd->node->writable) {
+        uint32_t off = vfd->append ? vfd->node->size : vfd->offset;
+        uint32_t n = vfs_write(vfd->node, off, len, buf);
+        vfd->offset = off + n;
+        return (int)n;
+    }
+
+    return -1;
 }
 
 
@@ -393,12 +398,21 @@ static int sys_exit_task(struct trap_frame *frame)
 
 /* ── VFS syscalls ─────────────────────────────────────────────────────────── */
 
+/* Linux open(2) flag bits (O_CREAT, O_TRUNC, O_APPEND, access mode) */
+#define O_RDONLY  0
+#define O_WRONLY  1
+#define O_RDWR    2
+#define O_CREAT   0x40
+#define O_TRUNC   0x200
+#define O_APPEND  0x400
+
 /* Allocate the lowest available fd in the running task. Returns -1 if full. */
-static int fd_alloc(struct vfs_node *node)
+static int fd_alloc(struct vfs_node *node, bool append)
 {
     for (int i = 0; i < VFS_FD_MAX; i++) {
         if (!running_task->fds[i].open) {
             running_task->fds[i].open    = true;
+            running_task->fds[i].append  = append;
             running_task->fds[i].node    = node;
             running_task->fds[i].offset  = 0;
             running_task->fds[i].dir_idx = 0;
@@ -410,13 +424,31 @@ static int fd_alloc(struct vfs_node *node)
 
 static int sys_open(struct trap_frame *frame)
 {
-    const char *path = (const char *)frame->ebx;
+    /* EBX = path, ECX = flags (Linux open(2) flags) */
+    const char *path  = (const char *)frame->ebx;
+    int         flags = (int)frame->ecx;
+
     if (!user_access_ok(path, 1)) return -1;
 
-    struct vfs_node *node = vfs_lookup(path);
-    if (!node) return -1;
+    int accmode = flags & 3; /* O_RDONLY=0, O_WRONLY=1, O_RDWR=2 */
+    bool do_creat  = (flags & O_CREAT)  != 0;
+    bool do_trunc  = (flags & O_TRUNC)  != 0;
+    bool do_append = (flags & O_APPEND) != 0;
 
-    return fd_alloc(node);
+    struct vfs_node *node;
+
+    if (do_creat || do_trunc) {
+        /* Create or truncate: need write access */
+        node = vfs_creat(path);
+        if (!node) return -1;
+    } else {
+        node = vfs_lookup(path);
+        if (!node) return -1;
+        if (accmode != O_RDONLY && !(node->flags & VFS_CHARDEV) && !node->writable)
+            return -1; /* read-only initrd file, write access denied */
+    }
+
+    return fd_alloc(node, do_append);
 }
 
 static int sys_close(struct trap_frame *frame)
@@ -440,9 +472,9 @@ static int sys_pipe(struct trap_frame *frame)
     struct vfs_node *rnode, *wnode;
     if (pipe_create(&rnode, &wnode) < 0) return -1;
 
-    int rfd = fd_alloc(rnode);
+    int rfd = fd_alloc(rnode, false);
     if (rfd < 0) return -1;
-    int wfd = fd_alloc(wnode);
+    int wfd = fd_alloc(wnode, false);
     if (wfd < 0) {
         running_task->fds[rfd].open = false;
         running_task->fds[rfd].node = NULL;
@@ -546,7 +578,7 @@ static int sys_mount(struct trap_frame *frame)
     (void)frame;
     /* Print VFS mount information to the kernel console */
     printk("mount:\n");
-    printk("  / (initrd, cpio, ro)\n");
+    printk("  / (initrd, cpio, rw — volatile)\n");
     return 0;
 }
 

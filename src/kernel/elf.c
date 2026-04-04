@@ -203,15 +203,19 @@ uint32_t elf_load(const void *elf_data, uint32_t elf_size, uint32_t page_dir,
     uint32_t strings_vaddr = stack_top - scratch_used;
     strings_vaddr &= ~3u;
 
-    /* argv pointer array below the strings, then argc, then dummy retaddr */
+    /* argv pointer array below the strings, then argv_ptr, argc, dummy retaddr.
+     * _start is a normal C function: [ebp+8]=argc, [ebp+0xc]=argv (char **).
+     * argv_ptr holds the address of the argv[] array so _start gets char **. */
     uint32_t argv_vaddr = strings_vaddr - (uint32_t)(n + 1) * 4;
     argv_vaddr &= ~3u;
-    uint32_t argc_vaddr = argv_vaddr - 4;
+    uint32_t argv_ptr_vaddr = argv_vaddr - 4;
+    uint32_t argc_vaddr = argv_ptr_vaddr - 4;
     uint32_t retaddr_vaddr = argc_vaddr - 4;
 
     DBGK("elf", "stack_top=0x%lx strings_vaddr=0x%lx argv_vaddr=0x%lx "
-         "argc_vaddr=0x%lx retaddr_vaddr=0x%lx\n",
-         stack_top, strings_vaddr, argv_vaddr, argc_vaddr, retaddr_vaddr);
+         "argv_ptr_vaddr=0x%lx argc_vaddr=0x%lx retaddr_vaddr=0x%lx\n",
+         stack_top, strings_vaddr, argv_vaddr, argv_ptr_vaddr,
+         argc_vaddr, retaddr_vaddr);
 
     /* Helper macro: write one uint32_t to user vaddr through page_dir */
 #define WRITE_USER32(dir_phys_arg, vaddr_arg, val_arg) do { \
@@ -255,6 +259,7 @@ uint32_t elf_load(const void *elf_data, uint32_t elf_size, uint32_t page_dir,
         WRITE_USER32(page_dir, argv_vaddr + (uint32_t)i * 4, str_uva);
     }
     WRITE_USER32(page_dir, argv_vaddr + (uint32_t)n * 4, 0); /* NULL terminator */
+    WRITE_USER32(page_dir, argv_ptr_vaddr, argv_vaddr);       /* char **argv for _start */
     WRITE_USER32(page_dir, argc_vaddr, (uint32_t)n);
     WRITE_USER32(page_dir, retaddr_vaddr, 0); /* dummy return address */
 

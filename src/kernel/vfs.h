@@ -1,34 +1,46 @@
+/* Virtual filesystem and file-descriptor layer.
+ *
+ * The VFS tree is an in-memory linked list of vfs_node structs allocated from
+ * a static pool. initrd populates the tree at boot; writable files are created
+ * at runtime with heap-backed buffers (non-persistent across reboots).
+ *
+ * Node types:
+ *   VFS_FILE    — regular file; data points to a read-only cpio buffer, or to
+ *                 a kmalloc'd buffer when writable is set.
+ *   VFS_DIR     — directory; children/sibling chain.
+ *   VFS_CHARDEV — character device; I/O dispatched through read_op/write_op.
+ */
 #pragma once
 
 #include <stdint.h>
 #include <stdbool.h>
 
-/* ── node type flags ─────────────────────────────────────────────────────── */
 #define VFS_FILE    0x01
 #define VFS_DIR     0x02
 #define VFS_CHARDEV 0x04    /* character device — I/O via read_op/write_op */
 
-/* ── maximum path/name lengths ───────────────────────────────────────────── */
 #define VFS_NAME_MAX  128
 #define VFS_PATH_MAX  256
 #define VFS_FD_MAX     32   /* open file descriptors per task */
 
-/* ── directory entry (returned by readdir) ───────────────────────────────── */
 struct vfs_dirent {
     char     name[VFS_NAME_MAX];
     uint32_t inode;
     uint8_t  type;      /* VFS_FILE or VFS_DIR */
 };
 
-/* ── vfs node ─────────────────────────────────────────────────────────────── */
 struct vfs_node {
     char     name[VFS_NAME_MAX];
     uint32_t inode;
-    uint32_t size;      /* bytes (files only) */
-    uint8_t  flags;     /* VFS_FILE | VFS_DIR */
+    uint32_t size;      /* bytes of valid data (files only) */
+    uint8_t  flags;     /* VFS_FILE | VFS_DIR | VFS_CHARDEV */
 
-    /* File data pointer (for initrd-backed files: pointer into cpio data) */
+    /* File data.  For initrd-backed read-only files, data points directly
+     * into the cpio image.  For writable files, data points to a kmalloc'd
+     * buffer of capacity buf_cap; the node owns the allocation. */
     const uint8_t *data;
+    bool           writable;    /* true  → heap-backed, mutable */
+    uint32_t       buf_cap;     /* allocated capacity of data buffer */
 
     /* Character device I/O ops — NULL for regular files */
     uint32_t (*read_op)(uint32_t offset, uint32_t len, void *buf);
@@ -43,8 +55,9 @@ struct vfs_node {
 /* ── open file descriptor ─────────────────────────────────────────────────── */
 struct vfs_fd {
     bool          open;
+    bool          append;   /* O_APPEND: writes always go to end of file */
     struct vfs_node *node;
-    uint32_t      offset;   /* current read position (files) */
+    uint32_t      offset;   /* current read/write position (files) */
     uint32_t      dir_idx;  /* current child index (dirs, for readdir) */
 };
 
@@ -84,3 +97,8 @@ struct vfs_node *vfs_get_root(void);
 /* Allocate a new node from the node pool (used by initrd). Returns NULL if
  * the pool is exhausted. */
 struct vfs_node *vfs_alloc_node(void);
+
+/* Create or truncate a writable file at path.  Intermediate directories must
+ * already exist.  Returns the node on success or NULL on error.
+ * The node's heap buffer grows on demand via vfs_write. */
+struct vfs_node *vfs_creat(const char *path);

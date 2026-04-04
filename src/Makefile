@@ -53,9 +53,18 @@ userspace:
 # Copy freshly-built ELF binaries into rootfs/bin, then pack with cpio.
 .PHONY: initrd
 initrd: userspace
-	cp ../userland/init.elf ../rootfs/bin/init
-	cp ../userland/sh.elf   ../rootfs/bin/sh
-	cp ../userland/gui.elf  ../rootfs/bin/gui
+	cp ../userland/init.elf  ../rootfs/bin/init
+	cp ../userland/sh.elf    ../rootfs/bin/sh
+	cp ../userland/gui.elf   ../rootfs/bin/gui
+	cp ../userland/uptime.elf ../rootfs/bin/uptime
+	cp ../userland/ps.elf    ../rootfs/bin/ps
+	cp ../userland/kill.elf  ../rootfs/bin/kill
+	cp ../userland/ls.elf    ../rootfs/bin/ls
+	cp ../userland/cat.elf   ../rootfs/bin/cat
+	cp ../userland/stat.elf  ../rootfs/bin/stat
+	cp ../userland/mount.elf ../rootfs/bin/mount
+	cp ../userland/halt.elf  ../rootfs/bin/halt
+	cp ../userland/exit.elf  ../rootfs/bin/exit
 	cd ../rootfs && find . | sort | cpio -o --format=newc > ../initrd.img
 	@echo "initrd: built $$(wc -c < ../initrd.img) bytes"
 

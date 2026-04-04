@@ -6,6 +6,10 @@
 
 #define MODULE "fbdev: "
 
+/* Solarized Dark palette */
+#define SOL_BASE03  rgb(  0,  26,  33)   /* background: darker than base03 (#001a21), same hue */
+#define SOL_BASE0   rgb(147, 161, 161)   /* foreground: base1 (emphasized content) */
+
 struct fbdev_console {
     char *framebuffer;
     uint32_t height;
@@ -45,9 +49,19 @@ static void putpixel(uint32_t x, uint32_t y, uint32_t color)
 
 static void clear_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h)
 {
+    uint32_t color = SOL_BASE03;
+    uint8_t b0 = color & 0xFF;
+    uint8_t b1 = (color >> 8) & 0xFF;
+    uint8_t b2 = (color >> 16) & 0xFF;
+    uint32_t bpp = console.depth / 8;
     for (uint32_t row = y; row < y + h; row++) {
-        unsigned where = (x * (console.depth / 8)) + (row * console.pitch);
-        memset(&console.framebuffer[where], 0, w * (console.depth / 8));
+        unsigned base = (x * bpp) + (row * console.pitch);
+        for (uint32_t col = 0; col < w; col++) {
+            unsigned where = base + col * bpp;
+            console.framebuffer[where]     = b0;
+            console.framebuffer[where + 1] = b1;
+            console.framebuffer[where + 2] = b2;
+        }
     }
 }
 
@@ -92,13 +106,10 @@ static uint32_t logical_to_ring(uint32_t logical)
 /* Redraw the entire screen from scrollback history */
 static void redraw_all(void)
 {
-    uint32_t fgcolor = rgb(255, 255, 255);
+    uint32_t fgcolor = SOL_BASE0;
 
-    /* Clear the whole framebuffer */
-    for (uint32_t y = 0; y < console.height; y++) {
-        unsigned where = y * console.pitch;
-        memset(&console.framebuffer[where], 0, console.width * (console.depth / 8));
-    }
+    /* Clear the whole framebuffer to background color */
+    clear_rect(0, 0, console.width, console.height);
 
     /* Determine first logical row to show.
      * Logical rows: 0 = oldest, ring_used-1 = newest live row.
@@ -221,7 +232,7 @@ void writechar_fb(char c)
     uint32_t screen_row = (console.ring_used <= console.rows)
                           ? (console.ring_used - 1)
                           : (console.rows - 1);
-    uint32_t fgcolor = rgb(255, 255, 255);
+    uint32_t fgcolor = SOL_BASE0;
     drawchar((uint8_t)c,
              console.cur_col * CONSOLE_FONT_WIDTH,
              screen_row * CONSOLE_FONT_HEIGHT,
@@ -317,6 +328,10 @@ void init_fbdev(char *fbaddr, uint32_t width, uint32_t height, uint8_t depth,
     memset(console.cells, 0, sizeof(console.cells));
 
     fbdev_ready = true;
+
+    /* Paint the background color immediately */
+    clear_rect(0, 0, console.width, console.height);
+
     printk(MODULE "framebuffer console %ldx%ld (%ld cols x %ld rows, %d row history)\n",
             width, height, console.cols, console.rows, FBDEV_HISTORY_ROWS);
 }

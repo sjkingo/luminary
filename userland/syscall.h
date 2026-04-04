@@ -60,6 +60,14 @@ struct vfs_stat {
 #define SEEK_CUR 1
 #define SEEK_END 2
 
+/* open() flags — Linux i386 values */
+#define O_RDONLY  0
+#define O_WRONLY  1
+#define O_RDWR    2
+#define O_CREAT   0x40
+#define O_TRUNC   0x200
+#define O_APPEND  0x400
+
 static inline int syscall0(int num)
 {
     int ret;
@@ -172,7 +180,12 @@ static inline int waitpid(int pid)
 /* VFS wrappers */
 static inline int vfs_open(const char *path)
 {
-    return syscall1(SYS_OPEN, (unsigned int)path);
+    return syscall2(SYS_OPEN, (unsigned int)path, O_RDONLY);
+}
+
+static inline int open(const char *path, int flags)
+{
+    return syscall2(SYS_OPEN, (unsigned int)path, (unsigned int)flags);
 }
 
 static inline int vfs_close(int fd)

@@ -8,7 +8,7 @@
 /* 2 = unused */
 #define SYS_READ        3   /* read(fd, buf, len) - read from fd; blocks on chardev stdin */
 #define SYS_WRITE       4   /* write(fd, buf, len) - write to fd (chardev only) */
-#define SYS_OPEN        5   /* open(path) -> fd or -1 */
+#define SYS_OPEN        5   /* open(path, flags) -> fd or -1; flags: O_RDONLY/O_WRONLY/O_CREAT/O_TRUNC/O_APPEND */
 #define SYS_CLOSE       6   /* close(fd) -> 0 or -1; notifies pipe on pipe fds */
 #define SYS_PS          7   /* ps(buf, len) - format process list into buf, returns bytes written */
 

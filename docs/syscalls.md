@@ -14,8 +14,8 @@ Userspace macros (in `userland/syscall.h` and `userland/gui.h`):
 | 0 | SYS_NOP | — | 0 | No-op |
 | 1 | SYS_EXIT_TASK | — | — | Kill calling task (normal process exit) |
 | 3 | SYS_READ | EBX=fd, ECX=buf, EDX=len | bytes read or -1 | Read from fd; blocks on chardev (stdin) until data available |
-| 4 | SYS_WRITE | EBX=fd, ECX=buf, EDX=len | len or -1 | Write bytes to fd (chardev only; use fd 1 for stdout) |
-| 5 | SYS_OPEN | EBX=path | fd or -1 | Open VFS path |
+| 4 | SYS_WRITE | EBX=fd, ECX=buf, EDX=len | bytes written or -1 | Write to fd. Chardevs dispatched to write_op; writable regular files (O_CREAT/O_TRUNC opened) track offset; O_APPEND fds always write at end. |
+| 5 | SYS_OPEN | EBX=path, ECX=flags | fd or -1 | Open VFS path. flags: O_RDONLY=0, O_WRONLY=1, O_CREAT=0x40, O_TRUNC=0x200, O_APPEND=0x400. O_CREAT\|O_TRUNC creates or truncates; resulting fd is writable (heap-backed, volatile). |
 | 6 | SYS_CLOSE | EBX=fd | 0 or -1 | Close fd |
 | 7 | SYS_PS | EBX=buf, ECX=len | bytes written or -1 | Format process list (PID/PRIO/NAME) into userland buffer |
 | 8 | SYS_WIN_CREATE | EBX=x, ECX=y, EDX=w, [uesp+0]=h, [uesp+4]=title | id or -1 | Create window |
@@ -49,7 +49,7 @@ Userspace macros (in `userland/syscall.h` and `userland/gui.h`):
 - **SYS_EXEC (28)** replaces the calling task's address space in-place. On failure, the task continues with its original image.
 - **SYS_SPAWN (16)** creates a new independent task (no parent relationship). For fork+exec with wait, use SYS_FORK + SYS_EXEC + SYS_WAITPID.
 - **SYS_READ (3)** routes through the fd table. For fd 0 (stdin chardev), it blocks until keyboard input is available and yields without consuming while the keyboard is owned by the GUI (`kbd_is_owned()`).
-- **SYS_WRITE (4)** routes through the fd table. For fd 1/2 (stdout/stderr chardevs), it writes to the framebuffer console. Regular file fds return -1 (read-only kernel).
+- **SYS_WRITE (4)** routes through the fd table. For fd 1/2 (stdout/stderr chardevs), it writes to the framebuffer console. For writable regular file fds (opened with O_CREAT or O_TRUNC), it writes to the heap buffer and advances the offset. Read-only (initrd-backed) fds return -1.
 - **SYS_PS (7)** formats the process list as "PID  PRIO  NAME\n" entries into a userland-supplied buffer. Returns bytes written (not counting the null terminator), or -1 on error.
 - **SYS_PIPE (32)** allocates a 4KB ring buffer shared between two chardev VFS nodes. Up to 16 concurrent pipes. The read end blocks when empty (until data arrives or write end closes). The write end blocks when full (until space is available or read end closes).
 - **SYS_DUP2 (33)** is the standard mechanism for I/O redirection: `dup2(pipe_fds[0], 0)` redirects stdin to a pipe read end. Inherited across `fork()`; preserved across `exec()`.
