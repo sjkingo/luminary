@@ -39,14 +39,17 @@
 #define SYS_MOUNT           27  /* mount() -> prints mount info, returns 0 */
 #define SYS_EXEC            28  /* exec(path, argv) - replace address space in-place; fds preserved */
 #define SYS_FORK            29  /* fork() -> child PID in parent, 0 in child; fds inherited */
-#define SYS_WAITPID         30  /* waitpid(pid) -> pid on child exit, -1 on error */
+#define SYS_WAITPID         30  /* waitpid(pid, &status, flags) -> pid on exit, -1 on error; flags: WNOHANG=1 */
 #define SYS_PIPE            32  /* pipe(int fds[2]) -> 0 or -1; fds[0]=read end, fds[1]=write end */
 #define SYS_DUP2            33  /* dup2(oldfd, newfd) -> newfd or -1; closes newfd first if open */
 #define SYS_TASK_DONE       34  /* task_done(pid) -> 1 if pid no longer exists, 0 if still running */
 #define SYS_CHDIR           35  /* chdir(path) -> 0 or -1 */
 #define SYS_GETCWD          36  /* getcwd(buf, len) -> 0 or -1 */
+#define SYS_GETPPID         37  /* getppid() -> parent PID, 0 if no parent */
+#define SYS_MKDIR           38  /* mkdir(path) -> 0 or -1 */
+#define SYS_UNLINK          39  /* unlink(path) -> 0 or -1 */
 
-#define SYS_MAX     36
+#define SYS_MAX     39
 
 /* Handle a syscall. Called from trap_handler when trapno == SYSCALL_VECTOR. */
 void syscall_handler(struct trap_frame *frame);

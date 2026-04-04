@@ -64,7 +64,7 @@ static uint32_t pipe_read_##i(uint32_t off, uint32_t len, void *buf)           \
     uint32_t out = 0;                                                           \
     while (out < len) {                                                         \
         if (pipe_used(p) == 0) {                                                \
-            if (p->write_closed) break; /* EOF */                               \
+            if (p->write_refs == 0) break; /* EOF: no writers remain */         \
             if (out > 0) break; /* return what we already have */               \
             if (running_task && running_task->read_nonblock) break; /* non-blocking */ \
             enable_interrupts();                                                \
@@ -82,11 +82,11 @@ static uint32_t pipe_write_##i(uint32_t off, uint32_t len, const void *buf)    \
     (void)off;                                                                  \
     struct pipe *p = pipe_table[i].p;                                           \
     const char *cbuf = (const char *)buf;                                       \
-    if (p->read_closed) return (uint32_t)-1;                                   \
+    if (p->read_refs == 0) return (uint32_t)-1; /* broken pipe */              \
     uint32_t written = 0;                                                       \
     while (written < len) {                                                     \
         if (pipe_free(p) == 0) {                                                \
-            if (p->read_closed) return (uint32_t)-1;                           \
+            if (p->read_refs == 0) return (uint32_t)-1;                        \
             enable_interrupts();                                                \
             asm volatile("hlt");                                                \
             disable_interrupts();                                               \
@@ -131,19 +131,46 @@ void pipe_notify_close(struct vfs_node *node)
     for (int i = 0; i < PIPE_MAX; i++) {
         if (!pipe_table[i].p) continue;
         if (node == pipe_table[i].read_node) {
-            pipe_table[i].p->read_closed = 1;
-            if (pipe_table[i].p->write_closed) {
+            if (pipe_table[i].p->read_refs > 0)
+                pipe_table[i].p->read_refs--;
+            if (pipe_table[i].p->read_refs == 0 &&
+                pipe_table[i].p->write_refs == 0) {
                 kfree(pipe_table[i].p);
                 pipe_table[i].p = NULL;
+                vfs_free_node(pipe_table[i].read_node);
+                vfs_free_node(pipe_table[i].write_node);
+                pipe_table[i].read_node  = NULL;
+                pipe_table[i].write_node = NULL;
             }
             return;
         }
         if (node == pipe_table[i].write_node) {
-            pipe_table[i].p->write_closed = 1;
-            if (pipe_table[i].p->read_closed) {
+            if (pipe_table[i].p->write_refs > 0)
+                pipe_table[i].p->write_refs--;
+            if (pipe_table[i].p->read_refs == 0 &&
+                pipe_table[i].p->write_refs == 0) {
                 kfree(pipe_table[i].p);
                 pipe_table[i].p = NULL;
+                vfs_free_node(pipe_table[i].read_node);
+                vfs_free_node(pipe_table[i].write_node);
+                pipe_table[i].read_node  = NULL;
+                pipe_table[i].write_node = NULL;
             }
+            return;
+        }
+    }
+}
+
+void pipe_fork_fd(struct vfs_node *node)
+{
+    for (int i = 0; i < PIPE_MAX; i++) {
+        if (!pipe_table[i].p) continue;
+        if (node == pipe_table[i].read_node) {
+            pipe_table[i].p->read_refs++;
+            return;
+        }
+        if (node == pipe_table[i].write_node) {
+            pipe_table[i].p->write_refs++;
             return;
         }
     }
@@ -163,6 +190,8 @@ int pipe_create(struct vfs_node **read_out, struct vfs_node **write_out)
     struct pipe *p = (struct pipe *)kmalloc(sizeof(struct pipe));
     if (!p) return -1;
     memset(p, 0, sizeof(*p));
+    p->write_refs = 1;
+    p->read_refs  = 1;
 
     struct vfs_node *rnode = vfs_alloc_node();
     struct vfs_node *wnode = vfs_alloc_node();

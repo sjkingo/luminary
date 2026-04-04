@@ -32,7 +32,7 @@ static inline bool user_access_ok(const void *ptr, uint32_t len)
     uint32_t addr = (uint32_t)ptr;
     if (addr < USER_SPACE_START) return false;
     if (addr >= USER_SPACE_END)  return false;
-    if (len > 1 && (addr + len - 1) >= USER_SPACE_END) return false;
+    if (len > 1 && len > USER_SPACE_END - addr) return false;
     return true;
 }
 
@@ -368,13 +368,27 @@ static int sys_fork(struct trap_frame *frame)
 {
     struct task *child = task_fork(frame);
     if (!child) return -1;
+
+    /* Bump pipe refcounts for every inherited pipe fd */
+    for (int i = 0; i < VFS_FD_MAX; i++) {
+        if (child->fds[i].open && child->fds[i].node)
+            pipe_fork_fd(child->fds[i].node);
+    }
+
     return (int)child->pid;
 }
 
 static int sys_waitpid(struct trap_frame *frame)
 {
+    /* EBX = pid, ECX = &status (int *, may be NULL), EDX = flags */
     int target_pid = (int)frame->ebx;
+    int *status    = (int *)frame->ecx;
+    int  flags     = (int)frame->edx;
+
+#define WNOHANG 1
+
     if (target_pid <= 0) return -1;
+    if (status && !user_access_ok(status, sizeof(int))) return -1;
 
     /* Verify the target is a child of the caller */
     struct task *t = sched_queue;
@@ -390,10 +404,14 @@ static int sys_waitpid(struct trap_frame *frame)
         /* child may have already exited and been removed */
         if (running_task->wait_done) {
             running_task->wait_done = false;
+            if (status) *status = running_task->exit_status;
             return target_pid;
         }
         return -1;
     }
+
+    /* WNOHANG: return immediately if child hasn't exited yet */
+    if (flags & WNOHANG) return -1;
 
     /* Block until the child exits */
     running_task->wait_pid  = target_pid;
@@ -407,6 +425,7 @@ static int sys_waitpid(struct trap_frame *frame)
     }
 
     running_task->wait_done = false;
+    if (status) *status = running_task->exit_status;
     return target_pid;
 }
 
@@ -424,10 +443,15 @@ static int sys_task_done(struct trap_frame *frame)
 
 static int sys_exit_task(struct trap_frame *frame)
 {
-    (void)frame;
+    running_task->exit_status = (int)frame->ebx;
     cpu_reset_fault_counter();
     task_kill(running_task);
     __builtin_unreachable();
+}
+
+static int sys_getppid(void)
+{
+    return (int)running_task->ppid;
 }
 
 /* ── VFS syscalls ─────────────────────────────────────────────────────────── */
@@ -541,6 +565,9 @@ static int sys_dup2(struct trap_frame *frame)
     }
 
     running_task->fds[newfd] = running_task->fds[oldfd];
+    /* Bump pipe refcount for the new fd copy */
+    if (running_task->fds[newfd].node)
+        pipe_fork_fd(running_task->fds[newfd].node);
     return newfd;
 }
 
@@ -653,6 +680,22 @@ static int sys_getcwd(struct trap_frame *frame)
     return 0;
 }
 
+static int sys_mkdir(struct trap_frame *frame)
+{
+    char resolved[VFS_PATH_MAX];
+    const char *path = resolve_path((const char *)frame->ebx, resolved);
+    if (!path) return -1;
+    return vfs_mkdir(path) ? 0 : -1;
+}
+
+static int sys_unlink(struct trap_frame *frame)
+{
+    char resolved[VFS_PATH_MAX];
+    const char *path = resolve_path((const char *)frame->ebx, resolved);
+    if (!path) return -1;
+    return vfs_unlink(path);
+}
+
 /* ── dispatch ─────────────────────────────────────────────────────────────── */
 
 void syscall_handler(struct trap_frame *frame)
@@ -761,6 +804,15 @@ void syscall_handler(struct trap_frame *frame)
         break;
     case SYS_GETCWD:
         ret = sys_getcwd(frame);
+        break;
+    case SYS_GETPPID:
+        ret = sys_getppid();
+        break;
+    case SYS_MKDIR:
+        ret = sys_mkdir(frame);
+        break;
+    case SYS_UNLINK:
+        ret = sys_unlink(frame);
         break;
     default:
         printk("unknown syscall %d from pid %d\n",

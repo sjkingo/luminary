@@ -39,13 +39,16 @@ Userspace macros (in `userland/syscall.h` and `userland/gui.h`):
 | 27 | SYS_MOUNT | — | 0 | Print mount table |
 | 28 | SYS_EXEC | EBX=path, ECX=argv | 0 or -1 | exec in-place: replace address space with ELF at path |
 | 29 | SYS_FORK | — | child pid or 0 | Fork current task; child gets 0 |
-| 30 | SYS_WAITPID | EBX=pid | pid or -1 | Block until child exits |
+| 30 | SYS_WAITPID | EBX=pid, ECX=&status (or 0), EDX=flags | pid or -1 | Block until child exits; writes exit code to *status if non-NULL. flags: WNOHANG=1 returns -1 immediately if child hasn't exited |
 | 23 | SYS_READ_NB | EBX=fd, ECX=buf, EDX=len | bytes read or 0 | Non-blocking read: returns 0 immediately if no data available (pipe empty or no keyboard input) |
 | 32 | SYS_PIPE | EBX=int[2] ptr | 0 or -1 | Create pipe; fills fds[0]=read end, fds[1]=write end |
 | 33 | SYS_DUP2 | EBX=oldfd, ECX=newfd | newfd or -1 | Duplicate oldfd onto newfd; closes newfd first if open |
 | 34 | SYS_TASK_DONE | EBX=pid | 1 or 0 | Non-blocking check: returns 1 if pid is no longer in the scheduler queue, 0 if still running |
 | 35 | SYS_CHDIR | EBX=path | 0 or -1 | Change current working directory; resolves relative paths against current cwd |
 | 36 | SYS_GETCWD | EBX=buf, ECX=len | 0 or -1 | Copy current working directory string into buf |
+| 37 | SYS_GETPPID | — | ppid | Parent PID; 0 if no parent |
+| 38 | SYS_MKDIR | EBX=path | 0 or -1 | Create directory; parent must exist |
+| 39 | SYS_UNLINK | EBX=path | 0 or -1 | Remove regular file; fails on dirs and chardevs |
 
 ## Notes
 

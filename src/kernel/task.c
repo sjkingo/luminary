@@ -452,9 +452,10 @@ void task_kill(struct task *t)
         struct task *waiter = sched_queue;
         while (waiter) {
             if (waiter->wait_pid == (int)dead_pid) {
-                waiter->wait_pid  = -1;
-                waiter->wait_done = true;
-                waiter->prio_d    = waiter->prio_s; /* unsuspend */
+                waiter->wait_pid    = -1;
+                waiter->wait_done   = true;
+                waiter->exit_status = t->exit_status;
+                waiter->prio_d      = waiter->prio_s; /* unsuspend */
             }
             waiter = waiter->next;
         }

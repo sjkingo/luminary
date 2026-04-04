@@ -119,8 +119,8 @@ uint32_t vmm_get_kernel_page_dir(void)
  * Free-list entries are a static array of (base, npages) pairs.
  * On alloc: check free-list for an exact or larger range first,
  *           then fall back to bumping kvirt_next.
- * On free:  add the range back to the free-list; adjacent ranges
- *           are NOT coalesced (not needed at this scale).
+ * On free:  coalesce adjacent entries before inserting, reducing
+ *           fragmentation and preventing list exhaustion.
  */
 #define KVIRT_BASE      0xC0000000u
 #define KVIRT_FL_MAX    64          /* max free-list entries */
@@ -185,14 +185,41 @@ void vmm_free_pages(void *virt_base, uint32_t n)
         vmm_unmap_page(v + i * PAGE_SIZE);
     }
 
-    /* Return virtual range to free-list if space available */
-    if (kvirt_free_count < KVIRT_FL_MAX) {
-        kvirt_free[kvirt_free_count].base   = v;
-        kvirt_free[kvirt_free_count].npages = n;
-        kvirt_free_count++;
+    /* Coalesce with any adjacent free-list entries, then insert.
+     * Two ranges are adjacent if one ends exactly where the other begins.
+     * Loop restarts after each merge because the swap-in of the last entry
+     * may itself be adjacent to another entry. */
+    uint32_t new_base   = v;
+    uint32_t new_npages = n;
+
+restart:
+    for (uint32_t i = 0; i < kvirt_free_count; i++) {
+        uint32_t e_end  = kvirt_free[i].base + kvirt_free[i].npages * PAGE_SIZE;
+        uint32_t nw_end = new_base + new_npages * PAGE_SIZE;
+
+        if (e_end == new_base) {
+            /* existing entry is immediately before the new range */
+            new_base   = kvirt_free[i].base;
+            new_npages = kvirt_free[i].npages + new_npages;
+            kvirt_free[i] = kvirt_free[--kvirt_free_count];
+            goto restart;
+        }
+        if (nw_end == kvirt_free[i].base) {
+            /* new range is immediately before the existing entry */
+            new_npages += kvirt_free[i].npages;
+            kvirt_free[i] = kvirt_free[--kvirt_free_count];
+            goto restart;
+        }
     }
-    /* If free-list is full the virtual range is simply leaked —
-     * acceptable given KVIRT_FL_MAX=64 covers all realistic workloads. */
+
+    if (kvirt_free_count < KVIRT_FL_MAX) {
+        kvirt_free[kvirt_free_count].base   = new_base;
+        kvirt_free[kvirt_free_count].npages = new_npages;
+        kvirt_free_count++;
+    } else {
+        printk("vmm: free-list full, losing virtual range 0x%lx (%ld pages)\n",
+               new_base, new_npages);
+    }
 }
 
 /* Temporary kmap pool: a fixed window of virtual pages at the top of the

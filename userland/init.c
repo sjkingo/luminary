@@ -14,11 +14,11 @@ int main(int argc, char **argv)
         if (pid == 0) {
             /* child: become the shell */
             char *sh_argv[] = { INIT_CHILD, (char *)0 };
-            puts("init: starting " INIT_CHILD "\n");
+            printf("init: starting " INIT_CHILD "\n");
             execv(INIT_CHILD, sh_argv);
             exit(1);
         } else if (pid > 0) {
-            waitpid(pid);
+            waitpid(pid, NULL, 0);
         }
         /* shell died, loop and respawn */
     }

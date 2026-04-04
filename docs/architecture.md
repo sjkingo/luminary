@@ -82,13 +82,13 @@ Priority-based preemptive scheduler with dynamic aging. Tasks have a static prio
 
 ## Process Model
 
-Tasks are created with per-task 4KB kernel stacks and synthetic trap frames for initial context switching via `trapret`. Context switches swap CR3 (page directory) and update TSS esp0.
+Tasks are created with per-task 8KB kernel stacks. Each stack is allocated by `kstack_alloc()` which maps `(TASK_STACK_SIZE/PAGE_SIZE) + 1` virtual pages and unmaps the first page as a guard page — stack overflow causes a page fault rather than silently corrupting adjacent data. Synthetic trap frames are built on the stack for initial context switching via `trapret`. Context switches swap CR3 (page directory) and update TSS esp0.
 
 ## Heap
 
-`kmalloc`/`kfree` are backed by a slab allocator with 8 size classes: 32, 64, 128, 256, 512, 1024, 2048, 4096 bytes. Each class maintains up to 64 4KB PMM pages; within each page, slots are tracked by a 128-bit bitmap. Allocations larger than 4096 bytes go to an overflow list (up to 64 entries) backed by `vmm_alloc_pages`. With `-DDEBUG`, each alloc/free prints the call site and slab class to serial.
+`kmalloc`/`kfree` are backed by a slab allocator with 8 size classes: 32, 64, 128, 256, 512, 1024, 2048, 4096 bytes. Each class maintains up to 64 4KB PMM pages; within each page, slots are tracked by a 128-bit bitmap. Allocations larger than 4096 bytes go to an overflow list (up to 128 entries) backed by `vmm_alloc_pages`. With `-DDEBUG`, each alloc/free prints the call site and slab class to serial.
 
-Init (PID 1) is loaded from the initrd and respawned automatically if killed — analogous to Unix PID 1. `task_fork()` does a full address space copy (no CoW). `task_exec()` replaces the calling task's address space in-place.
+Init (PID 1) is loaded from the initrd and respawned automatically if killed — analogous to Unix PID 1. `task_fork()` clones the address space with copy-on-write: writable pages are marked read-only and shared; a page-fault on either side triggers a copy (`vmm_cow_fault`). `task_exec()` replaces the calling task's address space in-place. `waitpid(pid, &status, flags)` supports `WNOHANG` and propagates the child's exit code via `exit_status` in `struct task`.
 
 `task_death_hook` is a function pointer in `task.h` called by `task_kill()` with the dying task's pid before its page directory is freed. Subsystems register here to clean up per-task resources without creating a compile-time dependency on `task.c`. The GUI subsystem registers `gui_destroy_windows_for_pid` here at `init_gui()` time.
 
@@ -100,7 +100,7 @@ Unhandled CPU exceptions call `dump_trap_frame()` which prints registers and wal
 
 ## Filesystem
 
-CPIO newc initrd, parsed by `initrd.c` and mounted read-only at `/` on boot. A VFS layer (`vfs.c`) provides mount table, path resolution, and open/read/readdir/stat/close. Per-task fd tables are stored inline in `struct task`.
+CPIO newc initrd, parsed by `initrd.c` and mounted read-only at `/` on boot. A VFS layer (`vfs.c`) provides mount table, path resolution, and open/read/readdir/stat/close/creat/mkdir/unlink. Per-task fd tables are stored inline in `struct task`. `vfs_alloc_node()` uses a static pool of 512 nodes with a free-list (`sibling` pointer reused as link) so closed pipe nodes and unlinked file nodes are reclaimed and reused.
 
 ## GUI
 

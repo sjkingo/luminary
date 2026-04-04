@@ -98,11 +98,23 @@ void vfs_add_child(struct vfs_node *parent, struct vfs_node *child);
 /* Return the current VFS root node. */
 struct vfs_node *vfs_get_root(void);
 
-/* Allocate a new node from the node pool (used by initrd). Returns NULL if
- * the pool is exhausted. */
+/* Allocate a new node from the node pool. Checks the reclaim free-list first.
+ * Returns NULL if the pool is exhausted. */
 struct vfs_node *vfs_alloc_node(void);
+
+/* Return a node to the reclaim free-list so it can be reused by vfs_alloc_node.
+ * The node must not be referenced by any fd or tree pointer after this call. */
+void vfs_free_node(struct vfs_node *n);
 
 /* Create or truncate a writable file at path.  Intermediate directories must
  * already exist.  Returns the node on success or NULL on error.
  * The node's heap buffer grows on demand via vfs_write. */
 struct vfs_node *vfs_creat(const char *path);
+
+/* Create a new empty directory at path. Parent must exist. Returns the node
+ * on success or NULL if the path already exists or the parent is missing. */
+struct vfs_node *vfs_mkdir(const char *path);
+
+/* Remove a regular file node at path. Frees its heap buffer if writable.
+ * Returns 0 on success, -1 on error (not found, is a directory, is a chardev). */
+int vfs_unlink(const char *path);

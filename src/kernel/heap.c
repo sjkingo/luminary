@@ -53,7 +53,7 @@ static struct slab_class classes[NUM_SLAB_CLASSES];
 
 /* ── overflow table for allocations > 4096 bytes ────────────────────────── */
 
-#define MAX_OVERFLOW 64
+#define MAX_OVERFLOW 128
 
 struct overflow_entry {
     uint32_t virt;      /* base virtual address (from vmm_alloc_pages) */

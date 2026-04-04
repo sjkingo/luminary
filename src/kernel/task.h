@@ -30,6 +30,7 @@ struct task {
     unsigned int ppid;          /* parent PID (0 if no parent) */
     int          wait_pid;      /* pid this task is blocked waiting for (-1 = not waiting) */
     bool         wait_done;     /* set true when the waited-on child has exited */
+    int          exit_status;   /* exit code passed to SYS_EXIT_TASK; read by parent via SYS_WAITPID */
 
     unsigned int fault_count;   /* consecutive CPU exceptions; panic at MAX_TASK_FAULTS */
     bool         read_nonblock; /* set during SYS_READ_NB: chardev/pipe reads return 0 if empty */

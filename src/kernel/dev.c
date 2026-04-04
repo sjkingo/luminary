@@ -74,22 +74,17 @@ static uint32_t stdout_write_op(uint32_t offset, uint32_t len, const void *buf)
 {
     (void)offset;
     static const char hex[] = "0123456789abcdef";
-    static uint32_t total_chars = 0;
     const unsigned char *cbuf = (const unsigned char *)buf;
     for (uint32_t i = 0; i < len; i++) {
         unsigned char c = cbuf[i];
         if (c == '\n' || c == '\r' || c == '\t' || c == '\b' ||
             (c >= 0x20 && c <= 0x7E)) {
-            printk_serial("stdout[%lu] raw_byte=%lu char=0x%x\n", total_chars, i, (unsigned)c);
-            total_chars++;
             writechar_fb((char)c);
             write_serial((char)c);
         } else {
             /* non-printable: render as \xNN */
             char esc[4] = { '\\', 'x', hex[c >> 4], hex[c & 0xF] };
             for (int j = 0; j < 4; j++) {
-                printk_serial("stdout[%lu] raw_byte=%lu esc[%d]=0x%x\n", total_chars, i, j, (unsigned)esc[j]);
-                total_chars++;
                 writechar_fb(esc[j]);
                 write_serial(esc[j]);
             }

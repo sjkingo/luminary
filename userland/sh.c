@@ -162,15 +162,15 @@ static int parse_redirs(char *argv[], int *argc_p, struct redir redirs[], int re
             unsigned int li;
             char c;
             while (1) {
-                write(1, "> ", 2);
+                printf("> ");
                 li = 0;
                 while (read(0, &c, 1) == 1) {
                     if (c == '\n') { putchar('\n'); break; }
                     if (c == '\b') {
-                        if (li > 0) { li--; write(1, "\b \b", 3); }
+                        if (li > 0) { li--; printf("\b \b"); }
                         continue;
                     }
-                    if (li < sizeof(linebuf) - 1) { linebuf[li++] = c; write(1, &c, 1); }
+                    if (li < sizeof(linebuf) - 1) { linebuf[li++] = c; printf("%c", c); }
                 }
                 linebuf[li] = '\0';
                 if (strcmp(linebuf, delim) == 0) break;
@@ -427,7 +427,7 @@ static void run_pipeline(char *line)
                 /* Ctrl+C: kill remaining pipeline children and abort wait */
                 for (int j = i; j < npids; j++)
                     kill((unsigned int)pids[j]);
-                write(1, "^C\n", 3);
+                printf("^C\n");
                 return;
             }
             yield();
@@ -468,12 +468,12 @@ int main(int argc, char **argv)
         } else if (c == '\b') {
             if (idx > 0) {
                 idx--;
-                write(1, "\b \b", 3);
+                printf("\b \b");
             }
         } else {
             if (idx < (int)(sizeof(cmd) - 1)) {
                 cmd[idx++] = c;
-                write(1, &c, 1);
+                printf("%c", c);
             }
         }
     }

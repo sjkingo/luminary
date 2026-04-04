@@ -13,7 +13,7 @@
 - ELF32 loader
 - CPIO initrd, VFS layer, path-based file access
 - fork/exec/waitpid process model
-- Syscall interface (`int 0x80`, 33 syscalls)
+- Syscall interface (`int 0x80`, 39 syscalls including `mkdir`/`unlink`, `getppid`, `waitpid` with WNOHANG and exit-status propagation)
 - PS/2 keyboard driver with ring buffer
 - PS/2 mouse driver (IRQ12, absolute position tracking)
 - GUI compositor: three-buffer rendering, window management, drag, resize, close, statusbar/taskbar, focus-follows-mouse, resize cursor sprites, console window
@@ -26,16 +26,20 @@
 - Kernel symbol table (two-pass build): stack traces resolve addresses to `function (file:line)` for CPU exceptions
 - `fork()`/`exec()` with copy-on-write address space cloning (`vmm_clone_page_dir`): writable pages marked CoW, read-only pages shared; refcounts track sharing
 - Character device abstraction (`VFS_CHARDEV`): `/dev/stdin`, `/dev/stdout`, `/dev/stderr` as VFS nodes; `read(fd,buf,len)`/`write(fd,buf,len)` dispatch through fd table; fds 0/1/2 pre-opened on every task
-- Anonymous pipes (`pipe()`/`dup2()`): 4KB ring buffer, up to 16 concurrent pipes, blocking read/write with EOF and broken-pipe semantics; enables shell I/O redirection
+- Anonymous pipes (`pipe()`/`dup2()`): 4KB ring buffer, up to 16 concurrent pipes, blocking read/write with EOF and broken-pipe semantics; enables shell I/O redirection; `write_refs`/`read_refs` refcounts allow correct sharing across `fork()` and `dup2()`
 - GUI terminal emulator (`/bin/term`): userland process that creates a window, forks `/bin/sh`, connects it via pipes, and renders output; multiple term instances can run simultaneously
 - Ctrl+C signal interrupts: keyboard driver emits `\x03`; shell uses interruptible wait (`task_done()` + `read_nb()` + `yield()`) to detect and kill children
 - `task_death_hook`: registered callback fired by `task_kill()` for per-task resource cleanup; GUI uses it to destroy orphaned windows
+- Kernel stack guard pages: each task's 8KB kernel stack has an unmapped guard page immediately below it; overflow triggers a page fault rather than silent corruption
 
 ## What Luminary Needs
 
 1. **Network stack** — build on RTL8139 driver (has init but no packet I/O or IRQ handler yet)
 2. **i3-style keybinding system** — planned, not yet started
 3. **Writable filesystem** — initrd is read-only; no mechanism to create/write files
+4. **SYS_SPAWN** — there is no syscall to create a new independent task from user space; the GUI currently spawns `/bin/sh` etc. directly via kernel calls. A `spawn(path)` syscall (returns new pid, no parent relationship) would enable userland process launchers and the taskbar to start programs without fork+exec.
+5. **VFS tmpfs** — `/tmp` is currently backed by initrd nodes. A proper tmpfs (in-memory, pre-mounted at `/tmp`, supports `mkdir`/`unlink`/`creat` on a fresh tree) would give programs a clean scratch space that doesn't consume initrd node pool slots.
+6. **O_NONBLOCK / SYS_FCNTL** — there is no per-fd non-blocking flag. Non-blocking reads are done via `SYS_READ_NB` (a separate syscall). POSIX programs expect `fcntl(fd, F_SETFL, O_NONBLOCK)` to set the flag on the fd itself, and `read(fd, …)` to then return EAGAIN rather than blocking. Implementing `SYS_FCNTL` with `F_GETFL`/`F_SETFL` and adding an `O_NONBLOCK` bit to `struct vfs_fd` would make porting POSIX code easier.
 
 ## Known Bugs
 
@@ -47,14 +51,6 @@
 
 4. **Back buffer allocation failure**: `pmm_alloc_contiguous(n)` allocates the back buffer from ZONE_LOW. If ZONE_LOW is exhausted (unlikely at init time), the GUI falls back to drawing directly to `fb_hw` with degraded performance (no partial updates, cursor drawn into scene).
 
-6. **Pipe no-refcount**: `write_closed`/`read_closed` are single flags, not reference counts. Closing any fd pointing to a pipe end sets the flag even if other fds hold the same end open (e.g. after `fork()`). Workaround: do not close unused pipe ends after `fork()`. Fix requires per-node refcounting.
-
-7. **VFS node pool is non-reclaimable**: `vfs_alloc_node()` is a bump allocator (`node_pool_used` only increments). Nodes are never returned to the pool — not for closed pipe ends, not for anything. 512 nodes is sufficient for the current workload (initrd tree + /dev nodes + 16 pipes × 2 = ~300 nodes max), but there is no reclaim path if the pool is exhausted.
-
-8. **`user_access_ok` integer overflow**: The check `addr + len - 1 >= USER_SPACE_END` overflows if `len` is close to `UINT32_MAX`. In practice this is blocked upstream by `len > 4096`/`len > 65536` guards in `sys_read`/`sys_write`, but callers that omit the guard (e.g. future syscalls) would be vulnerable to a wrap-around that bypasses the bounds check.
-
-9. **RTL8139 interrupts enabled with no handler**: `init_rtl8139()` enables NIC interrupts (IMR register) but the IRQ handler is a stub (`// TODO`). Network interrupts will fire and be silently dropped by the PIC spurious-IRQ path. No packet I/O is possible.
-
-10. **`vmm_free_pages` silently leaks virtual ranges when free-list is full**: The kernel virtual allocator free-list holds at most 64 entries (`KVIRT_FL_MAX`). If the list is full when `vmm_free_pages()` is called, the freed virtual range is silently discarded and that address space is permanently lost. Current workload stays well under 64 concurrent allocations.
+3. **RTL8139 interrupts enabled with no handler**: `init_rtl8139()` enables NIC interrupts (IMR register) but the IRQ handler is a stub (`// TODO`). Network interrupts will fire and be silently dropped by the PIC spurious-IRQ path. No packet I/O is possible.
 
 5. **`struct task` offset constants**: `TASK_ESP_OFFSET`, `TASK_PAGE_DIR_OFFSET`, `TASK_STACK_BASE_OFFSET` in `task.h` must match the actual byte layout of `struct task`. Verified with `_Static_assert(offsetof(...))`. If `struct task` is modified, update both the constants and the corresponding defines in `cpu/traps.S`. A `cpu/traps.o: kernel/task.h` dependency in the Makefile ensures `traps.S` is rebuilt when `task.h` changes.

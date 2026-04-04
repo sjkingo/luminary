@@ -13,8 +13,8 @@ struct pipe {
     char     buf[PIPE_BUF_SIZE];
     uint32_t head;          /* write index */
     uint32_t tail;          /* read index */
-    int      write_closed;  /* set when write end is closed */
-    int      read_closed;   /* set when read end is closed */
+    uint8_t  write_refs;    /* number of open write-end fds */
+    uint8_t  read_refs;     /* number of open read-end fds */
 };
 
 /* Allocate a pipe and return two chardev VFS nodes.
@@ -23,8 +23,12 @@ struct pipe {
  * Returns 0 on success, -1 on allocation failure. */
 int pipe_create(struct vfs_node **read_out, struct vfs_node **write_out);
 
-/* Called by sys_close when a pipe node is closed.
- * Updates write_closed/read_closed and frees the struct pipe when both
- * ends are closed. Safe to call on non-pipe nodes (no-op). */
+/* Called by sys_close / sys_dup2 when a pipe node fd is closed.
+ * Decrements the appropriate ref count; frees the struct pipe when both
+ * ref counts reach zero. Safe to call on non-pipe nodes (no-op). */
 void pipe_notify_close(struct vfs_node *node);
+
+/* Called by sys_fork for each fd that is a pipe node.
+ * Increments write_refs or read_refs to account for the inherited fd. */
+void pipe_fork_fd(struct vfs_node *node);
 

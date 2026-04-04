@@ -23,11 +23,18 @@
 /* Static pool — no heap allocation needed for the VFS tree itself. */
 #define VFS_NODE_POOL_SIZE 512
 
-static struct vfs_node node_pool[VFS_NODE_POOL_SIZE];
-static uint32_t        node_pool_used = 0;
+static struct vfs_node  node_pool[VFS_NODE_POOL_SIZE];
+static uint32_t         node_pool_used = 0;
+static struct vfs_node *node_free_list = NULL; /* reclaimed nodes via sibling */
 
 struct vfs_node *vfs_alloc_node(void)
 {
+    if (node_free_list) {
+        struct vfs_node *n = node_free_list;
+        node_free_list = n->sibling;
+        memset(n, 0, sizeof(*n));
+        return n;
+    }
     if (node_pool_used >= VFS_NODE_POOL_SIZE) {
         printk(MODULE "node pool exhausted\n");
         return NULL;
@@ -35,6 +42,14 @@ struct vfs_node *vfs_alloc_node(void)
     struct vfs_node *n = &node_pool[node_pool_used++];
     memset(n, 0, sizeof(*n));
     return n;
+}
+
+void vfs_free_node(struct vfs_node *n)
+{
+    if (!n) return;
+    memset(n, 0, sizeof(*n));
+    n->sibling     = node_free_list;
+    node_free_list = n;
 }
 
 /* ── root ────────────────────────────────────────────────────────────────── */
@@ -260,6 +275,73 @@ struct vfs_node *vfs_creat(const char *path)
     n->writable = true;
     vfs_add_child(parent, n);
     return n;
+}
+
+/* ── vfs_mkdir ────────────────────────────────────────────────────────────── */
+struct vfs_node *vfs_mkdir(const char *path)
+{
+    if (!vfs_root || !path || path[0] != '/') return NULL;
+
+    const char *base = path;
+    for (const char *s = path; *s; s++)
+        if (*s == '/') base = s + 1;
+    if (*base == '\0') return NULL;
+
+    uint32_t parent_len = (uint32_t)(base - path);
+    if (parent_len > 1) parent_len--;
+
+    struct vfs_node *parent;
+    if (parent_len == 0) {
+        parent = vfs_root;
+    } else {
+        char parent_path[VFS_PATH_MAX];
+        if (parent_len >= VFS_PATH_MAX) return NULL;
+        memcpy(parent_path, path, parent_len);
+        parent_path[parent_len] = '\0';
+        parent = vfs_lookup(parent_path);
+    }
+    if (!parent || !(parent->flags & VFS_DIR)) return NULL;
+
+    uint32_t blen = (uint32_t)strlen(base);
+    if (dir_child(parent, base, blen)) return NULL; /* already exists */
+
+    struct vfs_node *n = vfs_alloc_node();
+    if (!n) return NULL;
+    if (blen >= VFS_NAME_MAX) blen = VFS_NAME_MAX - 1;
+    memcpy(n->name, base, blen);
+    n->name[blen] = '\0';
+    n->flags = VFS_DIR;
+    vfs_add_child(parent, n);
+    return n;
+}
+
+/* ── vfs_unlink ───────────────────────────────────────────────────────────── */
+int vfs_unlink(const char *path)
+{
+    struct vfs_node *n = vfs_lookup(path);
+    if (!n) return -1;
+    if (n->flags & VFS_DIR) return -1; /* use rmdir, not unlink */
+    if (n->flags & VFS_CHARDEV) return -1; /* don't remove device nodes */
+
+    struct vfs_node *parent = n->parent;
+    if (!parent) return -1;
+
+    /* Unlink from parent's children list */
+    if (parent->children == n) {
+        parent->children = n->sibling;
+    } else {
+        struct vfs_node *s = parent->children;
+        while (s && s->sibling != n) s = s->sibling;
+        if (!s) return -1;
+        s->sibling = n->sibling;
+    }
+
+    /* Free heap buffer if writable */
+    if (n->writable && n->buf_cap > 0)
+        kfree((void *)n->data);
+
+    vfs_free_node(n);
+    return 0;
 }
 
 /* ── tree helpers ─────────────────────────────────────────────────────────── */

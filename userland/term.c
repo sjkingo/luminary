@@ -11,6 +11,7 @@
 
 #include "syscall.h"
 #include "gui.h"
+#include "libc/stdio.h"
 
 #define TERM_COLS   80
 #define TERM_ROWS   24
@@ -241,7 +242,7 @@ int main(int argc, char **argv)
 
         char *sh_argv[] = { "/bin/sh", (char *)0 };
         execv("/bin/sh", sh_argv);
-        write(1, "term: exec failed\n", 18);
+        printf("term: exec failed\n");
         exit(1);
     }
 

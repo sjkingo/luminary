@@ -4,6 +4,10 @@
  * Convention: syscall number in EAX, args in EBX, ECX, EDX.
  * Return value in EAX. */
 
+#ifndef NULL
+#define NULL ((void *)0)
+#endif
+
 #define SYS_NOP         0
 #define SYS_EXIT_TASK   1   /* exit_task() - kill calling task */
 #define SYS_READ        3
@@ -38,6 +42,11 @@
 #define SYS_TASK_DONE   34  /* task_done(pid) -> 1 if pid gone, 0 if still running */
 #define SYS_CHDIR       35  /* chdir(path) -> 0 or -1 */
 #define SYS_GETCWD      36  /* getcwd(buf, len) -> 0 or -1 */
+#define SYS_GETPPID     37  /* getppid() -> parent PID, 0 if no parent */
+#define SYS_MKDIR       38  /* mkdir(path) -> 0 or -1 */
+#define SYS_UNLINK      39  /* unlink(path) -> 0 or -1 */
+
+#define WNOHANG         1   /* waitpid flag: return -1 immediately if child hasn't exited */
 
 /* VFS node type flags (must match kernel/vfs.h) */
 #define VFS_FILE    0x01
@@ -115,8 +124,7 @@ static inline int write(int fd, const char *buf, unsigned int len)
 
 static inline __attribute__((noreturn)) void exit(int code)
 {
-    (void)code;
-    syscall0(SYS_EXIT_TASK);
+    syscall1(SYS_EXIT_TASK, (unsigned int)code);
     for (;;);
 }
 
@@ -168,10 +176,17 @@ static inline int execv(const char *path, char *const argv[])
     return syscall2(SYS_EXEC, (unsigned int)path, (unsigned int)argv);
 }
 
-/* waitpid: block until child pid exits; returns pid on success, -1 on error */
-static inline int waitpid(int pid)
+/* waitpid: wait for child pid to exit; writes exit code to *status if non-NULL.
+ * Pass WNOHANG in flags to return -1 immediately if child hasn't exited. */
+static inline int waitpid(int pid, int *status, int flags)
 {
-    return syscall1(SYS_WAITPID, (unsigned int)pid);
+    return syscall3(SYS_WAITPID, (unsigned int)pid, (unsigned int)status,
+                    (unsigned int)flags);
+}
+
+static inline int getppid(void)
+{
+    return syscall0(SYS_GETPPID);
 }
 
 /* VFS wrappers */
@@ -249,4 +264,16 @@ static inline int chdir(const char *path)
 static inline int getcwd(char *buf, unsigned int len)
 {
     return syscall2(SYS_GETCWD, (unsigned int)buf, len);
+}
+
+/* mkdir: create a new directory; returns 0 or -1 */
+static inline int mkdir(const char *path)
+{
+    return syscall1(SYS_MKDIR, (unsigned int)path);
+}
+
+/* unlink: remove a regular file; returns 0 or -1 */
+static inline int unlink(const char *path)
+{
+    return syscall1(SYS_UNLINK, (unsigned int)path);
 }
