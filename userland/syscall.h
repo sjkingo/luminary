@@ -23,7 +23,6 @@
 #define SYS_GETPID      20  /* getpid() -> pid */
 #define SYS_HALT        21  /* halt() - shut down */
 #define SYS_UPTIME      22  /* uptime() -> ms */
-#define SYS_SPAWN       16  /* spawn(path) -> pid or -1 */
 #define SYS_KILL        17  /* kill(pid) -> 0 or -1 */
 #define SYS_YIELD       18  /* yield() - give up CPU slice */
 #define SYS_LSEEK       24  /* lseek(fd, offset, whence) -> offset or -1 */
@@ -143,12 +142,6 @@ static inline void halt(void)
 static inline int ps(char *buf, unsigned int len)
 {
     return syscall2(SYS_PS, (unsigned int)buf, len);
-}
-
-/* spawn: launch ELF by VFS path as a new task, returns new pid or -1 */
-static inline int spawn(const char *path)
-{
-    return syscall1(SYS_SPAWN, (unsigned int)path);
 }
 
 static inline int kill(unsigned int pid)

@@ -76,7 +76,6 @@ static void cmd_help(void)
            "  echo <text>    - print text\n"
            "  getpid         - show current PID\n"
            "  exec <path>    - execute ELF (fork+exec, wait for completion)\n"
-           "  spawn <path>   - spawn ELF as background task\n"
            "  cd <path>      - change directory\n"
            "  pwd            - print working directory\n"
            "  crash          - dereference a null pointer\n"
@@ -312,13 +311,6 @@ static void run_builtin(char *argv[], int argc)
         if (pid == 0) { execv(resolved, argv + 1); exit(1); }
         else if (pid > 0) waitpid(pid);
         else printf("exec: fork failed\n");
-    } else if (strcmp(cmd, "spawn") == 0) {
-        if (!argv[1]) { printf("usage: spawn <path>\n"); return; }
-        char resolved[256];
-        resolve_path(argv[1], resolved, sizeof(resolved));
-        int pid = spawn(resolved);
-        if (pid < 0) printf("spawn: failed: %s\n", resolved);
-        else printf("spawn: launched pid %d\n", pid);
     } else if (strcmp(cmd, "crash") == 0) {
         printf("dereferencing NULL...\n");
         volatile int *p = (volatile int *)0x0;
@@ -335,7 +327,6 @@ static int is_builtin(const char *cmd)
             strcmp(cmd, "pwd")    == 0 ||
             strcmp(cmd, "cd")     == 0 ||
             strcmp(cmd, "exec")   == 0 ||
-            strcmp(cmd, "spawn")  == 0 ||
             strcmp(cmd, "crash")  == 0);
 }
 

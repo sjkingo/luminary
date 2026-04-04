@@ -164,19 +164,40 @@ static int sys_ps(struct trap_frame *frame)
     if (!user_access_ok(buf, buflen) || buflen == 0) return -1;
 
     unsigned int pos = 0;
-    char tmp[64];
+    char tmp[128];
 
-    /* Header */
-    const char *hdr = "PID  PRIO  NAME\n";
+    /* Header — tab-separated for easy parsing */
+    const char *hdr = "PID\tPPID\tPRIO\tTIME\tCMD\n";
     unsigned int i = 0;
     while (hdr[i] && pos < buflen - 1) buf[pos++] = hdr[i++];
 
+    /* Collect tasks into a local array, then emit in PID order */
+    struct task *tasks[64];
+    int ntasks = 0;
     struct task *t = sched_queue;
-    while (t && pos < buflen - 1) {
-        int n = sprintf(tmp, "%-4d %-5d %s\n", t->pid, t->prio_s, t->name);
+    while (t && ntasks < 64) {
+        tasks[ntasks++] = t;
+        t = t->next;
+    }
+
+    /* Insertion sort by pid ascending */
+    for (int i = 1; i < ntasks; i++) {
+        struct task *key = tasks[i];
+        int j = i - 1;
+        while (j >= 0 && tasks[j]->pid > key->pid) {
+            tasks[j + 1] = tasks[j];
+            j--;
+        }
+        tasks[j + 1] = key;
+    }
+
+    for (int i = 0; i < ntasks && pos < buflen - 1; i++) {
+        t = tasks[i];
+        unsigned int age_s = t->created / 1000;
+        int n = sprintf(tmp, "%d\t%d\t%d\t%lu\t%s\n",
+                        t->pid, t->ppid, t->prio_s, (unsigned long)age_s, t->name);
         for (int j = 0; j < n && pos < buflen - 1; j++)
             buf[pos++] = tmp[j];
-        t = t->next;
     }
     buf[pos] = '\0';
     return (int)pos;
@@ -304,35 +325,6 @@ static int sys_kill(struct trap_frame *frame)
 
     printk("kill: pid %d not found\n", target_pid);
     return -1;
-}
-
-static int sys_spawn(struct trap_frame *frame)
-{
-    /* EBX = pointer to path string in user space */
-    const char *path = (const char *)frame->ebx;
-    if (!user_access_ok(path, 1)) return -1;
-
-    uint32_t elf_size = 0;
-    const void *elf_data = initrd_get_file(path, &elf_size);
-    if (!elf_data) {
-        printk("spawn: '%s' not found in VFS\n", path);
-        return -1;
-    }
-
-    struct task *t = (struct task *)kmalloc(sizeof(struct task));
-    if (!t) {
-        printk("spawn: out of memory\n");
-        return -1;
-    }
-
-    /* Use the basename as the task name */
-    const char *name = path;
-    for (const char *s = path; *s; s++)
-        if (*s == '/') name = s + 1;
-
-    create_elf_task(t, (char *)name, 5, elf_data, elf_size);
-    printk("spawn: spawned '%s' as pid %d\n", name, t->pid);
-    return (int)t->pid;
 }
 
 static int sys_exec(struct trap_frame *frame)
@@ -674,9 +666,6 @@ void syscall_handler(struct trap_frame *frame)
         break;
     case SYS_MOUSE_GET:
         ret = sys_mouse_get(frame);
-        break;
-    case SYS_SPAWN:
-        ret = sys_spawn(frame);
         break;
     case SYS_KILL:
         ret = sys_kill(frame);

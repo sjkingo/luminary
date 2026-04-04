@@ -4,6 +4,8 @@
 #include "syscall.h"
 #include "libc/stdio.h"
 
+#define INIT_CHILD "/bin/sh"
+
 int main(int argc, char **argv)
 {
     (void)argc; (void)argv;
@@ -11,9 +13,9 @@ int main(int argc, char **argv)
         int pid = fork();
         if (pid == 0) {
             /* child: become the shell */
-            char *sh_argv[] = { "/bin/sh", (char *)0 };
-            puts("init: starting /bin/sh\n");
-            execv("/bin/sh", sh_argv);
+            char *sh_argv[] = { INIT_CHILD, (char *)0 };
+            puts("init: starting " INIT_CHILD "\n");
+            execv(INIT_CHILD, sh_argv);
             exit(1);
         } else if (pid > 0) {
             waitpid(pid);

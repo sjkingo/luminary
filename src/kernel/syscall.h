@@ -24,7 +24,6 @@
 #define SYS_WIN_POLL_EVENT  13  /* (id, event_buf_ptr) -> 0 or 1 */
 #define SYS_MOUSE_GET       14  /* (mouse_state_buf_ptr) -> 1 or 0 */
 #define SYS_WIN_DRAW_RECT   15  /* (id, x, y) + w,h,color at uesp+0..8 */
-#define SYS_SPAWN           16  /* spawn(path) - spawn ELF from VFS path -> pid or -1 */
 #define SYS_KILL            17  /* kill(pid) -> 0 on success, -1 if not found */
 #define SYS_YIELD           18  /* yield() - hlt and let scheduler run */
 #define SYS_WIN_GET_SIZE    19  /* (id, &w, &h) -> client w/h in pixels */

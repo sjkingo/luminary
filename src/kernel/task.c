@@ -277,6 +277,10 @@ static void insert_task_sorted(struct task *t, int prio)
     do {
         if (prio >= before->prio_s) {
             insert_task_before(t, before);
+            DBGK("sched", "enqueue '%s' pid=%d prio=%d prev=%d next=%d\n",
+                 t->name, t->pid, prio,
+                 t->prev ? (int)t->prev->pid : -1,
+                 t->next ? (int)t->next->pid : -1);
             return;
         }
         last_node = before;
@@ -286,6 +290,8 @@ static void insert_task_sorted(struct task *t, int prio)
     last_node->next = t;
     t->prev = last_node;
     t->next = NULL;
+    DBGK("sched", "enqueue '%s' pid=%d prio=%d prev=%d next=-1\n",
+         t->name, t->pid, prio, last_node->pid);
 }
 
 void create_elf_task(struct task *t, char *name, int prio,
@@ -380,7 +386,10 @@ void task_kill(struct task *t)
      * harmless on this single-core x86 kernel. */
     disable_interrupts();
 
-    DBGK("sched", "removing '%s' (pid %d) from run queue\n", t->name, t->pid);
+    DBGK("sched", "dequeue '%s' pid=%d prev=%d next=%d\n",
+         t->name, t->pid,
+         t->prev ? (int)t->prev->pid : -1,
+         t->next ? (int)t->next->pid : -1);
 
     /* unlink from scheduler queue */
     if (t->prev != NULL)
