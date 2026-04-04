@@ -44,6 +44,8 @@ Userspace macros (in `userland/syscall.h` and `userland/gui.h`):
 | 32 | SYS_PIPE | EBX=int[2] ptr | 0 or -1 | Create pipe; fills fds[0]=read end, fds[1]=write end |
 | 33 | SYS_DUP2 | EBX=oldfd, ECX=newfd | newfd or -1 | Duplicate oldfd onto newfd; closes newfd first if open |
 | 34 | SYS_TASK_DONE | EBX=pid | 1 or 0 | Non-blocking check: returns 1 if pid is no longer in the scheduler queue, 0 if still running |
+| 35 | SYS_CHDIR | EBX=path | 0 or -1 | Change current working directory; resolves relative paths against current cwd |
+| 36 | SYS_GETCWD | EBX=buf, ECX=len | 0 or -1 | Copy current working directory string into buf |
 
 ## Notes
 

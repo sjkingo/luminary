@@ -36,6 +36,8 @@
 #define SYS_PIPE        32  /* pipe(int fds[2]) -> 0 or -1 */
 #define SYS_DUP2        33  /* dup2(oldfd, newfd) -> newfd or -1 */
 #define SYS_TASK_DONE   34  /* task_done(pid) -> 1 if pid gone, 0 if still running */
+#define SYS_CHDIR       35  /* chdir(path) -> 0 or -1 */
+#define SYS_GETCWD      36  /* getcwd(buf, len) -> 0 or -1 */
 
 /* VFS node type flags (must match kernel/vfs.h) */
 #define VFS_FILE    0x01
@@ -235,4 +237,16 @@ static inline int read_nb(int fd, char *buf, unsigned int len)
 static inline int task_done(int pid)
 {
     return syscall1(SYS_TASK_DONE, (unsigned int)pid);
+}
+
+/* chdir: change current working directory; returns 0 or -1 */
+static inline int chdir(const char *path)
+{
+    return syscall1(SYS_CHDIR, (unsigned int)path);
+}
+
+/* getcwd: copy current working directory into buf; returns 0 or -1 */
+static inline int getcwd(char *buf, unsigned int len)
+{
+    return syscall2(SYS_GETCWD, (unsigned int)buf, len);
 }

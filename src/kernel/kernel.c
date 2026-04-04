@@ -50,12 +50,6 @@ static void print_defines(void)
 #ifdef DEBUG
     printk("-DDEBUG ");
 #endif
-#ifdef TURTLE
-    printk("-DTURTLE ");
-#endif
-#ifdef USE_SERIAL
-    printk("-DUSE_SERIAL ");
-#endif
 }
 
 /* Print a fancy startup banner */
@@ -78,7 +72,12 @@ static void print_startup_banner(void)
     printk("   |===|     ");
     printk("%d MB memory available\n", mem_available());
     printk("    \\_/      ");
-    printk("Timer set at %d Hz (every %d ms)\n", TIMER_FREQ, TIMER_INTERVAL);
+    {
+        struct multiboot_mod_entry *mods = (struct multiboot_mod_entry *)mb_info->mods_addr;
+        const char *tag = (mb_info->mods_count > 0 && mods[0].string)
+                          ? (const char *)mods[0].string : "(none)";
+        printk("initrd: %s\n", tag);
+    }
     printk("\n");
 }
 

@@ -79,6 +79,13 @@ void init_vga(void)
     reset_color();
     vid.cur_x = 0;
     vid.cur_y = 0;
+
+    /* Enable hardware cursor: scan lines 14–15 (underline) */
+    outb(CRT_PORT,   0x0A);
+    outb(CRT_PORT+1, 14);   /* cursor start scan line, bit5=0 enables */
+    outb(CRT_PORT,   0x0B);
+    outb(CRT_PORT+1, 15);   /* cursor end scan line */
+
     clear_screen();
 }
 

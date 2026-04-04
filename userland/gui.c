@@ -9,8 +9,9 @@
 
 #include "syscall.h"
 #include "gui.h"
+#include "libc/stdio.h"
+#include "libc/string.h"
 
-/* ── colours ─────────────────────────────────────────────────────────────── */
 #define COL_WHITE   rgb(255, 255, 255)
 #define COL_BLACK   rgb(0,   0,   0)
 #define COL_GREY    rgb(200, 200, 200)
@@ -23,45 +24,8 @@
 #define COL_LGREEN  rgb(100, 220, 100)
 #define COL_BGWIN   rgb(240, 240, 240)
 
-/* ── font metrics (must match kernel 8×16 font) ──────────────────────────── */
 #define FONT_W  8
 #define FONT_H  16
-
-/* ── minimal string utils ────────────────────────────────────────────────── */
-
-static unsigned int mystrlen(const char *s)
-{
-    unsigned int n = 0;
-    while (s[n]) n++;
-    return n;
-}
-
-static void myutoa(unsigned int v, char *buf)
-{
-    char tmp[12];
-    int i = 0;
-    if (v == 0) { buf[0]='0'; buf[1]='\0'; return; }
-    while (v) { tmp[i++] = '0' + (char)(v % 10); v /= 10; }
-    int j = 0;
-    while (i > 0) buf[j++] = tmp[--i];
-    buf[j] = '\0';
-}
-
-/* Append src to dst (dst must be large enough) */
-static void mystrcat(char *dst, const char *src)
-{
-    while (*dst) dst++;
-    while (*src) *dst++ = *src++;
-    *dst = '\0';
-}
-
-static void mystrcpy(char *dst, const char *src)
-{
-    while (*src) *dst++ = *src++;
-    *dst = '\0';
-}
-
-/* ── button helper ───────────────────────────────────────────────────────── */
 
 struct button {
     unsigned int x, y, w, h;
@@ -78,7 +42,7 @@ static void button_draw(int wid, struct button *btn)
     win_draw_rect(wid, btn->x, btn->y, btn->w, btn->h, COL_BLACK);
 
     /* Centre label text */
-    unsigned int tw = mystrlen(btn->label) * FONT_W;
+    unsigned int tw = strlen(btn->label) * FONT_W;
     unsigned int tx = btn->x + (btn->w > tw ? (btn->w - tw) / 2 : 0);
     unsigned int ty = btn->y + (btn->h > FONT_H ? (btn->h - FONT_H) / 2 : 0);
     win_draw_text(wid, tx, ty, btn->label, COL_BLACK, col);
@@ -90,9 +54,6 @@ static int button_hit(struct button *btn, unsigned int x, unsigned int y)
     return x >= btn->x && x < btn->x + btn->w &&
            y >= btn->y && y < btn->y + btn->h;
 }
-
-/* ── text field ──────────────────────────────────────────────────────────── */
-
 #define TEXTFIELD_MAX 64
 
 struct textfield {
@@ -111,7 +72,7 @@ static void textfield_draw(int wid, struct textfield *tf)
 
     /* Draw text + cursor */
     char display[TEXTFIELD_MAX + 2];
-    mystrcpy(display, tf->buf);
+    strcpy(display, tf->buf);
     if (tf->focused) {
         display[tf->len]     = '_';
         display[tf->len + 1] = '\0';
@@ -128,9 +89,6 @@ static void textfield_key(struct textfield *tf, char c)
         tf->buf[tf->len]   = '\0';
     }
 }
-
-/* ── windows ─────────────────────────────────────────────────────────────── */
-
 /* Window 1: info panel with buttons */
 static int win1 = -1;
 static struct button btn_hello  = {10, 10, 100, 28, "Hello!",  0, 0, 0};
@@ -155,9 +113,6 @@ static void init_colours(void)
     btn_submit.col_normal = COL_GREEN;
     btn_submit.col_hover  = COL_LGREEN;
 }
-
-/* ── draw routines ───────────────────────────────────────────────────────── */
-
 static void draw_win1(void)
 {
     win_fill_rect(win1, 0, 0, 300, 200, COL_BGWIN);
@@ -185,8 +140,7 @@ static void draw_win2(void)
     unsigned int ms = (unsigned int)uptime();
     unsigned int secs = ms / 1000;
     char buf[32];
-    myutoa(secs, buf);
-    mystrcat(buf, "s");
+    snprintf(buf, sizeof(buf), "%us", secs);
 
     win_fill_rect(win2, 10, 30, 180, FONT_H + 4, COL_BGWIN);
     win_draw_text(win2, 10, 32, buf, COL_BLUE, COL_BGWIN);
@@ -206,8 +160,7 @@ static void draw_win3(void)
     /* Show last submitted value */
     if (submitted[0]) {
         char msg[TEXTFIELD_MAX + 12];
-        mystrcpy(msg, "Got: ");
-        mystrcat(msg, submitted);
+        snprintf(msg, sizeof(msg), "Got: %s", submitted);
         win_fill_rect(win3, 10, 106, 280, FONT_H, COL_BGWIN);
         win_draw_text(win3, 10, 106, msg, COL_DKGREY, COL_BGWIN);
     }
@@ -215,9 +168,6 @@ static void draw_win3(void)
     win_flip(win3);
     btn_submit.pressed = 0;
 }
-
-/* ── event handling ──────────────────────────────────────────────────────── */
-
 static void handle_win1_event(struct gui_event *ev)
 {
     if (ev->type == GUI_EVENT_RESIZE) {
@@ -226,10 +176,10 @@ static void handle_win1_event(struct gui_event *ev)
         (ev->buttons & MOUSE_BTN_LEFT)) {
         if (button_hit(&btn_hello, ev->x, ev->y)) {
             btn_hello.pressed = 1;
-            mystrcpy(label_text, "Hello, Luminary!");
+            strcpy(label_text, "Hello, Luminary!");
         } else if (button_hit(&btn_clear, ev->x, ev->y)) {
             btn_clear.pressed = 1;
-            mystrcpy(label_text, "Cleared.");
+            strcpy(label_text, "Cleared.");
         }
         draw_win1();
     }
@@ -249,7 +199,7 @@ static void handle_win3_event(struct gui_event *ev)
         (ev->buttons & MOUSE_BTN_LEFT)) {
         if (button_hit(&btn_submit, ev->x, ev->y)) {
             btn_submit.pressed = 1;
-            mystrcpy(submitted, tfield.buf);
+            strcpy(submitted, tfield.buf);
             /* Clear field */
             tfield.buf[0] = '\0';
             tfield.len    = 0;
@@ -260,9 +210,6 @@ static void handle_win3_event(struct gui_event *ev)
         draw_win3();
     }
 }
-
-/* ── main loop ───────────────────────────────────────────────────────────── */
-
 static unsigned int last_uptime_draw = 0;
 
 int main(int argc, char **argv)

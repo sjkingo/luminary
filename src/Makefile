@@ -1,4 +1,5 @@
 # Kernel-only Makefile.  Builds kernel.bin into BUILD_DIR (set by root Makefile).
+
 BUILD_DIR  ?= ../_build
 KERNEL_BIN  = $(BUILD_DIR)/kernel.bin
 
@@ -9,8 +10,7 @@ NM=		$(CROSS)nm
 ADDR2LINE=	$(CROSS)addr2line
 
 ARCH=		-m32
-#DEFINES=	-DDEBUG -DTURTLE -DUSE_SERIAL
-DEFINES=	-DDEBUG -DUSE_SERIAL
+DEFINES=	-DDEBUG
 CFLAGS=		$(ARCH) -Wall -Wextra -Wno-unused-variable -Wno-unused-function -ffreestanding -std=gnu99 -g -I . -isystem include $(DEFINES)
 ASFLAGS=	$(ARCH)
 LDFLAGS=	-T linker.ld -nostdlib -lgcc

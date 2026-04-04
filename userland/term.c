@@ -12,7 +12,6 @@
 #include "syscall.h"
 #include "gui.h"
 
-/* ── terminal dimensions ─────────────────────────────────────────────────── */
 #define TERM_COLS   80
 #define TERM_ROWS   24
 #define FONT_W       8
@@ -20,7 +19,6 @@
 #define CLIENT_W    (TERM_COLS * FONT_W)
 #define CLIENT_H    (TERM_ROWS * FONT_H)
 
-/* ── scrollback ──────────────────────────────────────────────────────────── */
 #define SB_LINES    512
 
 /* Solarized Dark colours */
@@ -28,7 +26,6 @@
 #define COL_FG      rgb(147, 161, 161)
 #define COL_CURSOR  rgb(147, 161, 161)
 
-/* ── scrollback ring buffer ──────────────────────────────────────────────── */
 static char sb[SB_LINES][TERM_COLS];  /* ring of full-width lines */
 static int  sb_head  = 0;             /* index of oldest line (or next to write when full) */
 static int  sb_count = 0;             /* total lines in ring (0..SB_LINES) */
@@ -41,9 +38,6 @@ static int scroll_offset = 0;
 /* cursor position within the live bottom TERM_ROWS */
 static int cur_col = 0;
 static int cur_row = 0;   /* 0 = top of live area; grows until TERM_ROWS-1 */
-
-/* ── scrollback helpers ──────────────────────────────────────────────────── */
-
 /* Return a pointer to live row r (0 = top of live area, cur_row = bottom) */
 static char *sb_live_row(int r)
 {
@@ -102,7 +96,6 @@ static void sb_new_line(void)
         sb[idx][c] = ' ';
 }
 
-/* ── dirty tracking ──────────────────────────────────────────────────────── */
 static char dirty[TERM_ROWS];
 
 static void mark_all_dirty(void)
@@ -111,9 +104,6 @@ static void mark_all_dirty(void)
     for (r = 0; r < TERM_ROWS; r++)
         dirty[r] = 1;
 }
-
-/* ── terminal output ─────────────────────────────────────────────────────── */
-
 /* Advance to the next row.  If we haven't filled the screen yet, just grow
  * cur_row.  Once cur_row would exceed TERM_ROWS-1, allocate a new ring line
  * and keep cur_row pinned at TERM_ROWS-1 (scroll). */
@@ -187,9 +177,6 @@ static void term_putchar(char ch)
     dirty[cur_row] = 1;
     cur_col++;
 }
-
-/* ── rendering ───────────────────────────────────────────────────────────── */
-
 static void render_row(int wid, int row)
 {
     char *line = visible_row(row);
@@ -205,6 +192,14 @@ static void render_row(int wid, int row)
     unsigned int y = (unsigned int)(row * FONT_H);
     win_fill_rect(wid, 0, y, CLIENT_W, FONT_H, COL_BG);
     win_draw_text(wid, 0, y, buf, COL_FG, COL_BG);
+
+    /* Draw block cursor on the cursor cell when in live view */
+    if (scroll_offset == 0 && row == cur_row) {
+        unsigned int cx = (unsigned int)(cur_col * FONT_W);
+        char cell[2] = { buf[cur_col], '\0' };
+        win_fill_rect(wid, cx, y, FONT_W, FONT_H, COL_FG);
+        win_draw_text(wid, cx, y, cell, COL_BG, COL_FG);
+    }
 }
 
 static void render_dirty(int wid)
@@ -227,9 +222,6 @@ static void render_all(int wid)
     mark_all_dirty();
     render_dirty(wid);
 }
-
-/* ── main ────────────────────────────────────────────────────────────────── */
-
 int main(int argc, char **argv)
 {
     (void)argc; (void)argv;

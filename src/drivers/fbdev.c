@@ -103,6 +103,43 @@ static uint32_t logical_to_ring(uint32_t logical)
     return (console.ring_start + logical) % FBDEV_HISTORY_ROWS;
 }
 
+/* Draw a solid block cursor at the current live cursor position */
+static void draw_cursor(void)
+{
+    if (console.ring_used == 0) return;
+    uint32_t screen_row = (console.ring_used <= console.rows)
+                          ? (console.ring_used - 1)
+                          : (console.rows - 1);
+    uint32_t cx = console.cur_col * CONSOLE_FONT_WIDTH;
+    uint32_t cy = screen_row * CONSOLE_FONT_HEIGHT;
+
+    for (uint32_t row = cy; row < cy + CONSOLE_FONT_HEIGHT; row++)
+        for (uint32_t col = cx; col < cx + CONSOLE_FONT_WIDTH; col++)
+            putpixel(col, row, SOL_BASE0);
+
+    uint32_t live_ring = logical_to_ring(console.ring_used - 1);
+    char c = ring_row_ptr(live_ring)[console.cur_col];
+    if (c && c != ' ')
+        drawchar((uint8_t)c, cx, cy, SOL_BASE03);
+}
+
+/* Erase the cursor at the current live cursor position (redraw cell normally) */
+static void erase_cursor(void)
+{
+    if (console.ring_used == 0) return;
+    uint32_t screen_row = (console.ring_used <= console.rows)
+                          ? (console.ring_used - 1)
+                          : (console.rows - 1);
+    uint32_t cx = console.cur_col * CONSOLE_FONT_WIDTH;
+    uint32_t cy = screen_row * CONSOLE_FONT_HEIGHT;
+
+    clear_rect(cx, cy, CONSOLE_FONT_WIDTH, CONSOLE_FONT_HEIGHT);
+    uint32_t live_ring = logical_to_ring(console.ring_used - 1);
+    char c = ring_row_ptr(live_ring)[console.cur_col];
+    if (c && c != ' ')
+        drawchar((uint8_t)c, cx, cy, SOL_BASE0);
+}
+
 /* Redraw the entire screen from scrollback history */
 static void redraw_all(void)
 {
@@ -157,7 +194,32 @@ static void advance_live_row(void)
 static void scroll(void)
 {
     advance_live_row();
-    redraw_all();
+
+    /* Fast path: shift framebuffer up by one character row and clear the bottom.
+     * Avoids a full redraw_all() on every newline — O(screen) instead of O(screen * rows). */
+    uint32_t row_bytes = (uint32_t)CONSOLE_FONT_HEIGHT * console.pitch;
+    uint32_t total_rows = console.rows;
+    char *fb = console.framebuffer;
+
+    /* Copy rows [1..rows-1] up to [0..rows-2]. Destination is before source
+     * so memcpy is safe (no backwards overlap). */
+    memcpy(fb, fb + row_bytes, row_bytes * (total_rows - 1));
+
+    /* Clear the bottom row */
+    uint32_t bottom_y = (total_rows - 1) * CONSOLE_FONT_HEIGHT;
+    clear_rect(0, bottom_y, console.width, CONSOLE_FONT_HEIGHT);
+
+    /* Repaint the bottom row from the new live ring row */
+    uint32_t live_ring = logical_to_ring(console.ring_used - 1);
+    char *row = ring_row_ptr(live_ring);
+    for (uint32_t col = 0; col < console.cols; col++) {
+        char c = row[col];
+        if (c && c != ' ')
+            drawchar((uint8_t)c,
+                     col * CONSOLE_FONT_WIDTH,
+                     bottom_y,
+                     SOL_BASE0);
+    }
 }
 
 void writechar_fb(char c)
@@ -170,6 +232,8 @@ void writechar_fb(char c)
         console.view_offset = 0;
     }
 
+    erase_cursor();
+
     if (c == '\n') {
         console.cur_col = 0;
         if (console.ring_used < console.rows) {
@@ -180,10 +244,8 @@ void writechar_fb(char c)
         } else {
             scroll();
         }
-        return;
     } else if (c == '\r') {
         console.cur_col = 0;
-        return;
     } else if (c == '\b') {
         if (console.cur_col > 0) {
             console.cur_col--;
@@ -196,7 +258,6 @@ void writechar_fb(char c)
                         screen_row * CONSOLE_FONT_HEIGHT,
                         CONSOLE_FONT_WIDTH, CONSOLE_FONT_HEIGHT);
         }
-        return;
     } else if (c == '\t') {
         console.cur_col = (console.cur_col + 4) & ~3;
         if (console.cur_col >= console.cols) {
@@ -209,35 +270,35 @@ void writechar_fb(char c)
                 scroll();
             }
         }
-        return;
-    }
-
-    /* Wrap if we hit the right edge */
-    if (console.cur_col >= console.cols) {
-        console.cur_col = 0;
-        if (console.ring_used < console.rows) {
-            console.ring_used++;
-            uint32_t new_ring = logical_to_ring(console.ring_used - 1);
-            memset(ring_row_ptr(new_ring), 0, FBDEV_MAX_COLS);
-        } else {
-            scroll();
+    } else {
+        /* Wrap if we hit the right edge */
+        if (console.cur_col >= console.cols) {
+            console.cur_col = 0;
+            if (console.ring_used < console.rows) {
+                console.ring_used++;
+                uint32_t new_ring = logical_to_ring(console.ring_used - 1);
+                memset(ring_row_ptr(new_ring), 0, FBDEV_MAX_COLS);
+            } else {
+                scroll();
+            }
         }
+
+        /* Write to the current live ring row */
+        uint32_t live_ring = logical_to_ring(console.ring_used - 1);
+        ring_row_ptr(live_ring)[console.cur_col] = c;
+
+        /* Screen row: before screen fills, = ring_used-1; after, always bottom row */
+        uint32_t screen_row = (console.ring_used <= console.rows)
+                              ? (console.ring_used - 1)
+                              : (console.rows - 1);
+        drawchar((uint8_t)c,
+                 console.cur_col * CONSOLE_FONT_WIDTH,
+                 screen_row * CONSOLE_FONT_HEIGHT,
+                 SOL_BASE0);
+        console.cur_col++;
     }
 
-    /* Write to the current live ring row */
-    uint32_t live_ring = logical_to_ring(console.ring_used - 1);
-    ring_row_ptr(live_ring)[console.cur_col] = c;
-
-    /* Screen row: before screen fills, = ring_used-1; after, always bottom row */
-    uint32_t screen_row = (console.ring_used <= console.rows)
-                          ? (console.ring_used - 1)
-                          : (console.rows - 1);
-    uint32_t fgcolor = SOL_BASE0;
-    drawchar((uint8_t)c,
-             console.cur_col * CONSOLE_FONT_WIDTH,
-             screen_row * CONSOLE_FONT_HEIGHT,
-             fgcolor);
-    console.cur_col++;
+    draw_cursor();
 }
 
 void writestr_fb(char *str)

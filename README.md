@@ -1,97 +1,36 @@
 # Luminary OS
 
-Luminary is a small x86 real-time operating system written in C and assembly.
-Its goal is to implement a kernel that includes a hard real-time scheduler that
-can run time-sensitive tasks.
+A small x86 (IA-32) operating system written in C and assembly.
 
-It takes concepts from an existing operating system by the same author called [Ulysses](https://github.com/sjkingo/ulysses).
+## Requirements
 
-Written by Sam Kingston.
-
-**Latest version: 0.10.0**
-
-![Luminary, version 0.10.0](https://raw.githubusercontent.com/sjkingo/luminary/master/screenshots/startup-0.10.0.png "Luminary, version 0.10.0")
-
-## Features
-
-* Small codebase
-* Hard priority-based [preemptive scheduler](https://github.com/sjkingo/luminary/blob/master/src/sched.c#L1-L82)
-* Flat memory model (no virtual addresses)
-* Support for [basic I/O drivers](https://github.com/sjkingo/luminary/tree/master/src/drivers)
-
-Some architecture notes and *gotchas* are located in [NOTES.md](https://github.com/sjkingo/luminary/blob/master/NOTES.md).
-
-## Build configuration
-
-You may configure the build by editing the `$DEFINES` variable at the top of [`src/Makefile`](https://github.com/sjkingo/luminary/blob/master/src/Makefile#L3).
-
-Available options are:
-
-* `-DDEBUG`: produce debugging output to the console. You probably want this with `-DTURTLE`
-* `-DTURTLE`: scale the scheduler down to 1 task per second
-* `-DUSE_SERIAL`: enable the serial subsystem, which writes console output to COM1. This may be used with `qemu -nographic`.
-
-## How to build
-
-First, ensure all build requirements are met:
-
-* An `i686-elf` cross-compiler toolchain (`i686-elf-gcc`, `i686-elf-binutils`)
-* `python3` (for interrupt vector code generation)
-* `qemu-system-i386` (for running the kernel)
-* `xorriso` and `grub2-mkrescue` (only needed for bootable ISO builds)
+- `i686-elf-gcc` cross-compiler toolchain (`i686-elf-gcc`, `i686-elf-binutils`)
+- `python3`
+- `qemu-system-i386`
+- `xorriso` and `grub2-mkrescue`
 
 ### macOS (Homebrew)
 
 ```bash
-brew install i686-elf-gcc i686-elf-binutils qemu python3
-# For ISO builds only:
-brew install xorriso
+brew install i686-elf-gcc i686-elf-binutils qemu python3 xorriso
 ```
 
 ### Linux (Debian/Ubuntu)
 
-If your system GCC can produce 32-bit ELF binaries natively, you can override the
-cross-compiler prefix:
-
 ```bash
-sudo apt install gcc gcc-multilib make qemu-system-x86 python3
-# For ISO builds only:
-sudo apt install xorriso grub2-common
-# Then build with:
-make -C src CROSS=
+sudo apt install gcc gcc-multilib make qemu-system-x86 python3 xorriso grub2-common
 ```
 
-Otherwise, build or install an `i686-elf-gcc` cross-compiler.
+## Build options
 
-### Building
+Edit `DEFINES` in `src/Makefile`:
 
-Building the kernel is as simple as running the included `Makefile`:
+- `-DDEBUG` — debug serial output via `DBGK()`
 
-```bash
-$ make -C src
-```
-
-## Running
-
-After building, you may run the kernel in QEMU with some shortcuts:
-
-To have QEMU load the kernel image directly, opening an SDL window (fastest):
+## Build and run
 
 ```bash
-$ make -C src qemu
+make        # build everything
+make qemucd # build and run in QEMU via GRUB2 ISO
+make clean  # remove all build output
 ```
-
-Or to build a bootable ISO image with Grub2 Multiboot and boot that way (requires `xorriso`):
-
-```bash
-$ make -C src qemucd
-```
-
-You may also redirect output to the terminal by using:
-
-```bash
-$ make -C src console
-```
-
-Note that the kernel must be built with the `-DUSE_SERIAL` option for this to work or you will
-get no output from the kernel.

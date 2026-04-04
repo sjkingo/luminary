@@ -73,8 +73,19 @@ static uint32_t stdout_write_op(uint32_t offset, uint32_t len, const void *buf)
 {
     (void)offset;
     const char *cbuf = (const char *)buf;
-    for (uint32_t i = 0; i < len; i++)
-        printk("%c", cbuf[i]);
+    for (uint32_t i = 0; i < len; i++) {
+        unsigned char c = (unsigned char)cbuf[i];
+        if (c == '\n' || c == '\r' || c == '\t' || c == '\b' ||
+            (c >= 0x20 && c <= 0x7E)) {
+            printk("%c", c);
+        } else {
+            /* non-printable: render as \xNN */
+            static const char hex[] = "0123456789abcdef";
+            char esc[4] = { '\\', 'x', hex[c >> 4], hex[c & 0xF] };
+            for (int j = 0; j < 4; j++)
+                printk("%c", esc[j]);
+        }
+    }
     return len;
 }
 

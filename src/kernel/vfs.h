@@ -69,6 +69,10 @@ void vfs_set_root(struct vfs_node *root);
 /* Resolve an absolute path to a node. Returns NULL if not found. */
 struct vfs_node *vfs_lookup(const char *path);
 
+/* Resolve path relative to cwd into out_buf (VFS_PATH_MAX bytes).
+ * Returns out_buf on success, NULL on overflow. */
+const char *vfs_resolve(const char *cwd, const char *path, char *out_buf);
+
 /* Read up to len bytes from node at offset. Returns bytes read. */
 uint32_t vfs_read(struct vfs_node *node, uint32_t offset,
                   uint32_t len, void *buf);

@@ -1,5 +1,3 @@
-#ifdef USE_SERIAL
-
 #include "cpu/x86.h"
 #include "drivers/serial.h"
 #include "kernel/printk.h"
@@ -29,5 +27,3 @@ void serial_init(void)
     printk("Built with serial support: console output will go to COM1\n");
 #endif
 }
-
-#endif

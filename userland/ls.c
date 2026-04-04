@@ -6,7 +6,7 @@
 
 int main(int argc, char **argv)
 {
-    const char *path = (argc > 1) ? argv[1] : "/";
+    const char *path = (argc > 1) ? argv[1] : ".";
 
     int fd = vfs_open(path);
     if (fd < 0) {
@@ -22,8 +22,15 @@ int main(int argc, char **argv)
     }
 
     struct vfs_dirent de;
-    while (vfs_readdir(fd, &de) == 1)
-        printf("%s%s\n", de.name, (de.type & VFS_DIR) ? "/" : "");
+    int first = 1;
+    while (vfs_readdir(fd, &de) == 1) {
+        if (!first)
+            printf("\t");
+        printf("%s%s", de.name, (de.type & VFS_DIR) ? "/" : "");
+        first = 0;
+    }
+    if (!first)
+        printf("\n");
     vfs_close(fd);
     return 0;
 }

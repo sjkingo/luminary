@@ -11,9 +11,7 @@
 #include "kernel/task.h"
 #include "kernel/vmm.h"
 
-#ifdef USE_SERIAL
 #include "drivers/serial.h"
-#endif
 
 /* The GDT */
 struct gdt_entry gdt[GDT_NUM_ENTRIES];
@@ -143,9 +141,7 @@ void init_cpu(void)
     gdt_install();
     idt_install();
     pic_init();
-#ifdef USE_SERIAL
     serial_init();
-#endif
 }
 
 /* Walk the kernel call stack from ebp, printing up to max_frames entries.

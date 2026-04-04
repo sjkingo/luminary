@@ -1,27 +1,17 @@
 /* Luminary shell.
  *
- * Interactive REPL with pipeline support (|) and I/O redirection
- * (>, >>, <, <<).
- *
- * Built-in commands (run in-process): help, echo, getpid, exec, spawn, cd,
- * pwd, crash.  Everything else is looked up in /bin and fork+exec'd.
+ * Interactive REPL with pipeline support and I/O redirection.
  *
  * cd is the only command that truly must run in-process (it modifies cwd).
  * The others are built-in as a convenience to avoid process overhead for
  * common operations.  When any built-in appears with I/O redirections it is
  * still forked (except cd, which saves/restores fds around the redirect).
- *
- * Redirection parsing strips >, >>, <, << tokens from argv before dispatch.
- * Pipeline stages are connected with kernel pipes; each stage is forked.
  */
 
 #include "syscall.h"
 #include "libc/stdio.h"
 #include "libc/string.h"
 #include "libc/stdlib.h"
-
-/* ── working directory ───────────────────────────────────────────────────── */
-
 static char cwd[256] = "/";
 
 static void resolve_path(const char *path, char *out, unsigned int outsz)
@@ -66,39 +56,26 @@ static void resolve_path(const char *path, char *out, unsigned int outsz)
     while (norm[i] && i < outsz-1) { out[i] = norm[i]; i++; }
     out[i] = '\0';
 }
-
-/* ── built-in command implementations ───────────────────────────────────── */
-
 static void cmd_help(void)
 {
     printf("built-in commands:\n"
            "  help           - show this message\n"
            "  echo <text>    - print text\n"
            "  getpid         - show current PID\n"
-           "  exec <path>    - execute ELF (fork+exec, wait for completion)\n"
            "  cd <path>      - change directory\n"
            "  pwd            - print working directory\n"
-           "  crash          - dereference a null pointer\n"
-           "\n"
-           "external commands (in /bin): uptime ps kill ls cat stat mount halt exit\n");
+           "  crash          - dereference a null pointer\n");
 }
 
 static void cmd_cd(const char *arg)
 {
     if (*arg == '\0') { printf("usage: cd <path>\n"); return; }
-    char resolved[256];
-    resolve_path(arg, resolved, sizeof(resolved));
-    struct vfs_stat st;
-    if (vfs_stat(resolved, &st) < 0 || !(st.type & VFS_DIR)) {
-        printf("cd: not a directory: %s\n", resolved);
+    if (chdir(arg) < 0) {
+        printf("cd: %s: no such directory\n", arg);
         return;
     }
-    strncpy(cwd, resolved, sizeof(cwd) - 1);
-    cwd[sizeof(cwd) - 1] = '\0';
+    getcwd(cwd, sizeof(cwd));
 }
-
-/* ── tokeniser ───────────────────────────────────────────────────────────── */
-
 #define ARGV_MAX 32
 
 /* Split line into whitespace-delimited tokens in-place.
@@ -129,9 +106,6 @@ static int tokenise(char *line, char *argv[], int argv_max)
     argv[argc] = (char *)0;
     return argc;
 }
-
-/* ── redirection ─────────────────────────────────────────────────────────── */
-
 #define REDIR_MAX 8
 
 struct redir {
@@ -250,9 +224,6 @@ static int apply_redirs(struct redir redirs[], int nredir)
     }
     return 0;
 }
-
-/* ── pipeline builder ────────────────────────────────────────────────────── */
-
 #define PIPE_MAX 8
 
 static int split_pipe(char *line, char *segs[], int max_segs)
@@ -303,14 +274,6 @@ static void run_builtin(char *argv[], int argc)
         printf("%s\n", cwd);
     } else if (strcmp(cmd, "cd") == 0) {
         cmd_cd(argv[1] ? argv[1] : "");
-    } else if (strcmp(cmd, "exec") == 0) {
-        if (!argv[1]) { printf("usage: exec <path>\n"); return; }
-        char resolved[256];
-        resolve_path(argv[1], resolved, sizeof(resolved));
-        int pid = fork();
-        if (pid == 0) { execv(resolved, argv + 1); exit(1); }
-        else if (pid > 0) waitpid(pid);
-        else printf("exec: fork failed\n");
     } else if (strcmp(cmd, "crash") == 0) {
         printf("dereferencing NULL...\n");
         volatile int *p = (volatile int *)0x0;
@@ -326,7 +289,6 @@ static int is_builtin(const char *cmd)
             strcmp(cmd, "getpid") == 0 ||
             strcmp(cmd, "pwd")    == 0 ||
             strcmp(cmd, "cd")     == 0 ||
-            strcmp(cmd, "exec")   == 0 ||
             strcmp(cmd, "crash")  == 0);
 }
 
@@ -352,9 +314,6 @@ static int resolve_external(const char *cmd, char *out, unsigned int outsz)
     }
     return -1;
 }
-
-/* ── pipeline executor ───────────────────────────────────────────────────── */
-
 static void run_pipeline(char *line)
 {
     static char linecopy[256];
@@ -475,18 +434,12 @@ static void run_pipeline(char *line)
         }
     }
 }
-
-/* ── line dispatcher ─────────────────────────────────────────────────────── */
-
 static void dispatch(char *line)
 {
     while (*line == ' ' || *line == '\t') line++;
     if (*line == '\0' || *line == '#') return;
     run_pipeline(line);
 }
-
-/* ── entry point ─────────────────────────────────────────────────────────── */
-
 int main(int argc, char **argv)
 {
     (void)argc; (void)argv;
@@ -495,7 +448,8 @@ int main(int argc, char **argv)
     int idx = 0;
     char c;
 
-    printf("Luminary shell\nType 'help' for commands.\n\n$ ");
+    getcwd(cwd, sizeof(cwd));
+    printf("Luminary shell\nType 'help' for commands.\n\n%s $ ", cwd);
 
     for (;;) {
         if (read(0, &c, 1) == 0)
@@ -503,14 +457,14 @@ int main(int argc, char **argv)
 
         if (c == '\x03') {
             /* Ctrl+C: discard current line, print ^C and new prompt */
-            write(1, "^C\n$ ", 5);
+            printf("^C\n%s $ ", cwd);
             idx = 0;
         } else if (c == '\n') {
             putchar('\n');
             cmd[idx] = '\0';
             dispatch(cmd);
             idx = 0;
-            printf("$ ");
+            printf("%s $ ", cwd);
         } else if (c == '\b') {
             if (idx > 0) {
                 idx--;

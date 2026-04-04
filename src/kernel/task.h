@@ -34,6 +34,8 @@ struct task {
     unsigned int fault_count;   /* consecutive CPU exceptions; panic at MAX_TASK_FAULTS */
     bool         read_nonblock; /* set during SYS_READ_NB: chardev/pipe reads return 0 if empty */
 
+    char cwd[256];              /* current working directory (absolute path) */
+
     struct task *prev, *next;
 };
 

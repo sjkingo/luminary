@@ -5,6 +5,7 @@
  */
 
 #include <stdbool.h>
+#include <string.h>
 #include "kernel/kernel.h"
 #include "kernel/dev.h"
 #include "kernel/pipe.h"
@@ -327,12 +328,15 @@ static int sys_kill(struct trap_frame *frame)
     return -1;
 }
 
+static const char *resolve_path(const char *upath, char *out_buf);
+
 static int sys_exec(struct trap_frame *frame)
 {
-    const char *path = (const char *)frame->ebx;
+    char resolved[VFS_PATH_MAX];
+    const char *path = resolve_path((const char *)frame->ebx, resolved);
     uint32_t argv_ptr = frame->ecx;   /* user pointer to char *argv[] (NULL-terminated) */
 
-    if (!user_access_ok(path, 1)) return -1;
+    if (!path) return -1;
 
     /* Collect argv from user space */
     static const char *kargv[32];
@@ -455,10 +459,11 @@ static int fd_alloc(struct vfs_node *node, bool append)
 static int sys_open(struct trap_frame *frame)
 {
     /* EBX = path, ECX = flags (Linux open(2) flags) */
-    const char *path  = (const char *)frame->ebx;
+    char resolved[VFS_PATH_MAX];
+    const char *path = resolve_path((const char *)frame->ebx, resolved);
     int         flags = (int)frame->ecx;
 
-    if (!user_access_ok(path, 1)) return -1;
+    if (!path) return -1;
 
     int accmode = flags & 3; /* O_RDONLY=0, O_WRONLY=1, O_RDWR=2 */
     bool do_creat  = (flags & O_CREAT)  != 0;
@@ -594,10 +599,11 @@ static int sys_readdir(struct trap_frame *frame)
 
 static int sys_stat(struct trap_frame *frame)
 {
-    const char *path = (const char *)frame->ebx;
+    char resolved[VFS_PATH_MAX];
+    const char *path = resolve_path((const char *)frame->ebx, resolved);
     struct vfs_stat *out = (struct vfs_stat *)frame->ecx;
 
-    if (!user_access_ok(path, 1)) return -1;
+    if (!path) return -1;
     if (!user_access_ok(out, sizeof(struct vfs_stat))) return -1;
 
     return vfs_stat(path, out);
@@ -609,6 +615,41 @@ static int sys_mount(struct trap_frame *frame)
     /* Print VFS mount information to the kernel console */
     printk("mount:\n");
     printk("  / (initrd, cpio, rw — volatile)\n");
+    return 0;
+}
+
+/* Resolve a user-supplied path against the running task's cwd.
+ * Returns pointer to out_buf (VFS_PATH_MAX bytes) on success, NULL on error. */
+static const char *resolve_path(const char *upath, char *out_buf)
+{
+    if (!user_access_ok(upath, 1)) return NULL;
+    return vfs_resolve(running_task->cwd, upath, out_buf);
+}
+
+static int sys_chdir(struct trap_frame *frame)
+{
+    const char *path = (const char *)frame->ebx;
+    char resolved[VFS_PATH_MAX];
+    if (!resolve_path(path, resolved)) return -1;
+
+    struct vfs_node *node = vfs_lookup(resolved);
+    if (!node || !(node->flags & VFS_DIR)) return -1;
+
+    uint32_t len = (uint32_t)strlen(resolved);
+    if (len >= VFS_PATH_MAX) return -1;
+    memcpy(running_task->cwd, resolved, len + 1);
+    return 0;
+}
+
+static int sys_getcwd(struct trap_frame *frame)
+{
+    char *buf = (char *)frame->ebx;
+    uint32_t len = frame->ecx;
+    if (!user_access_ok(buf, len)) return -1;
+
+    uint32_t cwdlen = (uint32_t)strlen(running_task->cwd) + 1;
+    if (cwdlen > len) return -1;
+    memcpy(buf, running_task->cwd, cwdlen);
     return 0;
 }
 
@@ -714,6 +755,12 @@ void syscall_handler(struct trap_frame *frame)
         break;
     case SYS_TASK_DONE:
         ret = sys_task_done(frame);
+        break;
+    case SYS_CHDIR:
+        ret = sys_chdir(frame);
+        break;
+    case SYS_GETCWD:
+        ret = sys_getcwd(frame);
         break;
     default:
         printk("unknown syscall %d from pid %d\n",

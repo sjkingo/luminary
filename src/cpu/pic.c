@@ -23,9 +23,6 @@ static void timer_init(void)
     outb(PIT_CH0_DATA, (unsigned char)(div & 0xFF));
     outb(PIT_CH0_DATA, (unsigned char)((div >> 8) & 0xFF));
     timekeeper.uptime_ms = 0;
-#ifdef TURTLE
-    printk("Built with -DTURTLE: will only schedule every second\n");
-#endif
 }
 
 #define GUI_FRAME_MS 16   /* ~60 Hz */
@@ -33,12 +30,6 @@ static void timer_init(void)
 static void timer_tick(void)
 {
     timekeeper.uptime_ms += TIMER_INTERVAL;
-
-#ifdef TURTLE
-    /* Only run scheduler every second */
-    if ((timekeeper.uptime_ms % TIMER_FREQ) != 0)
-        return;
-#endif
 
     sched();
 }

@@ -26,9 +26,7 @@
 
 /* VGA fallback */
 extern void putchar(int);
-#ifdef USE_SERIAL
 extern void write_serial(char);
-#endif
 
 static void printchar(char **str, int c)
 {
@@ -41,9 +39,7 @@ static void printchar(char **str, int c)
             writechar_fb(c);
         else
             putchar(c);
-#ifdef USE_SERIAL
         write_serial(c);
-#endif
     }
 }
 
@@ -212,7 +208,6 @@ int printk_serial(const char *format, ...)
 {
     va_list args;
     va_start(args, format);
-#ifdef USE_SERIAL
     static int at_line_start = 1;
     char buf[512];
     char *p = buf;
@@ -248,9 +243,6 @@ int printk_serial(const char *format, ...)
             at_line_start = 1;
     }
     return n;
-#else
-    return print(0, format, args);
-#endif
 }
 
 int sprintf(char *out, const char *format, ...)

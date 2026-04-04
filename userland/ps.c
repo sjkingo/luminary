@@ -1,44 +1,8 @@
 /* ps — list running tasks in a tree view */
 
 #include "syscall.h"
-
-/* ── minimal helpers ──────────────────────────────────────────────────────── */
-
-static void mywrite(const char *s)
-{
-    unsigned int n = 0;
-    while (s[n]) n++;
-    write(1, s, n);
-}
-
-static void myutoa(unsigned int v, char *buf)
-{
-    char tmp[12];
-    int i = 0;
-    if (v == 0) { buf[0] = '0'; buf[1] = '\0'; return; }
-    while (v) { tmp[i++] = '0' + (char)(v % 10); v /= 10; }
-    int j = 0;
-    while (i > 0) buf[j++] = tmp[--i];
-    buf[j] = '\0';
-}
-
-/* Right-align v in a field of width w, space-padded on left */
-static void print_uint_w(unsigned int v, unsigned int w)
-{
-    char num[12];
-    myutoa(v, num);
-    unsigned int len = 0;
-    while (num[len]) len++;
-    unsigned int pad = (len < w) ? w - len : 0;
-    char spaces[12];
-    unsigned int i;
-    for (i = 0; i < pad && i < 11; i++) spaces[i] = ' ';
-    spaces[i] = '\0';
-    mywrite(spaces);
-    mywrite(num);
-}
-
-/* ── task record ──────────────────────────────────────────────────────────── */
+#include "libc/stdio.h"
+#include "libc/string.h"
 
 #define MAX_TASKS 64
 
@@ -59,7 +23,6 @@ static int parse_line(const char *line, struct task_info *ti)
 {
     const char *p = line;
 
-    /* Parse unsigned int from p, advance past it */
 #define PARSE_UINT(dst) do {                              \
     (dst) = 0;                                            \
     if (*p < '0' || *p > '9') return -1;                 \
@@ -95,39 +58,25 @@ static int parse_line(const char *line, struct task_info *ti)
 #undef PARSE_UINT
 }
 
-/* ── task list ────────────────────────────────────────────────────────────── */
-
 static struct task_info tasks[MAX_TASKS];
 static int              ntasks = 0;
 
-/* ── tree rendering ───────────────────────────────────────────────────────── */
-
 static void print_row(struct task_info *ti, const char *prefix)
 {
-    print_uint_w(ti->pid,       4);
-    mywrite(" ");
-    print_uint_w(ti->ppid,      4);
-    mywrite(" ");
-    if (ti->prio < 0) {
-        mywrite("-");
-        print_uint_w((unsigned int)(-ti->prio), 2);
-    } else {
-        mywrite(" ");
-        print_uint_w((unsigned int)(ti->prio), 2);
-    }
-    mywrite(" ");
-    print_uint_w(ti->created_s, 4);
-    mywrite("s ");
-    mywrite(prefix);
-    mywrite(ti->name);
-    mywrite("\n");
+    if (ti->prio < 0)
+        printf("%4u %4u -%2u %4us %s%s\n",
+               ti->pid, ti->ppid, (unsigned int)(-ti->prio),
+               ti->created_s, prefix, ti->name);
+    else
+        printf("%4u %4u  %2u %4us %s%s\n",
+               ti->pid, ti->ppid, (unsigned int)(ti->prio),
+               ti->created_s, prefix, ti->name);
 }
 
 static void print_children(unsigned int ppid, const char *prefix, int depth)
 {
     if (depth > 16) return;
 
-    /* Collect children: tasks with a real (non-zero) ppid matching this pid */
     int children[MAX_TASKS];
     int nc = 0;
     for (int i = 0; i < ntasks; i++) {
@@ -140,18 +89,11 @@ static void print_children(unsigned int ppid, const char *prefix, int depth)
         tasks[idx].printed = 1;
         print_row(&tasks[idx], prefix);
 
-        /* Build child prefix: extend by 2 spaces */
         char newpfx[64];
-        unsigned int pi = 0;
-        for (; prefix[pi] && pi < 62; pi++) newpfx[pi] = prefix[pi];
-        newpfx[pi++] = ' '; newpfx[pi++] = ' ';
-        newpfx[pi] = '\0';
-
+        snprintf(newpfx, sizeof(newpfx), "%s  ", prefix);
         print_children(tasks[idx].pid, newpfx, depth + 1);
     }
 }
-
-/* ── main ─────────────────────────────────────────────────────────────────── */
 
 int main(int argc, char **argv)
 {
@@ -167,7 +109,6 @@ int main(int argc, char **argv)
     while (*p && *p != '\n') p++;
     if (*p == '\n') p++;
 
-    /* Parse each line */
     while (*p && ntasks < MAX_TASKS) {
         const char *end = p;
         while (*end && *end != '\n') end++;
@@ -189,13 +130,10 @@ int main(int argc, char **argv)
 
     if (ntasks == 0) return 0;
 
-    /* Banner */
-    mywrite(" PID PPID PRI  TIME CMD\n");
+    printf(" PID PPID PRI  TIME CMD\n");
 
-    /* Print roots: idle (pid==0) and any task whose ppid is 0 */
     for (int i = 0; i < ntasks; i++) {
-        int is_root = (tasks[i].ppid == 0);
-        if (is_root && !tasks[i].printed) {
+        if (tasks[i].ppid == 0 && !tasks[i].printed) {
             tasks[i].printed = 1;
             print_row(&tasks[i], "");
             print_children(tasks[i].pid, "  ", 1);

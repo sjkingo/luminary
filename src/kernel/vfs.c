@@ -93,6 +93,66 @@ struct vfs_node *vfs_lookup(const char *path)
     return cur;
 }
 
+/* Resolve path relative to cwd into out_buf (VFS_PATH_MAX bytes).
+ * Absolute paths are used as-is. Relative paths are appended to cwd.
+ * Normalises: collapses double slashes, handles . and .. components.
+ * Returns out_buf on success, NULL if the result would overflow. */
+const char *vfs_resolve(const char *cwd, const char *path, char *out_buf)
+{
+    /* Components stack: store pointers into raw[] for each path segment */
+    static char raw[VFS_PATH_MAX];
+    uint32_t ri = 0;
+
+    /* Build un-normalised absolute path in raw[] */
+    if (path[0] == '/') {
+        while (path[ri] && ri < VFS_PATH_MAX - 1) { raw[ri] = path[ri]; ri++; }
+        raw[ri] = '\0';
+    } else {
+        uint32_t ci = 0;
+        while (cwd[ci] && ri < VFS_PATH_MAX - 1) raw[ri++] = cwd[ci++];
+        if (ri > 1 && raw[ri-1] != '/' && ri < VFS_PATH_MAX - 1) raw[ri++] = '/';
+        uint32_t pi = 0;
+        while (path[pi] && ri < VFS_PATH_MAX - 1) raw[ri++] = path[pi++];
+        raw[ri] = '\0';
+    }
+
+    /* Walk components, track stack of kept segment bounds */
+    const char *seg_start[64];
+    uint32_t    seg_len[64];
+    uint32_t    nseg = 0;
+
+    const char *p = raw + 1; /* skip leading '/' */
+    while (*p) {
+        while (*p == '/') p++;
+        if (!*p) break;
+        const char *end = p;
+        while (*end && *end != '/') end++;
+        uint32_t len = (uint32_t)(end - p);
+
+        if (len == 1 && p[0] == '.') {
+            /* skip */
+        } else if (len == 2 && p[0] == '.' && p[1] == '.') {
+            if (nseg > 0) nseg--;
+        } else {
+            if (nseg < 64) { seg_start[nseg] = p; seg_len[nseg] = len; nseg++; }
+        }
+        p = end;
+    }
+
+    /* Emit result */
+    out_buf[0] = '/';
+    uint32_t oi = 1;
+    for (uint32_t s = 0; s < nseg; s++) {
+        if (s > 0) { if (oi < VFS_PATH_MAX - 1) out_buf[oi++] = '/'; }
+        for (uint32_t i = 0; i < seg_len[s]; i++) {
+            if (oi < VFS_PATH_MAX - 1) out_buf[oi++] = seg_start[s][i];
+            else return NULL;
+        }
+    }
+    out_buf[oi] = '\0';
+    return out_buf;
+}
+
 /* ── read ────────────────────────────────────────────────────────────────── */
 uint32_t vfs_read(struct vfs_node *node, uint32_t offset,
                   uint32_t len, void *buf)

@@ -35,8 +35,8 @@ docs/
 
 - Compiler: `i686-elf-gcc -std=gnu99 -ffreestanding -g`
 - Assembler: `i686-elf-gcc` (GAS syntax)
-- Active build defines: `-DDEBUG -DUSE_SERIAL`
-- Available defines: `-DDEBUG` (heap tracking, debug serial output via `DBGK()`), `-DTURTLE` (1Hz scheduling), `-DUSE_SERIAL`
+- Active build defines: `-DDEBUG`
+- Available defines: `-DDEBUG` (heap tracking, debug serial output via `DBGK()`)
 - `src/cpu/mkvectors.py` generates `vectors.S` (256 interrupt stubs)
 - `tools/make_version_h.sh` runs `git describe` to generate `version.h`
 - Two-pass build for kernel symbol table: pass 1 links without `symtab_gen.o` to get stable addresses, `tools/gen_symtab.sh` runs `nm`+`addr2line` to emit `kernel/symtab_gen.c`, pass 2 links the final binary with symbol data included for stack traces
@@ -122,7 +122,7 @@ All userspace programs are ELF32 binaries built with the same `i686-elf-gcc` too
 |----------|-------|----------|
 | Kernel load addr | 0x00100000 | linker.ld |
 | VGA framebuffer | 0xB8000 | vga.h |
-| PIT frequency | 1000 Hz (1 Hz if TURTLE) | cpu.c |
+| PIT frequency | 1000 Hz | cpu.c |
 | IRQ base vector | 32 | x86.h |
 | Trap magic | 0xc0ffee | x86.h |
 | Slab size classes | 8 (32–4096 bytes) | heap.h |

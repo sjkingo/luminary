@@ -43,8 +43,10 @@
 #define SYS_PIPE            32  /* pipe(int fds[2]) -> 0 or -1; fds[0]=read end, fds[1]=write end */
 #define SYS_DUP2            33  /* dup2(oldfd, newfd) -> newfd or -1; closes newfd first if open */
 #define SYS_TASK_DONE       34  /* task_done(pid) -> 1 if pid no longer exists, 0 if still running */
+#define SYS_CHDIR           35  /* chdir(path) -> 0 or -1 */
+#define SYS_GETCWD          36  /* getcwd(buf, len) -> 0 or -1 */
 
-#define SYS_MAX     34
+#define SYS_MAX     36
 
 /* Handle a syscall. Called from trap_handler when trapno == SYSCALL_VECTOR. */
 void syscall_handler(struct trap_frame *frame);
