@@ -273,9 +273,9 @@ int main(int argc, char **argv)
     tfield.focused = 1;
 
     /* Create windows */
-    win1 = win_create(100, 80,  320, 120 + 20 + 2*2, "Demo: Buttons");
-    win2 = win_create(460, 80,  220, 80  + 20 + 2*2, "Uptime");
-    win3 = win_create(100, 260, 320, 120 + 20 + 2*2, "Demo: Text Input");
+    win1 = win_create(100, 80,  320 + GUI_CHROME_W, 120 + GUI_CHROME_H, "Demo: Buttons");
+    win2 = win_create(460, 80,  220 + GUI_CHROME_W, 80  + GUI_CHROME_H, "Uptime");
+    win3 = win_create(100, 260, 320 + GUI_CHROME_W, 120 + GUI_CHROME_H, "Demo: Text Input");
 
     /* Initial draw */
     draw_win1();

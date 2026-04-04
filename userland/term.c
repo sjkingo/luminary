@@ -6,6 +6,7 @@
  *   - shell stdout pipe    → parse and render to window (non-blocking read)
  *
  * Font: 8×16 (matches kernel fbdev).  Default size: 80×24 cells.
+ * Scrollback: 512 lines, Page Up/Down to navigate.
  */
 
 #include "syscall.h"
@@ -16,50 +17,139 @@
 #define TERM_ROWS   24
 #define FONT_W       8
 #define FONT_H      16
-#define CLIENT_W    (TERM_COLS * FONT_W)   /* 640 */
-#define CLIENT_H    (TERM_ROWS * FONT_H)   /* 384 */
+#define CLIENT_W    (TERM_COLS * FONT_W)
+#define CLIENT_H    (TERM_ROWS * FONT_H)
 
-/* ── Solarized Dark colours (match fbdev console) ────────────────────────── */
+/* ── scrollback ──────────────────────────────────────────────────────────── */
+#define SB_LINES    512
+
+/* Solarized Dark colours */
 #define COL_BG      rgb(  0,  26,  33)
 #define COL_FG      rgb(147, 161, 161)
 #define COL_CURSOR  rgb(147, 161, 161)
 
-/* ── cell buffer ─────────────────────────────────────────────────────────── */
-static char cells[TERM_ROWS][TERM_COLS];
-static char dirty[TERM_ROWS];   /* 1 = row needs redraw */
+/* ── scrollback ring buffer ──────────────────────────────────────────────── */
+static char sb[SB_LINES][TERM_COLS];  /* ring of full-width lines */
+static int  sb_head  = 0;             /* index of oldest line (or next to write when full) */
+static int  sb_count = 0;             /* total lines in ring (0..SB_LINES) */
 
+static char sb_blank[TERM_COLS];      /* always-blank row for padding */
+
+/* scroll_offset: 0 = showing live bottom; N = scrolled back N rows */
+static int scroll_offset = 0;
+
+/* cursor position within the live bottom TERM_ROWS */
 static int cur_col = 0;
-static int cur_row = 0;
+static int cur_row = 0;   /* 0 = top of live area; grows until TERM_ROWS-1 */
 
-static void mark_dirty(int row)
+/* ── scrollback helpers ──────────────────────────────────────────────────── */
+
+/* Return a pointer to live row r (0 = top of live area, cur_row = bottom) */
+static char *sb_live_row(int r)
 {
-    if (row >= 0 && row < TERM_ROWS)
-        dirty[row] = 1;
+    /* Live rows are the last (cur_row+1) lines in the ring.
+     * When sb_count <= TERM_ROWS the live area hasn't filled the screen yet;
+     * base is always the first line in the ring in that case. */
+    int live   = sb_count < TERM_ROWS ? sb_count : TERM_ROWS;
+    int base   = sb_count - live;
+    int idx    = (sb_head + base + r) % SB_LINES;
+    return sb[idx];
 }
 
-static void scroll_up(void)
+/* Return a pointer to scrollback row r counted from the top of the visible
+ * window (which may be scrolled back by scroll_offset rows).
+ * When fewer than TERM_ROWS lines exist the content is top-aligned. */
+static char *visible_row(int r)
+{
+    if (sb_count == 0)
+        return sb[0];   /* shouldn't happen but guard */
+
+    /* How many lines are we showing from the ring? */
+    int live = sb_count < TERM_ROWS ? sb_count : TERM_ROWS;
+
+    /* vtop: index into the ring for the topmost visible row */
+    int vtop;
+    if (sb_count <= TERM_ROWS) {
+        /* Screen not yet full — top-align; rows beyond live content are blank */
+        vtop = 0;
+    } else {
+        vtop = sb_count - TERM_ROWS - scroll_offset;
+        if (vtop < 0) vtop = 0;
+    }
+
+    /* Rows beyond live content (bottom padding when screen isn't full) */
+    if (r >= live && sb_count < TERM_ROWS)
+        return sb_blank;
+
+    int idx = (sb_head + vtop + r) % SB_LINES;
+    return sb[idx];
+}
+
+/* Allocate a new blank line at the bottom of the scrollback ring */
+static void sb_new_line(void)
+{
+    int idx;
+    if (sb_count < SB_LINES) {
+        idx = (sb_head + sb_count) % SB_LINES;
+        sb_count++;
+    } else {
+        /* ring is full — overwrite oldest */
+        idx     = sb_head;
+        sb_head = (sb_head + 1) % SB_LINES;
+    }
+    int c;
+    for (c = 0; c < TERM_COLS; c++)
+        sb[idx][c] = ' ';
+}
+
+/* ── dirty tracking ──────────────────────────────────────────────────────── */
+static char dirty[TERM_ROWS];
+
+static void mark_all_dirty(void)
 {
     int r;
-    for (r = 0; r < TERM_ROWS - 1; r++) {
-        int c;
-        for (c = 0; c < TERM_COLS; c++)
-            cells[r][c] = cells[r + 1][c];
-        mark_dirty(r);
+    for (r = 0; r < TERM_ROWS; r++)
+        dirty[r] = 1;
+}
+
+/* ── terminal output ─────────────────────────────────────────────────────── */
+
+/* Advance to the next row.  If we haven't filled the screen yet, just grow
+ * cur_row.  Once cur_row would exceed TERM_ROWS-1, allocate a new ring line
+ * and keep cur_row pinned at TERM_ROWS-1 (scroll). */
+static void advance_row(void)
+{
+    if (cur_row < TERM_ROWS - 1) {
+        /* Screen not yet full — allocate the new line and move cursor down */
+        sb_new_line();
+        cur_row++;
+    } else {
+        /* Screen full — push a new line into the ring, cursor stays at bottom */
+        sb_new_line();
     }
-    for (int c = 0; c < TERM_COLS; c++)
-        cells[TERM_ROWS - 1][c] = ' ';
-    mark_dirty(TERM_ROWS - 1);
+    mark_all_dirty();
+}
+
+/* Ensure there is at least one line in the ring for the cursor to write on */
+static void ensure_line(void)
+{
+    if (sb_count == 0)
+        sb_new_line();
 }
 
 static void term_putchar(char ch)
 {
+    /* Any new output snaps back to live view */
+    if (scroll_offset != 0) {
+        scroll_offset = 0;
+        mark_all_dirty();
+    }
+
+    ensure_line();
+
     if (ch == '\n') {
         cur_col = 0;
-        cur_row++;
-        if (cur_row >= TERM_ROWS) {
-            scroll_up();
-            cur_row = TERM_ROWS - 1;
-        }
+        advance_row();
         return;
     }
     if (ch == '\r') {
@@ -69,64 +159,51 @@ static void term_putchar(char ch)
     if (ch == '\b') {
         if (cur_col > 0) {
             cur_col--;
-            cells[cur_row][cur_col] = ' ';
-            mark_dirty(cur_row);
+            sb_live_row(cur_row)[cur_col] = ' ';
+            dirty[cur_row] = 1;
         }
         return;
     }
     if (ch == '\t') {
         int next = (cur_col + 8) & ~7;
         while (cur_col < next && cur_col < TERM_COLS) {
-            cells[cur_row][cur_col] = ' ';
-            mark_dirty(cur_row);
+            sb_live_row(cur_row)[cur_col] = ' ';
+            dirty[cur_row] = 1;
             cur_col++;
         }
         if (cur_col >= TERM_COLS) {
             cur_col = 0;
-            cur_row++;
-            if (cur_row >= TERM_ROWS) {
-                scroll_up();
-                cur_row = TERM_ROWS - 1;
-            }
+            advance_row();
         }
         return;
     }
-    /* Printable */
-    if (ch < 32) return;  /* ignore other control chars */
+    if (ch < 32) return;
 
     if (cur_col >= TERM_COLS) {
         cur_col = 0;
-        cur_row++;
-        if (cur_row >= TERM_ROWS) {
-            scroll_up();
-            cur_row = TERM_ROWS - 1;
-        }
+        advance_row();
     }
-    cells[cur_row][cur_col] = ch;
-    mark_dirty(cur_row);
+    sb_live_row(cur_row)[cur_col] = ch;
+    dirty[cur_row] = 1;
     cur_col++;
 }
 
 /* ── rendering ───────────────────────────────────────────────────────────── */
 
-/* Draw a single row as a text string via win_draw_text.
- * win_draw_text renders one NUL-terminated string; we pass the whole row. */
 static void render_row(int wid, int row)
 {
-    /* Build NUL-terminated string from cell row */
+    char *line = visible_row(row);
+
     char buf[TERM_COLS + 1];
     int c;
-    /* Find last non-space to avoid trailing garbage; draw full row for simplicity */
     for (c = 0; c < TERM_COLS; c++) {
-        char ch = cells[row][c];
+        char ch = line[c];
         buf[c] = (ch >= 32) ? ch : ' ';
     }
     buf[TERM_COLS] = '\0';
 
     unsigned int y = (unsigned int)(row * FONT_H);
-    /* Clear the row first */
     win_fill_rect(wid, 0, y, CLIENT_W, FONT_H, COL_BG);
-    /* Draw text */
     win_draw_text(wid, 0, y, buf, COL_FG, COL_BG);
 }
 
@@ -147,9 +224,7 @@ static void render_dirty(int wid)
 
 static void render_all(int wid)
 {
-    int r;
-    for (r = 0; r < TERM_ROWS; r++)
-        mark_dirty(r);
+    mark_all_dirty();
     render_dirty(wid);
 }
 
@@ -159,8 +234,6 @@ int main(int argc, char **argv)
 {
     (void)argc; (void)argv;
 
-    /* pipes: shell_in[0] = read by shell (stdin), shell_in[1] = written by us
-     *        shell_out[0] = read by us,           shell_out[1] = written by shell (stdout) */
     int shell_in[2], shell_out[2];
     if (pipe(shell_in) < 0 || pipe(shell_out) < 0)
         return 1;
@@ -170,54 +243,35 @@ int main(int argc, char **argv)
         return 1;
 
     if (child == 0) {
-        /* Child: wire stdio to the pipes then exec the shell.
-         * Do NOT close the other pipe ends — the pipe implementation has no
-         * refcounting, so closing any endpoint sets a shared closed flag that
-         * breaks the parent's side of the pipe. */
-        dup2(shell_in[0],  0);   /* stdin  = read end of shell_in */
-        dup2(shell_out[1], 1);   /* stdout = write end of shell_out */
-        dup2(shell_out[1], 2);   /* stderr = same */
+        dup2(shell_in[0],  0);
+        dup2(shell_out[1], 1);
+        dup2(shell_out[1], 2);
 
         char *sh_argv[] = { "/bin/sh", (char *)0 };
         execv("/bin/sh", sh_argv);
-        /* execv only returns on failure */
         write(1, "term: exec failed\n", 18);
         exit(1);
     }
 
-    /* Parent: do NOT close the unused pipe ends for the same reason —
-     * pipe_notify_close sets a shared flag that would break the child's I/O. */
+    int stdin_wr  = shell_in[1];
+    int stdout_rd = shell_out[0];
 
-    int stdin_wr  = shell_in[1];   /* we write keypresses here */
-    int stdout_rd = shell_out[0];  /* we read shell output here */
-
-    /* Create the terminal window */
-    int wid = win_create(40, 40, CLIENT_W, CLIENT_H, "Terminal");
+    int wid = win_create(40, 40, CLIENT_W + GUI_CHROME_W, CLIENT_H + GUI_CHROME_H, "Terminal");
     if (wid < 0) {
         vfs_close(stdin_wr);
         vfs_close(stdout_rd);
         return 1;
     }
 
-    /* Init cell buffer to spaces */
-    int r, c;
-    for (r = 0; r < TERM_ROWS; r++) {
-        for (c = 0; c < TERM_COLS; c++)
-            cells[r][c] = ' ';
-        dirty[r] = 0;
-    }
-
-    /* Paint initial background */
     win_fill_rect(wid, 0, 0, CLIENT_W, CLIENT_H, COL_BG);
     win_flip(wid);
 
-    /* Event loop */
     char readbuf[256];
     struct gui_event ev;
     int running = 1;
 
     while (running) {
-        /* Drain shell output (non-blocking) */
+        /* Drain shell output */
         int n = read_nb(stdout_rd, readbuf, sizeof(readbuf) - 1);
         if (n > 0) {
             int i;
@@ -234,11 +288,26 @@ int main(int argc, char **argv)
             }
             if (ev.type == GUI_EVENT_KEYPRESS && ev.key) {
                 char ch = ev.key;
-                write(stdin_wr, &ch, 1);
+
+                /* Page Up / Page Down for scrollback */
+                if (ch == '\x01') {   /* Page Up */
+                    int max_scroll = sb_count - TERM_ROWS;
+                    if (max_scroll < 0) max_scroll = 0;
+                    scroll_offset += TERM_ROWS;
+                    if (scroll_offset > max_scroll)
+                        scroll_offset = max_scroll;
+                    render_all(wid);
+                } else if (ch == '\x02') {   /* Page Down */
+                    scroll_offset -= TERM_ROWS;
+                    if (scroll_offset < 0)
+                        scroll_offset = 0;
+                    render_all(wid);
+                } else {
+                    write(stdin_wr, &ch, 1);
+                }
             }
         }
 
-        /* Yield CPU if nothing to do */
         if (n == 0)
             yield();
     }

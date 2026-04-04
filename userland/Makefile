@@ -9,9 +9,11 @@ LIBC=       libc/libc.a
 LIBC_SRCS=  libc/string.c libc/stdio.c libc/stdlib.c
 LIBC_OBJS=  $(LIBC_SRCS:.c=.o)
 
-TARGETS=    init.elf sh.elf gui.elf term.elf \
-            uptime.elf ps.elf kill.elf ls.elf cat.elf stat.elf \
-            mount.elf halt.elf exit.elf
+# BIN_DIR is set by the root Makefile to _build/rootfs/bin
+BIN_DIR    ?= .
+
+PROGS=      init sh gui term uptime ps kill ls cat stat mount halt exit
+TARGETS=    $(addprefix $(BIN_DIR)/,$(PROGS))
 
 .PHONY: all clean
 all: $(TARGETS)
@@ -23,19 +25,10 @@ $(LIBC): $(LIBC_OBJS)
 libc/%.o: libc/%.c libc/string.h libc/stdio.h libc/stdlib.h
 	$(CC) $(CFLAGS) -c $< -o $@
 
-# Programs
-init.elf: $(CRT0) init.o $(LIBC)
-	$(CC) $(LDFLAGS) -o $@ $(CRT0) init.o $(LIBC)
-
-sh.elf: $(CRT0) sh.o $(LIBC)
-	$(CC) $(LDFLAGS) -o $@ $(CRT0) sh.o $(LIBC)
-
-gui.elf: $(CRT0) gui.o $(LIBC)
-	$(CC) $(LDFLAGS) -o $@ $(CRT0) gui.o $(LIBC)
-
-%.elf: $(CRT0) %.o $(LIBC)
+$(BIN_DIR)/%: $(CRT0) %.o $(LIBC)
 	$(CC) $(LDFLAGS) -o $@ $(CRT0) $*.o $(LIBC)
 
+# Compile rules
 %.o: %.c syscall.h
 	$(CC) $(CFLAGS) -c $< -o $@
 
@@ -43,4 +36,4 @@ gui.o: gui.c gui.h syscall.h
 term.o: term.c gui.h syscall.h
 
 clean:
-	rm -f *.o $(TARGETS) $(LIBC_OBJS) $(LIBC)
+	rm -f *.o $(LIBC_OBJS) $(LIBC)

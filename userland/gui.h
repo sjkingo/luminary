@@ -9,6 +9,12 @@
 
 #pragma once
 
+/* ── window chrome dimensions (must match kernel/gui.h) ─────────────────── */
+#define GUI_TITLE_HEIGHT    20
+#define GUI_BORDER          2
+#define GUI_CHROME_W        (GUI_BORDER * 2)
+#define GUI_CHROME_H        (GUI_TITLE_HEIGHT + GUI_BORDER * 2)
+
 /* ── syscall numbers ─────────────────────────────────────────────────────── */
 #define SYS_WIN_CREATE      8
 #define SYS_WIN_DESTROY     9
