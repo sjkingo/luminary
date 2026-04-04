@@ -22,6 +22,47 @@ _Static_assert(offsetof(struct task, stack_base) == TASK_STACK_BASE_OFFSET,
 _Static_assert(offsetof(struct task, stack_hwm) == TASK_STACK_HWM_OFFSET,
                "TASK_STACK_HWM_OFFSET does not match struct layout");
 
+/* Verify a task struct has a valid magic value.
+ * Use the TASK_CHECK macro so the panic shows the call site, not this helper. */
+#define TASK_CHECK(t) do { \
+    if ((t)->magic == TASK_MAGIC_DEAD) \
+        panic("use-after-free: task struct accessed after kill"); \
+    if ((t)->magic != TASK_MAGIC) \
+        panic("task struct magic corrupted"); \
+} while (0)
+
+/* Walk the entire scheduler queue and verify structural integrity:
+ * - every node has a valid magic value
+ * - prev/next cross-links are consistent
+ * - idle_task is reachable (it must always be in the queue)
+ * Called at every queue mutation site and at sched() entry. */
+void sched_queue_verify(void)
+{
+    struct task *t = sched_queue;
+    struct task *prev = NULL;
+    int count = 0;
+    bool found_idle = false;
+
+    while (t != NULL) {
+        if (++count > 1024)
+            panic("sched_queue_verify: queue loop or runaway length");
+
+        TASK_CHECK(t);
+
+        if (t->prev != prev)
+            panic("sched_queue_verify: prev/next cross-link broken");
+
+        if (t->pid == PID_IDLE)
+            found_idle = true;
+
+        prev = t;
+        t = t->next;
+    }
+
+    if (!found_idle)
+        panic("sched_queue_verify: idle_task not in queue");
+}
+
 _Static_assert(TASK_STACK_SIZE % PAGE_SIZE == 0,
                "TASK_STACK_SIZE must be a multiple of PAGE_SIZE");
 
@@ -135,6 +176,9 @@ static void setup_task_stack(struct task *t)
 
 static void insert_task_before(struct task *new_task, struct task *new_next)
 {
+    TASK_CHECK(new_task);
+    TASK_CHECK(new_next);
+
     struct task *new_prev = new_next->prev;
 
     /* stitch to the task after this new one */
@@ -150,6 +194,8 @@ static void insert_task_before(struct task *new_task, struct task *new_next)
         new_prev->next = new_task;
         new_task->prev = new_prev;
     }
+
+    sched_queue_verify();
 }
 
 void create_task(struct task *t, char *name, int prio, void (*entry)(void))
@@ -161,6 +207,7 @@ void create_task(struct task *t, char *name, int prio, void (*entry)(void))
      * timer interrupt calls sched() which reads sched_queue. */
     disable_interrupts();
 
+    t->magic = TASK_MAGIC;
     strncpy(t->name, name, sizeof(t->name) - 1);
     t->name[sizeof(t->name) - 1] = '\0';
     t->pid = ++last_pid;
@@ -197,6 +244,7 @@ void create_task(struct task *t, char *name, int prio, void (*entry)(void))
     /* No insertion point found - append after the last node */
     last->next = t;
     t->prev = last;
+    sched_queue_verify();
 
 out:
     if (sched_queue == NULL)
@@ -257,6 +305,7 @@ void create_user_task(struct task *t, char *name, int prio,
 
     disable_interrupts();
 
+    t->magic = TASK_MAGIC;
     strncpy(t->name, name, sizeof(t->name) - 1);
     t->name[sizeof(t->name) - 1] = '\0';
     t->pid = ++last_pid;
@@ -308,6 +357,7 @@ void create_user_task(struct task *t, char *name, int prio,
 
     last->next = t;
     t->prev = last;
+    sched_queue_verify();
 
 out:
     if (sched_queue == NULL)
@@ -319,6 +369,8 @@ out:
 /* Helper to insert a task into the scheduler queue by priority */
 static void insert_task_sorted(struct task *t, int prio)
 {
+    TASK_CHECK(t);
+
     struct task *before = sched_queue;
     struct task *last_node = before;
     do {
@@ -333,6 +385,7 @@ static void insert_task_sorted(struct task *t, int prio)
     last_node->next = t;
     t->prev = last_node;
     t->next = NULL;
+    sched_queue_verify();
 }
 
 void create_elf_task(struct task *t, char *name, int prio,
@@ -343,6 +396,7 @@ void create_elf_task(struct task *t, char *name, int prio,
 
     disable_interrupts();
 
+    t->magic = TASK_MAGIC;
     strncpy(t->name, name, sizeof(t->name) - 1);
     t->name[sizeof(t->name) - 1] = '\0';
     t->pid = ++last_pid;
@@ -428,6 +482,8 @@ void task_kill(struct task *t)
      * harmless on this single-core x86 kernel. */
     disable_interrupts();
 
+    TASK_CHECK(t);
+
     /* unlink from scheduler queue */
     if (t->prev != NULL)
         t->prev->next = t->next;
@@ -436,6 +492,11 @@ void task_kill(struct task *t)
 
     if (t->next != NULL)
         t->next->prev = t->prev;
+
+    /* Poison magic so any subsequent access to this struct is caught */
+    t->magic = TASK_MAGIC_DEAD;
+
+    sched_queue_verify();
 
     /* notify subsystems (e.g. GUI) that this pid is dying */
     if (task_death_hook)
@@ -529,6 +590,8 @@ struct task *task_fork(struct trap_frame *frame)
 
     disable_interrupts();
 
+    TASK_CHECK(running_task);
+
     /* Copy most fields from parent */
     *child = *running_task;
 
@@ -552,6 +615,7 @@ struct task *task_fork(struct trap_frame *frame)
 
     /* Deep-copy the address space (kernel page dir now includes kstack mapping) */
     child->page_dir_phys = vmm_clone_page_dir(running_task->page_dir_phys);
+
     uint8_t *parent_kstack = (uint8_t *)running_task->stack_base;
     memcpy(kstack, parent_kstack, TASK_STACK_SIZE);
 
@@ -583,16 +647,26 @@ struct task *task_fork(struct trap_frame *frame)
 int task_exec(const void *elf_data, uint32_t elf_size, struct trap_frame *frame,
               int argc, const char *const *argv)
 {
-    /* Capture task name from argv[0] before the address space is replaced.
-     * argv[0] is a user-space pointer valid in the current page directory. */
+    /* Capture task name and cmdline from argv before the address space is
+     * replaced. argv pointers are user-space, valid in the current page dir. */
     if (argc > 0 && argv[0]) {
-        /* Use basename: find last '/' */
         const char *base = argv[0];
         for (const char *p = argv[0]; *p; p++)
             if (*p == '/')
                 base = p + 1;
         strncpy(running_task->name, base, sizeof(running_task->name) - 1);
         running_task->name[sizeof(running_task->name) - 1] = '\0';
+
+        /* Build cmdline: argv[0..argc-1] joined by spaces */
+        uint32_t pos = 0;
+        for (int i = 0; i < argc && argv[i]; i++) {
+            if (i > 0 && pos < sizeof(running_task->cmdline) - 1)
+                running_task->cmdline[pos++] = ' ';
+            const char *src = (i == 0) ? base : argv[i];
+            for (; *src && pos < sizeof(running_task->cmdline) - 1; src++)
+                running_task->cmdline[pos++] = *src;
+        }
+        running_task->cmdline[pos] = '\0';
     }
 
     /* Create a new page directory for the new image */
@@ -640,6 +714,7 @@ void init_task(void)
 {
     /* hand-craft the first task (uses the boot stack) */
     memset(&idle_task, 0, sizeof(idle_task));
+    idle_task.magic = TASK_MAGIC;
     strncpy(idle_task.name, "idle", sizeof(idle_task.name) - 1);
     idle_task.name[sizeof(idle_task.name) - 1] = '\0';
     idle_task.pid = PID_IDLE;

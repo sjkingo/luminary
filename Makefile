@@ -47,6 +47,11 @@ qemucd: bootiso
 	$(EMULATOR) -cdrom $(ISO_OUT) $(QEMU_ARGS)
 	cat /tmp/luminary.log
 
+.PHONY: qemucd-debug
+qemucd-debug: bootiso
+	$(EMULATOR) -cdrom $(ISO_OUT) $(QEMU_ARGS) -d cpu_reset -no-reboot 2>&1 | tee /tmp/luminary-reset.log
+	cat /tmp/luminary.log
+
 .PHONY: console
 console: kernel initrd
 	$(EMULATOR) -kernel $(KERNEL_BIN) -initrd $(INITRD_IMG) -nographic $(QEMU_ARGS) &

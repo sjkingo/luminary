@@ -201,8 +201,9 @@ static int sys_ps(struct trap_frame *frame)
     for (int i = 0; i < ntasks && pos < buflen - 1; i++) {
         t = tasks[i];
         unsigned int age_s = t->created / 1000;
+        const char *cmd = t->cmdline[0] ? t->cmdline : t->name;
         int n = sprintf(tmp, "%d\t%d\t%d\t%lu\t%s\n",
-                        t->pid, t->ppid, t->prio_s, (unsigned long)age_s, t->name);
+                        t->pid, t->ppid, t->prio_s, (unsigned long)age_s, cmd);
         for (int j = 0; j < n && pos < buflen - 1; j++)
             buf[pos++] = tmp[j];
     }

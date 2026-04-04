@@ -8,8 +8,15 @@
 /* ── per-task open file descriptor table ─────────────────────────────────── */
 /* Stored inline in struct task to avoid heap allocation on task creation.   */
 
+/* Written to task.magic on creation, checked at every queue operation.
+ * Poisoned to TASK_MAGIC_DEAD when the task struct is freed so use-after-free
+ * is caught immediately rather than silently corrupting the scheduler queue. */
+#define TASK_MAGIC      0xCA11AB1Eu
+#define TASK_MAGIC_DEAD 0xDEADDEADu
+
 /* A task to be scheduled in the system */
 struct task {
+    uint32_t magic;             /* TASK_MAGIC — checked at every queue operation */
     char name[32];
     unsigned int pid;
     unsigned int created; /* ms since boot */
@@ -37,6 +44,7 @@ struct task {
     bool         read_nonblock; /* set during SYS_READ_NB: chardev/pipe reads return 0 if empty */
 
     char cwd[256];              /* current working directory (absolute path) */
+    char cmdline[128];          /* full argv[0..n] joined by spaces, for ps */
 
     struct task *prev, *next;
 };
@@ -44,10 +52,14 @@ struct task {
 #define PID_IDLE                0
 #define PID_INIT                1
 #define TASK_STACK_SIZE         16384
-#define TASK_ESP_OFFSET         52  /* byte offset of esp in struct task */
-#define TASK_PAGE_DIR_OFFSET    56  /* byte offset of page_dir_phys in struct task */
-#define TASK_STACK_BASE_OFFSET  60  /* byte offset of stack_base in struct task */
-#define TASK_STACK_HWM_OFFSET   64  /* byte offset of stack_hwm in struct task */
+#define TASK_ESP_OFFSET         56  /* byte offset of esp in struct task */
+#define TASK_PAGE_DIR_OFFSET    60  /* byte offset of page_dir_phys in struct task */
+#define TASK_STACK_BASE_OFFSET  64  /* byte offset of stack_base in struct task */
+#define TASK_STACK_HWM_OFFSET   68  /* byte offset of stack_hwm in struct task */
+
+/* Walk the scheduler queue and panic on any structural inconsistency.
+ * Called at every queue mutation site. */
+void sched_queue_verify(void);
 
 /* Initialise the task subsystem */
 void init_task(void);

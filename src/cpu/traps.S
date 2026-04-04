@@ -2,10 +2,10 @@
 
 #include "traps.h"
 
-#define TASK_ESP_OFFSET 52
-#define TASK_PAGE_DIR_OFFSET 56
-#define TASK_STACK_BASE_OFFSET 60
-#define TASK_STACK_HWM_OFFSET 64
+#define TASK_ESP_OFFSET 56
+#define TASK_PAGE_DIR_OFFSET 60
+#define TASK_STACK_BASE_OFFSET 64
+#define TASK_STACK_HWM_OFFSET 68
 #define TASK_STACK_SIZE 16384
 
 .section .bss
