@@ -162,6 +162,14 @@ static int sys_halt(void)
     return 0; /* unreachable */
 }
 
+static int sys_reboot(void)
+{
+    printk("system reboot requested by pid %d\n", running_task->pid);
+    extern void cpu_reboot(void);
+    cpu_reboot();
+    return 0; /* unreachable */
+}
+
 static int sys_ps(struct trap_frame *frame)
 {
     /* EBX = buf, ECX = buflen — format process list into userland buffer */
@@ -841,6 +849,9 @@ void syscall_handler(struct trap_frame *frame)
         break;
     case SYS_HALT:
         ret = sys_halt();
+        break;
+    case SYS_REBOOT:
+        ret = sys_reboot();
         break;
     case SYS_PS:
         ret = sys_ps(frame);

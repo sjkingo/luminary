@@ -49,17 +49,34 @@ multiboot_entry:
 cpu_halt:
     push $halting
     call printk
-    jmp hltloop 
+    jmp hltloop
 hltloop:
     cli
     hlt
     jmp hltloop
+
+/* Reboot the machine via PS/2 controller reset pulse */
+.globl cpu_reboot
+cpu_reboot:
+    push $rebooting
+    call printk
+.Lreboot_wait:
+    inb $0x64, %al
+    testb $0x02, %al
+    jnz .Lreboot_wait
+    movb $0xFE, %al
+    outb %al, $0x64
+.Lreboot_spin:
+    hlt
+    jmp .Lreboot_spin
 
 
 /* string messages */
 .section .data
 halting:
     .asciz "\n\nCPU halt\n"
+rebooting:
+    .asciz "\n\nRebooting...\n"
 kernel_returned:
     .asciz "\n\nBUG: kernel_main() returned?\n"
 kernel_end:

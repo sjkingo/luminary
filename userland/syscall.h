@@ -47,6 +47,7 @@
 #define SYS_UNLINK      39  /* unlink(path) -> 0 or -1 */
 #define SYS_GUI_SET_BG              40  /* gui_set_bg(pixels, w, h) -> 0 or -1 */
 #define SYS_GUI_SET_DESKTOP_COLOR   41  /* gui_set_desktop_color(r, g, b) -> 0 */
+#define SYS_REBOOT                  42  /* reboot() - reboot the machine */
 
 #define WNOHANG         1   /* waitpid flag: return -1 immediately if child hasn't exited */
 
@@ -148,6 +149,12 @@ static inline int getpid(void)
 static inline void halt(void)
 {
     syscall0(SYS_HALT);
+    for (;;);
+}
+
+static inline void reboot(void)
+{
+    syscall0(SYS_REBOOT);
     for (;;);
 }
 

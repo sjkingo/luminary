@@ -49,6 +49,7 @@ Userspace macros (in `userland/syscall.h` and `userland/gui.h`):
 | 37 | SYS_GETPPID | — | ppid | Parent PID; 0 if no parent |
 | 38 | SYS_MKDIR | EBX=path | 0 or -1 | Create directory; parent must exist |
 | 39 | SYS_UNLINK | EBX=path | 0 or -1 | Remove regular file; fails on dirs and chardevs |
+| 42 | SYS_REBOOT | — | — | Reboot the machine via PS/2 controller reset pulse |
 
 ## Notes
 

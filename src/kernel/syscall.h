@@ -50,8 +50,9 @@
 #define SYS_UNLINK          39  /* unlink(path) -> 0 or -1 */
 #define SYS_GUI_SET_BG              40  /* gui_set_bg(pixels, w, h) -> 0 or -1 */
 #define SYS_GUI_SET_DESKTOP_COLOR   41  /* gui_set_desktop_color(r, g, b) -> 0 */
+#define SYS_REBOOT                  42  /* reboot() - reboot the machine */
 
-#define SYS_MAX     41
+#define SYS_MAX     42
 
 /* Handle a syscall. Called from trap_handler when trapno == SYSCALL_VECTOR. */
 void syscall_handler(struct trap_frame *frame);
