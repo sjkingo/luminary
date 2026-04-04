@@ -469,8 +469,20 @@ static void run_pipeline(char *line)
 
     if (prev_read >= 0) vfs_close(prev_read);
 
-    for (int i = 0; i < npids; i++)
-        waitpid(pids[i]);
+    /* Wait for all pipeline children, but allow Ctrl+C to kill them. */
+    for (int i = 0; i < npids; i++) {
+        while (!task_done(pids[i])) {
+            char c;
+            if (read_nb(0, &c, 1) > 0 && c == '\x03') {
+                /* Ctrl+C: kill remaining pipeline children and abort wait */
+                for (int j = i; j < npids; j++)
+                    kill((unsigned int)pids[j]);
+                write(1, "^C\n", 3);
+                return;
+            }
+            yield();
+        }
+    }
 }
 
 /* ── line dispatcher ─────────────────────────────────────────────────────── */
@@ -498,7 +510,11 @@ int main(int argc, char **argv)
         if (read(0, &c, 1) == 0)
             continue;
 
-        if (c == '\n') {
+        if (c == '\x03') {
+            /* Ctrl+C: discard current line, print ^C and new prompt */
+            write(1, "^C\n$ ", 5);
+            idx = 0;
+        } else if (c == '\n') {
             putchar('\n');
             cmd[idx] = '\0';
             dispatch(cmd);

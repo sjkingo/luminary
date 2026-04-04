@@ -27,3 +27,4 @@ int pipe_create(struct vfs_node **read_out, struct vfs_node **write_out);
  * Updates write_closed/read_closed and frees the struct pipe when both
  * ends are closed. Safe to call on non-pipe nodes (no-op). */
 void pipe_notify_close(struct vfs_node *node);
+

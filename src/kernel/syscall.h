@@ -33,6 +33,7 @@
 #define SYS_UPTIME          22  /* uptime() - return uptime in ms */
 
 /* VFS / I/O syscalls */
+#define SYS_READ_NB         23  /* read_nb(fd, buf, len) -> bytes or 0 if empty (non-blocking) */
 #define SYS_LSEEK           24  /* lseek(fd, offset, whence) -> new offset or -1; no-op (0) on chardevs */
 #define SYS_READDIR         25  /* readdir(fd, dirent_ptr) -> 1 if entry, 0 if done, -1 err */
 #define SYS_STAT            26  /* stat(path, stat_ptr) -> 0 or -1 */
@@ -42,8 +43,9 @@
 #define SYS_WAITPID         30  /* waitpid(pid) -> pid on child exit, -1 on error */
 #define SYS_PIPE            32  /* pipe(int fds[2]) -> 0 or -1; fds[0]=read end, fds[1]=write end */
 #define SYS_DUP2            33  /* dup2(oldfd, newfd) -> newfd or -1; closes newfd first if open */
+#define SYS_TASK_DONE       34  /* task_done(pid) -> 1 if pid no longer exists, 0 if still running */
 
-#define SYS_MAX     33
+#define SYS_MAX     34
 
 /* Handle a syscall. Called from trap_handler when trapno == SYSCALL_VECTOR. */
 void syscall_handler(struct trap_frame *frame);

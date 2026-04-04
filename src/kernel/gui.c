@@ -1109,6 +1109,7 @@ int gui_window_create(int32_t x, int32_t y, uint32_t w, uint32_t h,
     slot->bb_w       = cw;
     slot->bb_h       = ch;
     slot->bb_nframes = nframes;
+    slot->owner_pid = running_task ? running_task->pid : 0;
     slot->visible   = true;
     slot->focused   = false;
     slot->dirty     = true;
@@ -1157,6 +1158,14 @@ void gui_window_destroy(int id)
         kbd_set_owner(0);
         compositor_quit = true;
         compositor_dirty = true;
+    }
+}
+
+void gui_destroy_windows_for_pid(uint32_t pid)
+{
+    for (int i = 0; i < GUI_MAX_WINDOWS; i++) {
+        if (win_pool[i].id != 0 && win_pool[i].owner_pid == pid)
+            gui_window_destroy(win_pool[i].id);
     }
 }
 
@@ -1300,6 +1309,9 @@ void init_gui(void)
     memset(win_pool, 0, sizeof(win_pool));
     win_list = NULL;
     next_id  = 1;
+
+    /* Register cleanup hook so task_kill destroys our windows automatically */
+    task_death_hook = gui_destroy_windows_for_pid;
 
     DBGK("gui", "subsystem ready (%ldx%ld %d bpp)\n",
          (uint32_t)fb_w, (uint32_t)fb_h, fb_depth);

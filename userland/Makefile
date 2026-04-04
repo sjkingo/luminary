@@ -9,7 +9,7 @@ LIBC=       libc/libc.a
 LIBC_SRCS=  libc/string.c libc/stdio.c libc/stdlib.c
 LIBC_OBJS=  $(LIBC_SRCS:.c=.o)
 
-TARGETS=    init.elf sh.elf gui.elf \
+TARGETS=    init.elf sh.elf gui.elf term.elf \
             uptime.elf ps.elf kill.elf ls.elf cat.elf stat.elf \
             mount.elf halt.elf exit.elf
 
@@ -40,6 +40,7 @@ gui.elf: $(CRT0) gui.o $(LIBC)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 gui.o: gui.c gui.h syscall.h
+term.o: term.c gui.h syscall.h
 
 clean:
 	rm -f *.o $(TARGETS) $(LIBC_OBJS) $(LIBC)

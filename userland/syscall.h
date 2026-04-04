@@ -33,8 +33,10 @@
 #define SYS_EXEC        28  /* exec(path, argv) - exec in-place -> 0 or -1 */
 #define SYS_FORK        29  /* fork() -> child PID in parent, 0 in child */
 #define SYS_WAITPID     30  /* waitpid(pid) -> pid on child exit, -1 on error */
+#define SYS_READ_NB     23  /* read_nb(fd, buf, len) -> bytes or 0 if pipe empty (non-blocking) */
 #define SYS_PIPE        32  /* pipe(int fds[2]) -> 0 or -1 */
 #define SYS_DUP2        33  /* dup2(oldfd, newfd) -> newfd or -1 */
+#define SYS_TASK_DONE   34  /* task_done(pid) -> 1 if pid gone, 0 if still running */
 
 /* VFS node type flags (must match kernel/vfs.h) */
 #define VFS_FILE    0x01
@@ -228,4 +230,16 @@ static inline int pipe(int fds[2])
 static inline int dup2(int oldfd, int newfd)
 {
     return syscall2(SYS_DUP2, (unsigned int)oldfd, (unsigned int)newfd);
+}
+
+/* read_nb: non-blocking read — returns 0 immediately if pipe is empty */
+static inline int read_nb(int fd, char *buf, unsigned int len)
+{
+    return syscall3(SYS_READ_NB, (unsigned int)fd, (unsigned int)buf, len);
+}
+
+/* task_done: non-blocking check — returns 1 if pid no longer exists */
+static inline int task_done(int pid)
+{
+    return syscall1(SYS_TASK_DONE, (unsigned int)pid);
 }

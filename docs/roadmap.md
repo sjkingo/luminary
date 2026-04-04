@@ -27,6 +27,9 @@
 - `fork()`/`exec()` with copy-on-write address space cloning (`vmm_clone_page_dir`): writable pages marked CoW, read-only pages shared; refcounts track sharing
 - Character device abstraction (`VFS_CHARDEV`): `/dev/stdin`, `/dev/stdout`, `/dev/stderr` as VFS nodes; `read(fd,buf,len)`/`write(fd,buf,len)` dispatch through fd table; fds 0/1/2 pre-opened on every task
 - Anonymous pipes (`pipe()`/`dup2()`): 4KB ring buffer, up to 16 concurrent pipes, blocking read/write with EOF and broken-pipe semantics; enables shell I/O redirection
+- GUI terminal emulator (`/bin/term`): userland process that creates a window, forks `/bin/sh`, connects it via pipes, and renders output; multiple term instances can run simultaneously
+- Ctrl+C signal interrupts: keyboard driver emits `\x03`; shell uses interruptible wait (`task_done()` + `read_nb()` + `yield()`) to detect and kill children
+- `task_death_hook`: registered callback fired by `task_kill()` for per-task resource cleanup; GUI uses it to destroy orphaned windows
 
 ## What Luminary Needs
 
@@ -43,5 +46,7 @@
 3. **GUI back buffer frame leak**: PMM frames for the full-screen `back` buffer are allocated once in `init_gui()` and never freed (compositor exit does not free them — intentional for performance). Acceptable for the lifetime of the kernel.
 
 4. **Back buffer allocation failure**: `pmm_alloc_contiguous(n)` allocates the back buffer from ZONE_LOW. If ZONE_LOW is exhausted (unlikely at init time), the GUI falls back to drawing directly to `fb_hw` with degraded performance (no partial updates, cursor drawn into scene).
+
+6. **Pipe no-refcount**: `write_closed`/`read_closed` are single flags, not reference counts. Closing any fd pointing to a pipe end sets the flag even if other fds hold the same end open (e.g. after `fork()`). Workaround: do not close unused pipe ends after `fork()`. Fix requires per-node refcounting.
 
 5. **`struct task` offset constants**: `TASK_ESP_OFFSET`, `TASK_PAGE_DIR_OFFSET`, `TASK_STACK_BASE_OFFSET` in `task.h` must match the actual byte layout of `struct task`. Verified with `_Static_assert(offsetof(...))`. If `struct task` is modified, update both the constants and the corresponding defines in `cpu/traps.S`. A `cpu/traps.o: kernel/task.h` dependency in the Makefile ensures `traps.S` is rebuilt when `task.h` changes.

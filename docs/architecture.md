@@ -8,7 +8,7 @@ Luminary is a modular x86 (IA-32) kernel designed with real-time scheduling in m
 - Boot: GRUB2 Multiboot → `src/boot/boot.S` → `kernel_main()`
 - Kernel load address: 0x00100000 (1MB), defined in `src/linker.ld`
 - Kernel stack: 16KB
-- VBE: Requests 1024x768x32bpp via Multiboot flags
+- VBE: Requests 1280x960x32bpp via Multiboot flags
 - GDT: 6 entries (null, kernel code 0x9A, kernel data 0x92, user code 0xFA, user data 0xF2, TSS)
 - User mode: Ring 3 via TSS and `int 0x80` syscall gate
 
@@ -90,6 +90,8 @@ Tasks are created with per-task 4KB kernel stacks and synthetic trap frames for 
 
 Init (PID 1) is loaded from the initrd and respawned automatically if killed — analogous to Unix PID 1. `task_fork()` does a full address space copy (no CoW). `task_exec()` replaces the calling task's address space in-place.
 
+`task_death_hook` is a function pointer in `task.h` called by `task_kill()` with the dying task's pid before its page directory is freed. Subsystems register here to clean up per-task resources without creating a compile-time dependency on `task.c`. The GUI subsystem registers `gui_destroy_windows_for_pid` here at `init_gui()` time.
+
 ## Trap Handling
 
 All 256 interrupt vectors go through `alltraps` in `traps.S`, which saves the full register state (with magic cookie `0xc0ffee` for stack validation) and calls `trap_handler()` in C. On return, `alltraps` checks `prev_task` to determine if a context switch is needed, then does `iret`. Syscalls use vector `0x80` with a ring 3 gate.
@@ -106,7 +108,13 @@ Compositor and window manager running as a kernel task at priority 9. Three-buff
 
 ## Userland
 
-Init spawns `/bin/sh` via fork+exec and respawns it if it exits. The shell supports VFS commands, path-based exec, and standard builtins. A GUI demo app (`/bin/gui`) opens 4 windows including a console. All userspace programs are ELF32 binaries built with the same `i686-elf-gcc` toolchain and a freestanding libc.
+Init spawns `/bin/sh` via fork+exec and respawns it if it exits. The shell supports VFS commands, path-based exec, and standard builtins. It handles Ctrl+C (`\x03`) by killing all children in the current pipeline and returning to the prompt.
+
+Userspace programs:
+- `/bin/gui` — GUI demo app, opens 4 windows including a console
+- `/bin/term` — GUI terminal emulator; forks `/bin/sh` and connects it via pipes, rendering output into a window and routing keypresses back to the shell's stdin
+
+All userspace programs are ELF32 binaries built with the same `i686-elf-gcc` toolchain and a freestanding libc.
 
 ## Important Constants & Addresses
 

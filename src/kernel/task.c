@@ -366,6 +366,8 @@ void sched_free_stale_stack(void)
     }
 }
 
+void (*task_death_hook)(uint32_t pid) = NULL;
+
 void task_kill(struct task *t)
 {
     if (t->pid == PID_IDLE)
@@ -387,6 +389,10 @@ void task_kill(struct task *t)
 
     if (t->next != NULL)
         t->next->prev = t->prev;
+
+    /* notify subsystems (e.g. GUI) that this pid is dying */
+    if (task_death_hook)
+        task_death_hook(t->pid);
 
     /* destroy task's page directory (frees user page tables and frames) */
     if (t->page_dir_phys != vmm_get_kernel_page_dir())

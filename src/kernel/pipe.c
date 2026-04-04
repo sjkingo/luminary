@@ -20,6 +20,8 @@
 #include "kernel/pipe.h"
 #include "kernel/heap.h"
 #include "kernel/kernel.h"
+#include "kernel/sched.h"
+#include "kernel/task.h"
 #include "kernel/vfs.h"
 #include "cpu/x86.h"
 
@@ -64,6 +66,7 @@ static uint32_t pipe_read_##i(uint32_t off, uint32_t len, void *buf)           \
         if (pipe_used(p) == 0) {                                                \
             if (p->write_closed) break; /* EOF */                               \
             if (out > 0) break; /* return what we already have */               \
+            if (running_task && running_task->read_nonblock) break; /* non-blocking */ \
             enable_interrupts();                                                \
             asm volatile("hlt");                                                \
             disable_interrupts();                                               \

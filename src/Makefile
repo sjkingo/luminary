@@ -65,6 +65,7 @@ initrd: userspace
 	cp ../userland/mount.elf ../rootfs/bin/mount
 	cp ../userland/halt.elf  ../rootfs/bin/halt
 	cp ../userland/exit.elf  ../rootfs/bin/exit
+	cp ../userland/term.elf  ../rootfs/bin/term
 	cd ../rootfs && find . | sort | cpio -o --format=newc > ../initrd.img
 	@echo "initrd: built $$(wc -c < ../initrd.img) bytes"
 

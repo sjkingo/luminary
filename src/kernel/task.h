@@ -32,6 +32,7 @@ struct task {
     bool         wait_done;     /* set true when the waited-on child has exited */
 
     unsigned int fault_count;   /* consecutive CPU exceptions; panic at MAX_TASK_FAULTS */
+    bool         read_nonblock; /* set during SYS_READ_NB: chardev/pipe reads return 0 if empty */
 
     struct task *prev, *next;
 };
@@ -70,6 +71,11 @@ void spawn_init(const void *elf_data, unsigned int elf_size);
  * currently running task, this function does not return.
  * If the killed task is init, it is respawned automatically. */
 void task_kill(struct task *t);
+
+/* Optional hook called by task_kill with the pid of the dying task.
+ * Subsystems (e.g. GUI) register here to clean up per-task resources.
+ * Called before the context switch, with interrupts disabled. */
+extern void (*task_death_hook)(uint32_t pid);
 
 /* Fork the current task: clone address space, return new task ptr.
  * Child gets EAX=0 in its trap frame. Parent gets child PID returned. */

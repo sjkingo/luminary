@@ -11,6 +11,7 @@
 
 #include "kernel/dev.h"
 #include "kernel/kernel.h"
+#include "kernel/sched.h"
 #include "kernel/vfs.h"
 #include "kernel/task.h"
 #include "cpu/x86.h"
@@ -57,6 +58,10 @@ static uint32_t stdin_read_op(uint32_t offset, uint32_t len, void *buf)
 
         if (out > 0)
             return (uint32_t)out;
+
+        /* Non-blocking mode: return immediately with 0 bytes */
+        if (running_task && running_task->read_nonblock)
+            return 0;
 
         enable_interrupts();
         asm volatile("hlt");

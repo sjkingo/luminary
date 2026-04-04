@@ -40,8 +40,10 @@ Userspace macros (in `userland/syscall.h` and `userland/gui.h`):
 | 28 | SYS_EXEC | EBX=path, ECX=argv | 0 or -1 | exec in-place: replace address space with ELF at path |
 | 29 | SYS_FORK | — | child pid or 0 | Fork current task; child gets 0 |
 | 30 | SYS_WAITPID | EBX=pid | pid or -1 | Block until child exits |
+| 23 | SYS_READ_NB | EBX=fd, ECX=buf, EDX=len | bytes read or 0 | Non-blocking read: returns 0 immediately if no data available (pipe empty or no keyboard input) |
 | 32 | SYS_PIPE | EBX=int[2] ptr | 0 or -1 | Create pipe; fills fds[0]=read end, fds[1]=write end |
 | 33 | SYS_DUP2 | EBX=oldfd, ECX=newfd | newfd or -1 | Duplicate oldfd onto newfd; closes newfd first if open |
+| 34 | SYS_TASK_DONE | EBX=pid | 1 or 0 | Non-blocking check: returns 1 if pid is no longer in the scheduler queue, 0 if still running |
 
 ## Notes
 
@@ -53,4 +55,6 @@ Userspace macros (in `userland/syscall.h` and `userland/gui.h`):
 - **SYS_PS (7)** formats the process list as "PID  PRIO  NAME\n" entries into a userland-supplied buffer. Returns bytes written (not counting the null terminator), or -1 on error.
 - **SYS_PIPE (32)** allocates a 4KB ring buffer shared between two chardev VFS nodes. Up to 16 concurrent pipes. The read end blocks when empty (until data arrives or write end closes). The write end blocks when full (until space is available or read end closes).
 - **SYS_DUP2 (33)** is the standard mechanism for I/O redirection: `dup2(pipe_fds[0], 0)` redirects stdin to a pipe read end. Inherited across `fork()`; preserved across `exec()`.
+- **SYS_READ_NB (23)** sets the `pipe_nonblock` flag, calls the normal VFS read path, then clears the flag. Works on any fd including fd 0 (stdin chardev). Used by the shell's Ctrl+C wait loop and by `term.elf` to drain pipe output without blocking.
+- **SYS_TASK_DONE (34)** walks the scheduler queue and returns 1 if the pid is absent. Used together with `SYS_READ_NB` to implement an interruptible wait: poll `task_done(pid)` and `read_nb(0, &c, 1)` in a yield loop rather than blocking in `waitpid()`.
 - Extra stack args are at `[uesp+0]`, `[uesp+4]`, `[uesp+8]` — note offset 0, not +4, because they are pushed before `int $0x80` and ESP points to the first pushed value.

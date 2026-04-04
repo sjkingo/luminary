@@ -111,6 +111,32 @@ static int sys_read(struct trap_frame *frame)
     return -1;
 }
 
+static int sys_read_nb(struct trap_frame *frame)
+{
+    /* Non-blocking read: identical to sys_read but pipe reads return 0
+     * immediately if the buffer is empty instead of blocking. */
+    int fd = (int)frame->ebx;
+    char *buf = (char *)frame->ecx;
+    unsigned int len = frame->edx;
+
+    if (fd < 0 || fd >= VFS_FD_MAX) return -1;
+    if (!user_access_ok(buf, len) || len > 4096) return -1;
+
+    struct vfs_fd *vfd = &running_task->fds[fd];
+    if (!vfd->open || !vfd->node) return -1;
+
+    if (vfd->node->flags & (VFS_FILE | VFS_CHARDEV)) {
+        running_task->read_nonblock = true;
+        uint32_t n = vfs_read(vfd->node, vfd->offset, len, buf);
+        running_task->read_nonblock = false;
+        if (!(vfd->node->flags & VFS_CHARDEV))
+            vfd->offset += n;
+        return (int)n;
+    }
+
+    return -1;
+}
+
 static int sys_uptime(void)
 {
     return (int)timekeeper.uptime_ms;
@@ -388,6 +414,18 @@ static int sys_waitpid(struct trap_frame *frame)
     return target_pid;
 }
 
+static int sys_task_done(struct trap_frame *frame)
+{
+    /* Returns 1 if pid is no longer in the scheduler queue, 0 if still running */
+    unsigned int target_pid = frame->ebx;
+    struct task *t = sched_queue;
+    while (t) {
+        if (t->pid == target_pid) return 0;
+        t = t->next;
+    }
+    return 1;
+}
+
 static int sys_exit_task(struct trap_frame *frame)
 {
     (void)frame;
@@ -598,6 +636,9 @@ void syscall_handler(struct trap_frame *frame)
     case SYS_READ:
         ret = sys_read(frame);
         break;
+    case SYS_READ_NB:
+        ret = sys_read_nb(frame);
+        break;
     case SYS_UPTIME:
         ret = sys_uptime();
         break;
@@ -681,6 +722,9 @@ void syscall_handler(struct trap_frame *frame)
         break;
     case SYS_DUP2:
         ret = sys_dup2(frame);
+        break;
+    case SYS_TASK_DONE:
+        ret = sys_task_done(frame);
         break;
     default:
         printk("unknown syscall %d from pid %d\n",

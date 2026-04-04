@@ -83,6 +83,10 @@ All sprites are drawn directly into `fb_hw` (never `back`) with a 1px black outl
 | Vertical resize | 7×11 | `cursor_resize_v` (centred hotspot) |
 | Diagonal resize | 11×11 | `cursor_resize_d` (centred hotspot) |
 
+## Window Ownership and Cleanup
+
+Each `struct window` stores `owner_pid` — the pid of the task that called `gui_window_create`. When a task is killed, `task_death_hook` fires `gui_destroy_windows_for_pid(pid)`, which iterates the window pool and calls `gui_window_destroy` for any window owned by that pid. This ensures windows are never left orphaned in the compositor after their owner exits.
+
 ## Public API
 
 Called from syscall handlers in `syscall.c`:
@@ -98,6 +102,7 @@ void     gui_window_flip(int id);
 int      gui_window_poll_event(int id, struct gui_event *ev);
 void     gui_window_get_size(int id, int *cw, int *ch);
 int      gui_has_windows(void);
+void     gui_destroy_windows_for_pid(uint32_t pid);
 ```
 
 ## Event Types (`struct gui_event`)
@@ -110,7 +115,11 @@ int      gui_has_windows(void);
 
 ## Keyboard Routing
 
-While `gui_has_windows()` is true, `SYS_READ` (blocking keyboard read used by the shell) yields without consuming input. All keyboard input goes to the compositor's `process_keyboard()`, which routes to the focused window's event queue.
+Keyboard ownership is tracked by a flag in the keyboard driver (`kbd_set_owner(1/0)`, `kbd_is_owned()`). The GUI compositor sets it when the first window opens and clears it when the last window closes.
+
+While `kbd_is_owned()` is true, `SYS_READ` on fd 0 (stdin chardev) yields without consuming input — the shell blocks harmlessly. All keyboard input goes to the compositor's `process_keyboard()`, which routes to the focused window's event queue as `GUI_EVENT_KEYPRESS`.
+
+This decouples `dev.c` (stdin chardev) from the GUI subsystem: `dev.c` checks `kbd_is_owned()` from the keyboard driver rather than calling `gui_has_windows()` directly.
 
 ## Drawing Coordinates
 

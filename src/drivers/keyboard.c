@@ -43,6 +43,7 @@ static struct {
     unsigned int head; /* write index */
     unsigned int tail; /* read index */
     int shift;
+    int ctrl;
     int caps;
     int extended; /* set when 0xE0 prefix received */
 } kb;
@@ -52,6 +53,7 @@ void init_keyboard(void)
     kb.head = 0;
     kb.tail = 0;
     kb.shift = 0;
+    kb.ctrl  = 0;
     kb.caps = 0;
     kb.extended = 0;
 }
@@ -80,6 +82,9 @@ void keyboard_irq_handler(void)
         /* Page Up (0xE0 0x49) and Page Down (0xE0 0x51) - make codes only */
         if (scancode == 0x49) { kb_buf_put(KEY_PGUP); return; }
         if (scancode == 0x51) { kb_buf_put(KEY_PGDN); return; }
+        /* Right Ctrl make/break (0xE0 0x1D / 0xE0 0x9D) */
+        if (scancode == 0x1D) { kb.ctrl = 1; return; }
+        if (scancode == 0x9D) { kb.ctrl = 0; return; }
         /* Ignore all other extended keys */
         return;
     }
@@ -94,13 +99,18 @@ void keyboard_irq_handler(void)
         return;
     }
 
+    /* Ctrl make/break (left ctrl = 0x1D make, 0x9D break).
+     * Must be checked BEFORE the generic break-code filter below. */
+    if (scancode == 0x1D) { kb.ctrl = 1; return; }
+    if (scancode == 0x9D) { kb.ctrl = 0; return; }
+
     /* Caps lock toggle (make only) */
     if (scancode == 0x3A) {
         kb.caps = !kb.caps;
         return;
     }
 
-    /* Ignore break codes */
+    /* Ignore all other break codes (key release) */
     if (scancode & 0x80)
         return;
 
@@ -112,6 +122,16 @@ void keyboard_irq_handler(void)
     char c = kb.shift ? scancode_shifted[scancode] : scancode_unshifted[scancode];
     if (c == 0)
         return;
+
+    /* Ctrl+letter → control character (e.g. Ctrl+C = 0x03, Ctrl+D = 0x04) */
+    if (kb.ctrl && c >= 'a' && c <= 'z') {
+        kb_buf_put((char)(c - 'a' + 1));
+        return;
+    }
+    if (kb.ctrl && c >= 'A' && c <= 'Z') {
+        kb_buf_put((char)(c - 'A' + 1));
+        return;
+    }
 
     /* Apply caps lock - flip case for letters */
     if (kb.caps) {

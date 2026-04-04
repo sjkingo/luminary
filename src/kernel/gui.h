@@ -37,6 +37,8 @@ struct window {
     uint32_t    bb_w, bb_h;     /* dimensions backbuffer was allocated at */
     uint32_t    bb_nframes;     /* number of PMM frames backing backbuffer */
 
+    uint32_t    owner_pid;      /* pid of the task that created this window */
+
     bool        visible;
     bool        focused;
     bool        dirty;          /* needs recomposite */
@@ -96,3 +98,6 @@ void gui_window_push_event(struct window *w, struct gui_event *ev);
 
 /* Get current client area size of a window by ID. Returns 0 on success. */
 int  gui_window_get_size(int id, uint32_t *cw, uint32_t *ch);
+
+/* Destroy all windows owned by pid. Called via task_death_hook. */
+void gui_destroy_windows_for_pid(uint32_t pid);
