@@ -285,6 +285,7 @@ static void insert_task_sorted(struct task *t, int prio)
 
     last_node->next = t;
     t->prev = last_node;
+    t->next = NULL;
 }
 
 void create_elf_task(struct task *t, char *name, int prio,
