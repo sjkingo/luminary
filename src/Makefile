@@ -47,16 +47,12 @@ $(BUILD_DIR):
 
 .PHONY: clean
 clean:
-	rm -f $(KERNEL_OBJS) $(KERNEL_OBJS:.o=.d) core.* cpu/vectors.S version.h
+	rm -f $(KERNEL_OBJS) $(KERNEL_OBJS:.o=.d) core.* cpu/vectors.S
 	rm -f kernel/symtab_gen.c kernel/symtab_gen.o kernel/symtab_gen.d kernel.bin.pass1
 
 -include $(KERNEL_OBJS:.o=.d)
 
-.PHONY: version_header
-version_header:
-	../tools/make_version_h.sh > version.h
-
-kernel/kernel.o: version_header kernel/kernel.c
+kernel/kernel.o: kernel/kernel.c
 
 cpu/vectors.S: cpu/mkvectors.py
 	python3 cpu/mkvectors.py > $@

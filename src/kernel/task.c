@@ -310,10 +310,6 @@ static void insert_task_sorted(struct task *t, int prio)
     do {
         if (prio >= before->prio_s) {
             insert_task_before(t, before);
-            DBGK("sched", "enqueue '%s' pid=%d prio=%d prev=%d next=%d\n",
-                 t->name, t->pid, prio,
-                 t->prev ? (int)t->prev->pid : -1,
-                 t->next ? (int)t->next->pid : -1);
             return;
         }
         last_node = before;
@@ -323,8 +319,6 @@ static void insert_task_sorted(struct task *t, int prio)
     last_node->next = t;
     t->prev = last_node;
     t->next = NULL;
-    DBGK("sched", "enqueue '%s' pid=%d prio=%d prev=%d next=-1\n",
-         t->name, t->pid, prio, last_node->pid);
 }
 
 void create_elf_task(struct task *t, char *name, int prio,
@@ -419,11 +413,6 @@ void task_kill(struct task *t)
      * compositor self-kill path) calling disable_interrupts() again is
      * harmless on this single-core x86 kernel. */
     disable_interrupts();
-
-    DBGK("sched", "dequeue '%s' pid=%d prev=%d next=%d\n",
-         t->name, t->pid,
-         t->prev ? (int)t->prev->pid : -1,
-         t->next ? (int)t->next->pid : -1);
 
     /* unlink from scheduler queue */
     if (t->prev != NULL)
@@ -561,52 +550,11 @@ struct task *task_fork(struct trap_frame *frame)
     uint32_t stack_offset = parent_frame_esp - running_task->stack_base;
     child->esp = child->stack_base + stack_offset;
 
-    DBGK("task", "fork: parent frame_esp=0x%lx stack_base=0x%x offset=0x%lx\n",
-         parent_frame_esp, running_task->stack_base, stack_offset);
-    DBGK("task", "fork: child  esp=0x%x stack_base=0x%x\n",
-         child->esp, child->stack_base);
-
     /* Set child's return value (EAX in trap frame) to 0.
-     * The trap frame is embedded in the kernel stack, so we
-     * find it at the same offset as in the parent's stack. */
+     * The trap frame is embedded in the kernel stack at the same offset
+     * as in the parent's stack. */
     struct trap_frame *child_frame = (struct trap_frame *)child->esp;
-    DBGK("task", "fork: child_frame->ds=0x%x magic=0x%x eax=0x%x eip=0x%x cs=0x%x uesp=0x%x\n",
-         child_frame->ds, child_frame->magic, child_frame->eax,
-         child_frame->eip, child_frame->cs, child_frame->uesp);
     child_frame->eax = 0;
-
-    /* Debug: peek at top of child's and parent's user stack */
-    {
-        uint32_t uesp = child_frame->uesp;
-        uint32_t pdi = uesp >> 22;
-        uint32_t pti = (uesp >> 12) & 0x3FF;
-        uint32_t off = uesp & 0xFFF;
-        uint32_t *cdir = (uint32_t *)child->page_dir_phys;
-        uint32_t *pdir = (uint32_t *)running_task->page_dir_phys;
-        if (cdir[pdi] & 1) {
-            uint32_t *cpt = (uint32_t *)(cdir[pdi] & 0xFFFFF000);
-            uint32_t cframe = cpt[pti] & 0xFFFFF000;
-            void *kp = vmm_kmap(cframe);
-            uint32_t cval = *(uint32_t *)((uint8_t *)kp + off);
-            vmm_kunmap(kp);
-            DBGK("task", "fork: child  stack[0x%lx] = 0x%lx frame=0x%lx\n", uesp, cval, cframe);
-        }
-        if (pdir[pdi] & 1) {
-            uint32_t *ppt = (uint32_t *)(pdir[pdi] & 0xFFFFF000);
-            uint32_t pframe = ppt[pti] & 0xFFFFF000;
-            void *kp = vmm_kmap(pframe);
-            uint32_t pval = *(uint32_t *)((uint8_t *)kp + off);
-            vmm_kunmap(kp);
-            DBGK("task", "fork: parent stack[0x%lx] = 0x%lx frame=0x%lx\n", uesp, pval, pframe);
-        }
-    }
-
-    /* Verify child trap frame EIP just before scheduling */
-    {
-        struct trap_frame *cf = (struct trap_frame *)child->esp;
-        DBGK("task", "fork: pre-sched child_frame eip=0x%lx ds=0x%lx esp=0x%lx\n",
-             (uint32_t)cf->eip, (uint32_t)cf->ds, (uint32_t)cf->esp);
-    }
 
     /* Insert child into scheduler after parent */
     insert_task_sorted(child, child->prio_s);

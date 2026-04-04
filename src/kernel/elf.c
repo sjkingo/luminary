@@ -27,14 +27,9 @@ static uint32_t resolve_uva(uint32_t dir_phys, uint32_t vaddr,
     uint32_t pdi = vaddr >> 22;
     uint32_t pti = (vaddr >> 12) & 0x3FF;
 
-    DBGK("elf", "  resolve_uva: dir_phys=0x%lx vaddr=0x%lx pdi=%lu pti=%lu\n",
-         dir_phys, vaddr, pdi, pti);
     uint32_t pde = ((uint32_t *)dir_phys)[pdi];
-    DBGK("elf", "  resolve_uva: pde=0x%lx\n", pde);
     uint32_t pt_phys = pde & 0xFFFFF000;
-    DBGK("elf", "  resolve_uva: pt_phys=0x%lx -- about to read pte\n", pt_phys);
     uint32_t pte = ((uint32_t *)pt_phys)[pti];
-    DBGK("elf", "  resolve_uva: pte=0x%lx\n", pte);
     uint32_t frame = pte & 0xFFFFF000;
 
     *out_frame = frame;
@@ -109,13 +104,9 @@ uint32_t elf_load(const void *elf_data, uint32_t elf_size, uint32_t page_dir,
         uint32_t seg_start = phdr->p_vaddr & 0xFFFFF000;
         uint32_t seg_end = (phdr->p_vaddr + phdr->p_memsz + PAGE_SIZE - 1) & 0xFFFFF000;
 
-        DBGK("elf", "segment %d: vaddr=0x%lx memsz=0x%lx filesz=0x%lx flags=0x%lx\n",
-             i, phdr->p_vaddr, phdr->p_memsz, phdr->p_filesz, (uint32_t)phdr->p_flags);
-
         for (uint32_t vaddr = seg_start; vaddr < seg_end; vaddr += PAGE_SIZE) {
             uint32_t frame = pmm_alloc_frame();
 
-            /* Map frame temporarily into kernel virtual space for zeroing/copy */
             void *kp = vmm_kmap(frame);
             memset(kp, 0, PAGE_SIZE);
 
@@ -137,7 +128,6 @@ uint32_t elf_load(const void *elf_data, uint32_t elf_size, uint32_t page_dir,
 
             vmm_kunmap(kp);
             vmm_map_page_in(page_dir, vaddr, frame, flags);
-            DBGK("elf", "  mapped vaddr=0x%lx -> frame=0x%lx\n", vaddr, frame);
         }
     }
 
@@ -153,7 +143,7 @@ uint32_t elf_load(const void *elf_data, uint32_t elf_size, uint32_t page_dir,
      * [USER_STACK_TOP .. USER_STACK_TOP+PAGE_SIZE), page 1 covers
      * [USER_STACK_TOP-PAGE_SIZE .. USER_STACK_TOP), etc.
      * The highest usable address is then USER_STACK_TOP+PAGE_SIZE-4. */
-    uint32_t stack_top = USER_STACK_TOP + PAGE_SIZE; /* one past top page base */
+    uint32_t stack_top = USER_STACK_TOP + PAGE_SIZE;
     for (int i = 0; i < USER_STACK_PAGES; i++) {
         uint32_t stack_frame = pmm_alloc_frame();
         void *kp = vmm_kmap(stack_frame);
@@ -162,13 +152,9 @@ uint32_t elf_load(const void *elf_data, uint32_t elf_size, uint32_t page_dir,
         uint32_t stack_vaddr = stack_top - (uint32_t)(i + 1) * PAGE_SIZE;
         vmm_map_page_in(page_dir, stack_vaddr, stack_frame,
                         PTE_PRESENT | PTE_WRITE | PTE_USER);
-        DBGK("elf", "  stack[%d] vaddr=0x%lx -> frame=0x%lx\n", i, stack_vaddr, stack_frame);
     }
 
     /* Build argc/argv on the user stack.
-     * We write into a kernel-accessible scratch buffer, then copy it
-     * to the stack frames we just allocated.
-     *
      * Layout (stack grows down, ESP ends up pointing at the dummy retaddr):
      *   [strings area]   <- argv string data packed here
      *   [argv[0..argc-1] pointers + NULL terminator]
@@ -178,58 +164,40 @@ uint32_t elf_load(const void *elf_data, uint32_t elf_size, uint32_t page_dir,
      * _start is compiled as a normal C function (push ebp / mov ebp,esp),
      * so after the prologue: [ebp+8]=argc, [ebp+0xc]=argv.
      */
-
-    /* Use a 4KB scratch buffer (enough for 16 args + strings) */
     static uint8_t scratch[4096];
-    uint32_t scratch_top = sizeof(scratch);  /* offset from base, grows down */
+    uint32_t scratch_top = sizeof(scratch);
 
-    /* Copy strings into scratch from the top */
-    uint32_t str_offsets[32]; /* offsets within scratch where each string lands */
+    uint32_t str_offsets[32];
     int n = (argc > 32) ? 32 : argc;
     for (int i = n - 1; i >= 0; i--) {
         const char *s = argv[i];
         uint32_t slen = 0;
         while (s[slen]) slen++;
-        slen++; /* include NUL */
+        slen++;
         scratch_top -= slen;
-        scratch_top &= ~3u; /* align to 4 bytes */
+        scratch_top &= ~3u;
         memcpy(scratch + scratch_top, s, slen);
         str_offsets[i] = scratch_top;
     }
 
-    /* Compute where the scratch buffer will land in user virtual space.
-     * scratch[scratch_top..sizeof(scratch)] is the used portion. */
     uint32_t scratch_used = (uint32_t)sizeof(scratch) - scratch_top;
     uint32_t strings_vaddr = stack_top - scratch_used;
     strings_vaddr &= ~3u;
 
-    /* argv pointer array below the strings, then argv_ptr, argc, dummy retaddr.
-     * _start is a normal C function: [ebp+8]=argc, [ebp+0xc]=argv (char **).
-     * argv_ptr holds the address of the argv[] array so _start gets char **. */
     uint32_t argv_vaddr = strings_vaddr - (uint32_t)(n + 1) * 4;
     argv_vaddr &= ~3u;
     uint32_t argv_ptr_vaddr = argv_vaddr - 4;
     uint32_t argc_vaddr = argv_ptr_vaddr - 4;
     uint32_t retaddr_vaddr = argc_vaddr - 4;
 
-    DBGK("elf", "stack_top=0x%lx strings_vaddr=0x%lx argv_vaddr=0x%lx "
-         "argv_ptr_vaddr=0x%lx argc_vaddr=0x%lx retaddr_vaddr=0x%lx\n",
-         stack_top, strings_vaddr, argv_vaddr, argv_ptr_vaddr,
-         argc_vaddr, retaddr_vaddr);
-
-    /* Helper macro: write one uint32_t to user vaddr through page_dir */
 #define WRITE_USER32(dir_phys_arg, vaddr_arg, val_arg) do { \
     uint32_t _frame, _off; \
-    DBGK("elf", "WRITE_USER32: vaddr=0x%lx val=0x%lx\n", \
-         (uint32_t)(vaddr_arg), (uint32_t)(val_arg)); \
     resolve_uva((dir_phys_arg), (vaddr_arg), &_frame, &_off); \
     void *_kp = vmm_kmap(_frame); \
     *(uint32_t *)((uint8_t *)_kp + _off) = (uint32_t)(val_arg); \
     vmm_kunmap(_kp); \
 } while(0)
 
-    /* Write the string data to the user stack pages */
-    DBGK("elf", "writing strings: scratch_used=%lu\n", scratch_used);
     if (scratch_used > 0) {
         uint32_t remaining = scratch_used;
         uint32_t src_off = scratch_top;
@@ -237,7 +205,6 @@ uint32_t elf_load(const void *elf_data, uint32_t elf_size, uint32_t page_dir,
 
         while (remaining > 0) {
             uint32_t frame, off;
-            DBGK("elf", "string copy: dst_virt=0x%lx\n", dst_virt);
             resolve_uva(page_dir, dst_virt & 0xFFFFF000, &frame, &off);
             uint32_t page_off = dst_virt & 0xFFF;
 
@@ -253,20 +220,17 @@ uint32_t elf_load(const void *elf_data, uint32_t elf_size, uint32_t page_dir,
         }
     }
 
-    /* Write argv pointers */
     for (int i = 0; i < n; i++) {
         uint32_t str_uva = strings_vaddr + (str_offsets[i] - scratch_top);
         WRITE_USER32(page_dir, argv_vaddr + (uint32_t)i * 4, str_uva);
     }
-    WRITE_USER32(page_dir, argv_vaddr + (uint32_t)n * 4, 0); /* NULL terminator */
-    WRITE_USER32(page_dir, argv_ptr_vaddr, argv_vaddr);       /* char **argv for _start */
+    WRITE_USER32(page_dir, argv_vaddr + (uint32_t)n * 4, 0);
+    WRITE_USER32(page_dir, argv_ptr_vaddr, argv_vaddr);
     WRITE_USER32(page_dir, argc_vaddr, (uint32_t)n);
-    WRITE_USER32(page_dir, retaddr_vaddr, 0); /* dummy return address */
+    WRITE_USER32(page_dir, retaddr_vaddr, 0);
 
 #undef WRITE_USER32
 
     *out_sp = retaddr_vaddr;
-
-    DBGK("elf", "entry=0x%lx sp=0x%lx argc=%d\n", ehdr->e_entry, retaddr_vaddr, n);
     return ehdr->e_entry;
 }

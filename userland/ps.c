@@ -90,7 +90,7 @@ static void print_children(unsigned int ppid, const char *prefix, int depth)
         print_row(&tasks[idx], prefix);
 
         char newpfx[64];
-        snprintf(newpfx, sizeof(newpfx), "%s  ", prefix);
+        snprintf(newpfx, sizeof(newpfx), "%s ", prefix);
         print_children(tasks[idx].pid, newpfx, depth + 1);
     }
 }
@@ -136,7 +136,7 @@ int main(int argc, char **argv)
         if (tasks[i].ppid == 0 && !tasks[i].printed) {
             tasks[i].printed = 1;
             print_row(&tasks[i], "");
-            print_children(tasks[i].pid, "  ", 1);
+            print_children(tasks[i].pid, " ", 1);
         }
     }
 

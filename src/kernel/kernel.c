@@ -19,7 +19,6 @@
 #include "kernel/dev.h"
 #include "kernel/initrd.h"
 #include "pci/pci.h"
-#include "version.h"
 
 struct multiboot_info *mb_info;
 struct kernel_time timekeeper;
@@ -61,7 +60,7 @@ static void print_startup_banner(void)
     printk("Luminary OS\n");
     if (!fbdev_is_ready())
         reset_color();
-    printk(" /       \\   Version %s\n", KERNEL_VERSION);
+    printk(" /       \\  \n");
     printk("|         |  \n");
     printk("|         |  Built with: ");
     print_defines();

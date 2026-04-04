@@ -292,7 +292,6 @@ uint32_t vmm_clone_page_dir(uint32_t src_dir_phys)
             continue;
 
         uint32_t src_pt_phys = src_dir[pdi] & 0xFFFFF000;
-        DBGK("vmm", "clone: pdi=%lu src_pt_phys=0x%lx\n", pdi, src_pt_phys);
         uint32_t *src_pt = (uint32_t *)src_pt_phys;
 
         /* Allocate a private page table for the child (ZONE_LOW, directly accessible) */
@@ -306,8 +305,6 @@ uint32_t vmm_clone_page_dir(uint32_t src_dir_phys)
 
             uint32_t frame = src_pt[pti] & 0xFFFFF000;
             uint32_t flags = src_pt[pti] & 0xFFF;
-
-            DBGK("vmm", "clone: pdi=%lu pti=%lu frame=0x%lx\n", pdi, pti, frame);
 
             if (flags & PTE_WRITE) {
                 /* Writable page: mark both parent and child CoW, clear write bit.
