@@ -29,3 +29,4 @@ int            blkdev_register(struct blkdev *dev);
 struct blkdev *blkdev_find(const char *name);
 struct blkdev *blkdev_get(uint32_t index);
 void           blkdev_register_devnode(struct blkdev *dev);
+void           blkdev_register_all_devnodes(void);

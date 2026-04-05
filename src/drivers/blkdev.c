@@ -164,9 +164,9 @@ static const blkdev_ctrl_op_t  slot_ctrl[BLKDEV_MAX] = {
     blkdev_ctrl_op_4, blkdev_ctrl_op_5, blkdev_ctrl_op_6, blkdev_ctrl_op_7,
 };
 
-void blkdev_register_devnode(struct blkdev *dev)
+static void blkdev_register_devnode_slot(uint32_t slot)
 {
-    uint32_t slot = blkdev_count - 1;
+    struct blkdev *dev = blkdev_table[slot];
 
     struct vfs_node *n = vfs_register_dev(
         dev->name,
@@ -175,12 +175,21 @@ void blkdev_register_devnode(struct blkdev *dev)
         slot_write[slot],
         slot_ctrl[slot]);
 
-    if (!n) {
-        printk(MODULE "failed to create /dev/%s\n", dev->name);
-        return;
-    }
+    if (!n) return;
 
     n->size = dev->sector_count * BLKDEV_SECTOR_SIZE;
     DBGK("/dev/%s registered: %ld sectors, node size %ld bytes\n",
          dev->name, dev->sector_count, n->size);
+}
+
+void blkdev_register_devnode(struct blkdev *dev)
+{
+    (void)dev;
+    blkdev_register_devnode_slot(blkdev_count - 1);
+}
+
+void blkdev_register_all_devnodes(void)
+{
+    for (uint32_t i = 0; i < blkdev_count; i++)
+        blkdev_register_devnode_slot(i);
 }

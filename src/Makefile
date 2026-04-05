@@ -22,6 +22,7 @@ include cpu/Makefile.mk
 include drivers/Makefile.mk
 include lib/Makefile.mk
 include pci/Makefile.mk
+include fs/Makefile.mk
 
 .PHONY: all
 all: $(KERNEL_BIN)

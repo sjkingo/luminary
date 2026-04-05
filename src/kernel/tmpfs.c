@@ -30,8 +30,9 @@ static void tmpfs_free_tree(struct vfs_node *n)
     vfs_free_node(n);
 }
 
-static int tmpfs_mount(struct vfs_node *mountpoint)
+static int tmpfs_mount(struct vfs_node *mountpoint, void *device)
 {
+    (void)device;
     struct vfs_node *root = vfs_alloc_node();
     if (!root) return -1;
     strncpy(root->name, mountpoint->name, VFS_NAME_MAX - 1);

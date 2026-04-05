@@ -273,6 +273,13 @@ static inline int mount(const char *fstype, const char *path)
     return syscall2(SYS_MOUNT, (unsigned int)fstype, (unsigned int)path);
 }
 
+/* mount_dev: mount block-device-backed filesystem; device is e.g. "/dev/hda1" */
+static inline int mount_dev(const char *fstype, const char *device, const char *path)
+{
+    return syscall3(SYS_MOUNT, (unsigned int)fstype, (unsigned int)path,
+                    (unsigned int)device);
+}
+
 /* umount: unmount filesystem at path; returns 0 or -1 */
 static inline int umount(const char *path)
 {

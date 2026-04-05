@@ -35,8 +35,10 @@ struct vfs_node;
  * NULL ops fall back to the built-in VFS tree behaviour. */
 struct fs_ops {
     /* Called when this fs is mounted at mountpoint. Should initialise the
-     * subtree rooted at mountpoint->mounted_root. Returns 0 on success. */
-    int (*mount)(struct vfs_node *mountpoint);
+     * subtree rooted at mountpoint->mounted_root. device is driver-specific
+     * context (e.g. struct blkdev *); NULL for memory-only filesystems.
+     * Returns 0 on success. */
+    int (*mount)(struct vfs_node *mountpoint, void *device);
 
     /* Called when the fs is unmounted. Should free all nodes in the subtree
      * below mountpoint->mounted_root, then clear mounted_root. Returns 0 on
@@ -113,7 +115,7 @@ void vfs_fs_register(const char *fstype, struct fs_ops *ops);
 /* Mount filesystem fstype at path. path must name an existing directory.
  * Calls fs_ops->mount, records the mount, and updates the mount table.
  * Returns 0 on success, -1 on error. */
-int vfs_do_mount(const char *path, const char *fstype);
+int vfs_do_mount(const char *path, const char *fstype, void *device);
 
 /* Unmount the filesystem mounted at path. Calls fs_ops->umount.
  * Returns 0 on success, -1 if nothing is mounted there or unmount refused. */

@@ -15,11 +15,11 @@
 #include "kernel/heap.h"
 #include "kernel/vmm.h"
 #include "kernel/vfs.h"
-#include "kernel/initrd.h"
 #include "boot/multiboot.h"
 #include "cpu/traps.h"
 #include "cpu/x86.h"
 #include "drivers/keyboard.h"
+#include "drivers/blkdev.h"
 
 /* Linux open(2) flag bits and fcntl(2) constants */
 #define O_RDONLY   0
@@ -284,10 +284,17 @@ static int sys_exec(struct trap_frame *frame)
     }
     kargv[argc] = NULL;
 
-    uint32_t elf_size = 0;
-    const void *elf_data = initrd_get_file(path, &elf_size);
-    if (!elf_data) {
+    struct vfs_node *exec_node = vfs_lookup(path);
+    if (!exec_node || !(exec_node->flags & VFS_FILE)) {
         printk("exec: '%s' not found\n", path);
+        return -1;
+    }
+    uint32_t elf_size = exec_node->size;
+    void *elf_data = kmalloc(elf_size);
+    if (!elf_data) return -1;
+    if (vfs_read(exec_node, 0, elf_size, elf_data) != elf_size) {
+        kfree(elf_data);
+        printk("exec: '%s' short read\n", path);
         return -1;
     }
 
@@ -299,40 +306,46 @@ static int sys_exec(struct trap_frame *frame)
     if (parse_shebang((const char *)elf_data, elf_size,
                       shebang_interp, sizeof(shebang_interp),
                       shebang_arg,    sizeof(shebang_arg))) {
-        /* resolve interpreter */
+        kfree(elf_data);
+
         char interp_resolved[VFS_PATH_MAX];
         if (!vfs_resolve("/", shebang_interp, interp_resolved)) {
             printk("exec: shebang interpreter '%s' not found\n", shebang_interp);
             return -1;
         }
-        uint32_t interp_size = 0;
-        const void *interp_data = initrd_get_file(interp_resolved, &interp_size);
-        if (!interp_data) {
+        struct vfs_node *interp_node = vfs_lookup(interp_resolved);
+        if (!interp_node || !(interp_node->flags & VFS_FILE)) {
             printk("exec: shebang interpreter '%s' not found\n", interp_resolved);
             return -1;
         }
+        uint32_t interp_size = interp_node->size;
+        void *interp_data = kmalloc(interp_size);
+        if (!interp_data) return -1;
+        if (vfs_read(interp_node, 0, interp_size, interp_data) != interp_size) {
+            kfree(interp_data);
+            return -1;
+        }
 
-        /* build new argv: [interp, arg?, script, original_argv[1]...] */
         static const char *sargv[32];
         int sargc = 0;
         sargv[sargc++] = shebang_interp;
         if (shebang_arg[0])
             sargv[sargc++] = shebang_arg;
-        /* script path: copy resolved into shebang_script so it lives in static storage */
         memcpy(shebang_script, resolved, strlen(resolved) + 1);
         sargv[sargc++] = shebang_script;
-        /* append original argv[1..] (skip argv[0] which was the script name) */
         for (int i = 1; i < argc && sargc < 31; i++)
             sargv[sargc++] = kargv[i];
         sargv[sargc] = NULL;
 
         int r = task_exec(interp_data, interp_size, frame, sargc, sargv);
+        kfree(interp_data);
         if (r == 0)
             cpu_reset_fault_counter();
         return r;
     }
 
     int r = task_exec(elf_data, elf_size, frame, argc, kargv);
+    kfree(elf_data);
     if (r == 0)
         cpu_reset_fault_counter();
     return r;
@@ -697,13 +710,28 @@ static int sys_rename(struct trap_frame *frame)
 
 static int sys_mount(struct trap_frame *frame)
 {
-    /* EBX = fstype string, ECX = mountpoint path */
+    /* EBX = fstype string, ECX = mountpoint path, EDX = device path (or 0) */
     const char *fstype = (const char *)frame->ebx;
     const char *path   = (const char *)frame->ecx;
+    const char *devarg = (const char *)frame->edx;
+
     if (!user_access_ok(fstype, 1)) return -1;
     char resolved[VFS_PATH_MAX];
     if (!resolve_path(path, resolved)) return -1;
-    return vfs_do_mount(resolved, fstype);
+
+    void *device = NULL;
+    if (devarg && user_access_ok(devarg, 1)) {
+        const char *devname = devarg;
+        if (devname[0]=='/' && devname[1]=='d' && devname[2]=='e' &&
+            devname[3]=='v' && devname[4]=='/') devname += 5;
+        device = blkdev_find(devname);
+        if (!device) {
+            printk("mount: device '%s' not found\n", devarg);
+            return -1;
+        }
+    }
+
+    return vfs_do_mount(resolved, fstype, device);
 }
 
 static int sys_umount(struct trap_frame *frame)

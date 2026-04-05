@@ -126,7 +126,7 @@ void vfs_mount(const char *path, const char *fstype, struct vfs_node *root)
     m->mountpoint = NULL;
 }
 
-int vfs_do_mount(const char *path, const char *fstype)
+int vfs_do_mount(const char *path, const char *fstype, void *device)
 {
     struct fs_ops *ops = fs_lookup_ops(fstype);
     if (!ops) {
@@ -148,7 +148,7 @@ int vfs_do_mount(const char *path, const char *fstype)
         return -1;
     }
 
-    if (ops->mount(mp) != 0)
+    if (ops->mount(mp, device) != 0)
         return -1;
 
     struct vfs_mount *m = &mount_table[mount_count++];
@@ -669,10 +669,8 @@ struct vfs_node *vfs_register_dev(const char *name, uint32_t inode,
     int32_t  (*control_op)(struct vfs_node *, uint32_t, void *))
 {
     struct vfs_node *dev_dir = vfs_lookup("/dev");
-    if (!dev_dir) {
-        printk(MODULE "vfs_register_dev: /dev not found\n");
+    if (!dev_dir)
         return NULL;
-    }
 
     struct vfs_node *n = vfs_alloc_node();
     if (!n) {

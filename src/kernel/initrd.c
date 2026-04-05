@@ -227,8 +227,9 @@ static void initrd_free_tree(struct vfs_node *n)
     vfs_free_node(n);
 }
 
-static int initrd_mount(struct vfs_node *mountpoint)
+static int initrd_mount(struct vfs_node *mountpoint, void *device)
 {
+    (void)device;
     if (!initrd_data) return -1;
     uint32_t file_count = 0;
     struct vfs_node *root = initrd_parse(initrd_data, initrd_data_size, &file_count);

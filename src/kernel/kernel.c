@@ -24,6 +24,7 @@
 #include "kernel/cmdline.h"
 #include "kernel/initrd.h"
 #include "kernel/tmpfs.h"
+#include "fs/ext2.h"
 #include "pci/pci.h"
 
 struct multiboot_info *mb_info;
@@ -195,7 +196,7 @@ void kernel_main(struct multiboot_info *mb, uint32_t start, uint32_t stack, uint
         bare_root->parent  = bare_root;
         vfs_set_root(bare_root);
 
-        if (vfs_do_mount("/", "initrd") != 0)
+        if (vfs_do_mount("/", "initrd", NULL) != 0)
             panic("initrd: failed to mount cpio archive");
 
         printk("initrd: rootfs mounted at / (%ld bytes)\n", initrd_size);
@@ -210,7 +211,7 @@ void kernel_main(struct multiboot_info *mb, uint32_t start, uint32_t stack, uint
             tmp_dir->flags   = VFS_DIR;
             vfs_add_child(bare_root->mounted_root, tmp_dir);
         }
-        if (vfs_do_mount("/tmp", "tmpfs") != 0)
+        if (vfs_do_mount("/tmp", "tmpfs", NULL) != 0)
             panic("initrd: failed to mount /tmp as tmpfs");
 
         init_devfs();
@@ -236,9 +237,6 @@ void kernel_main(struct multiboot_info *mb, uint32_t start, uint32_t stack, uint
         bare_root->parent  = bare_root;
         vfs_set_root(bare_root);
 
-        init_devfs();
-        init_dev_sys();
-        init_dev_x();
         init_ata();
 
         /* Strip /dev/ prefix if present */
@@ -255,7 +253,36 @@ void kernel_main(struct multiboot_info *mb, uint32_t start, uint32_t stack, uint
         printk("root: device %s found (%ld sectors)\n",
                bd->name, bd->sector_count);
 
-        panic("root: ext2 driver not yet implemented - cannot mount rootfs");
+        init_ext2();
+        if (vfs_do_mount("/", "ext2", bd) != 0)
+            panic("root: failed to mount ext2 rootfs");
+
+        printk("ext2: rootfs mounted at / (%s)\n", bd->name);
+
+        init_devfs();
+        init_dev_sys();
+        init_dev_x();
+        blkdev_register_all_devnodes();
+        init_tmpfs();
+        if (!vfs_lookup("/tmp")) {
+            struct vfs_node *tmp_dir = vfs_alloc_node();
+            if (!tmp_dir) panic("root: out of VFS nodes for /tmp");
+            tmp_dir->name[0] = 't'; tmp_dir->name[1] = 'm';
+            tmp_dir->name[2] = 'p'; tmp_dir->name[3] = '\0';
+            tmp_dir->flags = VFS_DIR;
+            vfs_add_child(bare_root->mounted_root, tmp_dir);
+        }
+        if (vfs_do_mount("/tmp", "tmpfs", NULL) != 0)
+            panic("root: failed to mount /tmp as tmpfs");
+
+        struct vfs_node *init_node = vfs_lookup("/bin/init");
+        if (!init_node) panic("root: /bin/init not found on ext2 rootfs");
+        uint8_t *init_buf = kmalloc(init_node->size);
+        if (!init_buf) panic("root: out of memory loading /bin/init");
+        uint32_t init_nr = vfs_read(init_node, 0, init_node->size, init_buf);
+        if (init_nr != init_node->size) panic("root: short read on /bin/init");
+        spawn_init(init_buf, init_node->size);
+        /* init_buf intentionally not freed — spawn_init/respawn_init reuse it */
     }
 
     startup_complete = true;
