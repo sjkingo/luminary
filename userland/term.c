@@ -310,8 +310,12 @@ int main(int argc, char **argv)
             }
         }
 
-        if (n == 0)
-            yield();
+        if (n == 0) {
+            if (task_done(child))
+                running = 0;
+            else
+                yield();
+        }
     }
 
     vfs_close(stdin_wr);

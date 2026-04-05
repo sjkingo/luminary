@@ -2,3 +2,4 @@
 echo "Starting GUI.."
 wallpaper /usr/share/wallpaper/moon.bmp
 term
+echo "Exiting GUI.."

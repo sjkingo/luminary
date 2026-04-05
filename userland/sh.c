@@ -257,7 +257,8 @@ static int split_pipe(char *line, char *segs[], int max_segs)
 /* cd is the only command that truly must stay in-process */
 static int must_inprocess(const char *cmd)
 {
-    return strcmp(cmd, "cd") == 0;
+    return strcmp(cmd, "cd")   == 0 ||
+           strcmp(cmd, "exit") == 0;
 }
 
 /* Run a built-in command with the current fd table already set up. */
@@ -284,6 +285,8 @@ static void run_builtin(char *argv[], int argc)
         printf("dereferencing NULL...\n");
         volatile int *p = (volatile int *)0x0;
         (void)*p;
+    } else if (strcmp(cmd, "exit") == 0) {
+        exit(argv[1] ? atoi(argv[1]) : 0);
     }
 }
 
@@ -295,7 +298,8 @@ static int is_builtin(const char *cmd)
             strcmp(cmd, "getpid") == 0 ||
             strcmp(cmd, "pwd")    == 0 ||
             strcmp(cmd, "cd")     == 0 ||
-            strcmp(cmd, "crash")  == 0);
+            strcmp(cmd, "crash")  == 0 ||
+            strcmp(cmd, "exit")   == 0);
 }
 
 /* Resolve an external command to its full path.
