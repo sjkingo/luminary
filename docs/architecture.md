@@ -45,14 +45,14 @@ docs/
 
 | Target | Description |
 |--------|-------------|
-| `make` | Build GRUB2 ISO |
-| `make qemu` | Build ISO + disk image, boot from CD-ROM with `-hda` attached (GRUB menu selects initrd or disk boot) |
-| `make disk` | Create (or force-recreate) a blank 100MB MBR-partitioned disk image at `_build/disk.img` via `tools/mkdisk.py` |
-| `make debug` | Same as `qemu` but with GDB stub (`-s -S`) |
+| `make` | Build GRUB2 ISO + ext2 disk image |
+| `make qemu` | Build everything, launch QEMU (`-m 512`, serial → `/tmp/luminary.log`, prints log on exit) |
+| `make qemu-debug` | Same as `qemu` but with GDB stub (`-s -S`) |
 | `make gdb` | Connect GDB to running QEMU |
+| `make ext2fs` | Create ext2 disk image at `_build/disk.img` (only if absent) |
 | `make clean` | Clean build artifacts |
 
-`_build/disk.img` is created automatically on first `make qemu` if it does not exist. `make disk` force-recreates it. The disk image has one MBR partition (type 0x83, LBA 2048+202752 sectors); partition table is written by `tools/mkdisk.py`.
+`_build/disk.img` is created automatically by `make` / `make ext2fs` if it does not exist. The disk image is 100MB (`204800` sectors), MBR-partitioned with one partition (type 0x83, LBA 2048+202752 sectors) formatted as ext2 (1KB blocks) and populated from `_build/rootfs/`. Partition table is written by `tools/mkdisk.py`; formatting by `mke2fs`.
 
 ## Memory Model
 
@@ -91,7 +91,7 @@ Tasks are created with per-task 16KB kernel stacks. Each stack is allocated by `
 
 ## Heap
 
-`kmalloc`/`kfree` are backed by a slab allocator with 8 size classes: 32, 64, 128, 256, 512, 1024, 2048, 4096 bytes. Each class maintains up to 64 4KB PMM pages; within each page, slots are tracked by a 128-bit bitmap. Allocations larger than 4096 bytes go to an overflow list (up to 128 entries) backed by `vmm_alloc_pages`. With `-DDEBUG`, each alloc/free prints the call site and slab class to serial.
+`kmalloc`/`kfree` are backed by a slab allocator with 8 size classes: 32, 64, 128, 256, 512, 1024, 2048, 4096 bytes. Each class maintains up to 64 4KB PMM pages; within each page, slots are tracked by a 128-bit bitmap. Allocations larger than 4096 bytes go to an overflow list (up to 128 entries) backed by `vmm_alloc_pages`. Freed overflow blocks are held in a small large-object cache (8 slots, keyed by frame count) so repeated alloc/free of the same large size avoids PTE churn. With `-DDEBUG`, each alloc/free prints the call site and slab class to serial.
 
 Init (PID 1) is loaded from the initrd and respawned automatically if killed — analogous to Unix PID 1. `task_fork()` clones the address space with copy-on-write: writable pages are marked read-only and shared; a page-fault on either side triggers a copy (`vmm_cow_fault`). `task_exec()` replaces the calling task's address space in-place. `waitpid(pid, &status, flags)` supports `WNOHANG` and propagates the child's exit code via `exit_status` in `struct task`.
 
@@ -148,7 +148,7 @@ stat /dev/hda       # shows disk size in bytes
 
 `ioctl(fd, BLKDEV_IOCTL_GETSIZE, &size)` fills a `uint64_t` with the total byte size. `BLKDEV_IOCTL_GETSECTSZ` returns 512.
 
-QEMU: `make qemu` boots the GRUB2 ISO with the disk image attached as `-hda`. The GRUB menu has two entries: initrd boot and disk boot (`root=/dev/hda1`). The PIIX3 IDE controller in QEMU maps to the standard ports (0x1F0/0x3F6) without any PCI BAR programming.
+QEMU: `make qemu` boots the GRUB2 ISO (`-cdrom`) with the ext2 disk image attached as a drive (`-drive file=disk.img,index=0,media=disk`). The GRUB menu has two entries: initrd boot and disk boot (`root=/dev/hda1`). The PIIX3 IDE controller in QEMU maps to the standard ports (0x1F0/0x3F6) without any PCI BAR programming.
 
 ## GUI
 
@@ -163,11 +163,24 @@ Shell builtins: `help`, `echo`, `getpid`, `pwd`, `cd`, `exit`, `jobs`, `fg [n]`,
 Background jobs (`&`): a trailing `&` on any command line (including pipelines) forks all children as normal but skips the foreground wait loop. The job is stored in a static table (8 slots). Finished jobs are reaped and reported before each prompt. `fg [n]` brings job n (or the most recent) to the foreground and enters the normal Ctrl+C-interruptible wait loop. Ctrl+C at the prompt does not affect background jobs — only the current foreground pipeline is killed.
 
 Userspace programs:
-- `/bin/gui` — GUI demo app, opens 4 windows including a console
+- `/bin/init` — PID 1; spawns `/bin/sh` and respawns on exit
+- `/bin/sh` — shell with pipelines, I/O redirection, background jobs
+- `/bin/gui` — GUI demo app, opens windows including a console
 - `/bin/term` — GUI terminal emulator; forks `/bin/sh` and connects it via pipes, rendering output into a window and routing keypresses back to the shell's stdin
 - `/bin/ps` — process list with tree view, per-task CPU% (1s rolling window), state, and elapsed time; summary line shows total CPU%, idle%, and uptime
 - `/bin/uptime` — prints system uptime as `h:mm:ss`
 - `/bin/busy` — infinite loop for CPU load testing
+- `/bin/wallpaper` — sets the desktop background from a 24/32bpp BMP file
+- `/bin/ls` — list directory contents
+- `/bin/cat` — print file contents to stdout
+- `/bin/mv` — move/rename files
+- `/bin/mkdir` — create directories
+- `/bin/stat` — print file metadata
+- `/bin/kill` — send kill signal to a pid
+- `/bin/halt` — shut down the system
+- `/bin/reboot` — reboot via PS/2 controller reset
+- `/bin/mount` — mount a filesystem (`mount fstype path` or `mount fstype device path`)
+- `/bin/umount` — unmount a filesystem
 
 All userspace programs are ELF32 binaries built with the same `i686-elf-gcc` toolchain and a freestanding libc.
 
