@@ -1,6 +1,6 @@
 # Luminary OS — GUI Subsystem
 
-The GUI is a kernel-mode compositor and window manager implemented in `src/kernel/gui.c`. It runs as a kernel task at priority 9 and communicates with userspace via the window syscalls (SYS_WIN_*).
+The GUI is a kernel-mode compositor and window manager implemented in `src/kernel/gui.c`. It runs as a kernel task at priority 9 and communicates with userspace via `SYS_IOCTL` on `/dev/x`.
 
 ## Three-Buffer Rendering
 
@@ -89,7 +89,7 @@ Each `struct window` stores `owner_pid` — the pid of the task that called `gui
 
 ## Public API
 
-Called from syscall handlers in `syscall.c`:
+Called from `x_control_op` in `gui.c` (ioctl dispatch) and other kernel subsystems:
 
 ```c
 void     init_gui(void);
@@ -100,8 +100,8 @@ void     gui_window_draw_rect(int id, int x, int y, int w, int h, uint32_t color
 void     gui_window_draw_text(int id, int x, int y, const char *str, uint32_t fg, uint32_t bg);
 void     gui_window_flip(int id);
 int      gui_window_poll_event(int id, struct gui_event *ev);
-void     gui_window_get_size(int id, int *cw, int *ch);
-int      gui_has_windows(void);
+int      gui_window_get_size(int id, uint32_t *cw, uint32_t *ch);
+bool     gui_has_windows(void);
 void     gui_destroy_windows_for_pid(uint32_t pid);
 ```
 

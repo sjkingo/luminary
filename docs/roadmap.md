@@ -13,7 +13,7 @@
 - ELF32 loader
 - CPIO initrd, VFS layer, path-based file access
 - fork/exec/waitpid process model
-- Syscall interface (`int 0x80`, 39 syscalls including `mkdir`/`unlink`, `getppid`, `waitpid` with WNOHANG and exit-status propagation)
+- Syscall interface (`int 0x80`, 25 syscalls including `mkdir`/`unlink`, `getppid`, `waitpid` with WNOHANG and exit-status propagation; device-specific operations via `SYS_IOCTL` on `/dev/x` and `/dev/sys`)
 - PS/2 keyboard driver with ring buffer
 - PS/2 mouse driver (IRQ12, absolute position tracking)
 - GUI compositor: three-buffer rendering, window management, drag, resize, close, statusbar/taskbar, focus-follows-mouse, resize cursor sprites, console window
@@ -30,7 +30,7 @@
 - GUI terminal emulator (`/bin/term`): userland process that creates a window, forks `/bin/sh`, connects it via pipes, and renders output; multiple term instances can run simultaneously
 - Ctrl+C signal interrupts: keyboard driver emits `\x03`; shell uses interruptible wait (`task_done()` + `read_nb()` + `yield()`) to detect and kill children
 - `task_death_hook`: registered callback fired by `task_kill()` for per-task resource cleanup; GUI uses it to destroy orphaned windows
-- Kernel stack guard pages: each task's 8KB kernel stack has an unmapped guard page immediately below it; overflow triggers a page fault rather than silent corruption
+- Kernel stack guard pages: each task's 16KB kernel stack has an unmapped guard page immediately below it; overflow triggers a page fault rather than silent corruption
 
 ## What Luminary Needs
 
@@ -51,8 +51,8 @@
 
 4. **Back buffer allocation failure**: `pmm_alloc_contiguous(n)` allocates the back buffer from ZONE_LOW. If ZONE_LOW is exhausted (unlikely at init time), the GUI falls back to drawing directly to `fb_hw` with degraded performance (no partial updates, cursor drawn into scene).
 
-3. **RTL8139 interrupts enabled with no handler**: `init_rtl8139()` enables NIC interrupts (IMR register) but the IRQ handler is a stub (`// TODO`). Network interrupts will fire and be silently dropped by the PIC spurious-IRQ path. No packet I/O is possible.
+5. **RTL8139 interrupts enabled with no handler**: `init_rtl8139()` enables NIC interrupts (IMR register) but the IRQ handler is a stub (`// TODO`). Network interrupts will fire and be silently dropped by the PIC spurious-IRQ path. No packet I/O is possible.
 
-5. **`struct task` offset constants**: `TASK_ESP_OFFSET`, `TASK_PAGE_DIR_OFFSET`, `TASK_STACK_BASE_OFFSET` in `task.h` must match the actual byte layout of `struct task`. Verified with `_Static_assert(offsetof(...))`. If `struct task` is modified, update both the constants and the corresponding defines in `cpu/traps.S`. A `cpu/traps.o: kernel/task.h` dependency in the Makefile ensures `traps.S` is rebuilt when `task.h` changes.
+6. **`struct task` offset constants**: `TASK_ESP_OFFSET`, `TASK_PAGE_DIR_OFFSET`, `TASK_STACK_BASE_OFFSET` in `task.h` must match the actual byte layout of `struct task`. Verified with `_Static_assert(offsetof(...))`. If `struct task` is modified, update both the constants and the corresponding defines in `cpu/traps.S`. A `cpu/traps.o: kernel/task.h` dependency in the Makefile ensures `traps.S` is rebuilt when `task.h` changes.
 
-6. **`kill 1` GPF on respawned init's first fork**: Running `kill 1` kills init and all its children, then respawns init. When the new init forks its first child (sh), the child GPFs at `iret` with DS=0x0000 and zeroed registers. Debug instrumentation confirmed the child's kernel stack trap frame (virt `0xc0a14fbc`, phys `0x1a26000`) is valid immediately after `task_fork` returns, but is fully zeroed by the time the scheduler switches to it (the PTE's dirty bit is set, confirming a write occurred). The PTE mapping itself remains intact. Suspected cause: `vmm_destroy_page_dir` called during the kill cascade decrements CoW refcounts; if a refcount incorrectly hits zero, `pmm_free_frame` is called on a frame still mapped as the child's kstack page, allowing the PMM to hand it out again and zero it (e.g. as a new page table). Investigate `vmm_destroy_page_dir` CoW refcount handling and the interaction with `kstack_alloc` frames.
+7. **`kill 1` GPF on respawned init's first fork**: Running `kill 1` kills init and all its children, then respawns init. When the new init forks its first child (sh), the child GPFs at `iret` with DS=0x0000 and zeroed registers. Debug instrumentation confirmed the child's kernel stack trap frame (virt `0xc0a14fbc`, phys `0x1a26000`) is valid immediately after `task_fork` returns, but is fully zeroed by the time the scheduler switches to it (the PTE's dirty bit is set, confirming a write occurred). The PTE mapping itself remains intact. Suspected cause: `vmm_destroy_page_dir` called during the kill cascade decrements CoW refcounts; if a refcount incorrectly hits zero, `pmm_free_frame` is called on a frame still mapped as the child's kstack page, allowing the PMM to hand it out again and zero it (e.g. as a new page table). Investigate `vmm_destroy_page_dir` CoW refcount handling and the interaction with `kstack_alloc` frames.

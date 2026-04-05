@@ -82,7 +82,7 @@ Priority-based preemptive scheduler with dynamic aging. Tasks have a static prio
 
 ## Process Model
 
-Tasks are created with per-task 8KB kernel stacks. Each stack is allocated by `kstack_alloc()` which maps `(TASK_STACK_SIZE/PAGE_SIZE) + 1` virtual pages and unmaps the first page as a guard page — stack overflow causes a page fault rather than silently corrupting adjacent data. Synthetic trap frames are built on the stack for initial context switching via `trapret`. Context switches swap CR3 (page directory) and update TSS esp0.
+Tasks are created with per-task 16KB kernel stacks. Each stack is allocated by `kstack_alloc()` which maps `(TASK_STACK_SIZE/PAGE_SIZE) + 1` virtual pages and unmaps the first page as a guard page — stack overflow causes a page fault rather than silently corrupting adjacent data. Synthetic trap frames are built on the stack for initial context switching via `trapret`. Context switches swap CR3 (page directory) and update TSS esp0.
 
 ## Heap
 
