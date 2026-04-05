@@ -1,12 +1,13 @@
-/* Slab allocator - replaces the fixed-block heap.
+/* Slab allocator.
  *
  * Size classes: 32, 64, 128, 256, 512, 1024, 2048, 4096 bytes.
  * Each class maintains a list of 4KB PMM pages. Within each page, slots
  * are tracked by a 128-bit bitmap (4 × uint32_t), where bit=0 means free
  * and bit=1 means allocated.
  *
- * For allocations > 4096 bytes, falls back to contiguous PMM frames
- * tracked in a small overflow table.
+ * For allocations > 4096 bytes, falls back to vmm_alloc_pages tracked in
+ * a small overflow table. Freed overflow blocks are held in a large-object
+ * cache so repeated alloc/free of the same size avoids PTE churn.
  *
  * Thread safety: this kernel is single-core and kmalloc/kfree are never
  * called from IRQ context. Callers that need atomicity (e.g. task creation)
@@ -61,6 +62,19 @@ struct overflow_entry {
 };
 
 static struct overflow_entry overflow_table[MAX_OVERFLOW];
+
+/* Large-object cache: instead of unmapping on kfree, keep the virtual range
+ * alive keyed by nframes.  The next kmalloc of the same size returns it
+ * directly — zero PTE writes, zero TLB flushes. */
+#define LARGE_CACHE_MAX 8
+
+struct large_cache_entry {
+    uint32_t virt;
+    uint32_t nframes;
+};
+
+static struct large_cache_entry large_cache[LARGE_CACHE_MAX];
+static uint32_t large_cache_count = 0;
 
 /* ── helpers ─────────────────────────────────────────────────────────────── */
 
@@ -139,16 +153,28 @@ void *kmalloc(uint32_t size)
             return NULL;
         }
 
-        void *virt = vmm_alloc_pages(nframes);
+        /* Check large-object cache before calling vmm_alloc_pages. */
+        uint32_t virt = 0;
+        for (uint32_t i = 0; i < large_cache_count; i++) {
+            if (large_cache[i].nframes == nframes) {
+                virt = large_cache[i].virt;
+                large_cache[i] = large_cache[--large_cache_count];
+                break;
+            }
+        }
         if (!virt) {
-            DBGK("%s:%d(%s) overflow alloc failed (size=%ld)\n",
-                 path_basename(file), line, func, size);
-            return NULL;
+            void *p = vmm_alloc_pages(nframes);
+            if (!p) {
+                DBGK("%s:%d(%s) overflow alloc failed (size=%ld)\n",
+                     path_basename(file), line, func, size);
+                return NULL;
+            }
+            virt = (uint32_t)p;
         }
 
-        overflow_table[slot].virt    = (uint32_t)virt;
+        overflow_table[slot].virt    = virt;
         overflow_table[slot].nframes = nframes;
-        return virt;
+        return (void *)virt;
     }
 
     struct slab_class *cls = &classes[ci];
@@ -185,9 +211,22 @@ void kfree(void *ptr)
     /* Check overflow table first */
     for (int i = 0; i < MAX_OVERFLOW; i++) {
         if (overflow_table[i].virt == addr) {
-            vmm_free_pages((void *)addr, overflow_table[i].nframes);
+            uint32_t nframes = overflow_table[i].nframes;
             overflow_table[i].virt    = 0;
             overflow_table[i].nframes = 0;
+
+            /* Push to large-object cache instead of unmapping. */
+            if (large_cache_count < LARGE_CACHE_MAX) {
+                large_cache[large_cache_count].virt    = addr;
+                large_cache[large_cache_count].nframes = nframes;
+                large_cache_count++;
+            } else {
+                /* Cache full — evict oldest (index 0) and free it. */
+                vmm_free_pages((void *)large_cache[0].virt, large_cache[0].nframes);
+                large_cache[0] = large_cache[LARGE_CACHE_MAX - 1];
+                large_cache[LARGE_CACHE_MAX - 1].virt    = addr;
+                large_cache[LARGE_CACHE_MAX - 1].nframes = nframes;
+            }
             return;
         }
     }

@@ -297,8 +297,6 @@ static uint32_t ext2_blk_lookup(struct ext2_inode *inode,
     return c->ind2l2_buf[idx % ppb];
 }
 
-/* Maximum blocks to batch-read in one ext2_read_blocks call (128KB for 1KB
- * blocks, 512KB for 4KB blocks).  Keeps the run buffer in the slab range. */
 #define EXT2_READ_RUN_MAX 128
 
 static uint32_t ext2_do_read(int slot, uint32_t off, uint32_t len, void *buf)
@@ -317,11 +315,7 @@ static uint32_t ext2_do_read(int slot, uint32_t off, uint32_t len, void *buf)
     c.ind2l1_buf  = NULL; c.ind2l1_phys  = 0;
     c.ind2l2_buf  = NULL; c.ind2l2_phys  = 0;
 
-    /* Cap to slab max (4096 bytes) to avoid vmm_alloc_pages overhead. */
-    uint32_t rbuf_blocks = (len + g_block_size - 1) / g_block_size;
-    uint32_t slab_max_blocks = 4096 / g_block_size;
-    if (slab_max_blocks < 1) slab_max_blocks = 1;
-    if (rbuf_blocks > slab_max_blocks) rbuf_blocks = slab_max_blocks;
+    uint32_t rbuf_blocks = EXT2_READ_RUN_MAX;
     uint8_t *rbuf = kmalloc(rbuf_blocks * g_block_size);
     if (!rbuf) return 0;
 
