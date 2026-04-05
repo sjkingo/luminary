@@ -64,14 +64,9 @@ static int              ntasks = 0;
 
 static void print_row(struct task_info *ti, const char *prefix)
 {
-    if (ti->prio < 0)
-        printf("%4u %4u -%2u %4us %s%s\n",
-               ti->pid, ti->ppid, (unsigned int)(-ti->prio),
-               ti->created_s, prefix, ti->name);
-    else
-        printf("%4u %4u  %2u %4us %s%s\n",
-               ti->pid, ti->ppid, (unsigned int)(ti->prio),
-               ti->created_s, prefix, ti->name);
+    printf("%4u %4u %3d %4us %s%s\n",
+           ti->pid, ti->ppid, ti->prio,
+           ti->created_s, prefix, ti->name);
 }
 
 static void print_children(unsigned int ppid, const char *prefix, int depth)
