@@ -1,4 +1,7 @@
-KERNEL_OBJS +=  drivers/fbdev.o \
+KERNEL_OBJS +=  drivers/ata.o \
+		drivers/blkdev.o \
+		drivers/part.o \
+		drivers/fbdev.o \
 		drivers/keyboard.o \
 		drivers/mouse.o \
 		drivers/rtl8139.o \

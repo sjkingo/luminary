@@ -16,7 +16,6 @@
 
 #include "kernel/initrd.h"
 #include "kernel/vfs.h"
-#include "kernel/tmpfs.h"
 #include "kernel/kernel.h"
 
 #define MODULE "initrd: "
@@ -136,9 +135,9 @@ static struct vfs_node *find_or_create(struct vfs_node *parent, const char *name
 
 /* ── public entry point ──────────────────────────────────────────────────── */
 
-uint32_t initrd_init(const void *data, uint32_t size)
+struct vfs_node *initrd_init(const void *data, uint32_t size,
+                             uint32_t *file_count_out)
 {
-
     /* Create root directory node */
     struct vfs_node *root = vfs_alloc_node();
     if (!root) panic("initrd: out of VFS nodes");
@@ -237,30 +236,8 @@ uint32_t initrd_init(const void *data, uint32_t size)
         cur += next_offset;
     }
 
-    vfs_set_root(root);
-    vfs_mount("/", "initrd", root);
-
-    /* Mark the initrd tree read-only after mounting */
-    root->readonly = true;
-
-    /* Register filesystem drivers and mount /tmp as tmpfs.
-     * The /tmp dir node must exist in the initrd cpio; if not, create it. */
-    init_tmpfs();
-
-    struct vfs_node *tmp_dir = vfs_lookup("/tmp");
-    if (!tmp_dir) {
-        tmp_dir = vfs_alloc_node();
-        if (!tmp_dir) panic("initrd: out of VFS nodes for /tmp");
-        tmp_dir->name[0] = 't'; tmp_dir->name[1] = 'm';
-        tmp_dir->name[2] = 'p'; tmp_dir->name[3] = '\0';
-        tmp_dir->flags   = VFS_DIR;
-        tmp_dir->readonly = false;
-        vfs_add_child(root, tmp_dir);
-    }
-    if (vfs_do_mount("/tmp", "tmpfs") != 0)
-        panic("initrd: failed to mount /tmp as tmpfs");
-
-    return file_count;
+    if (file_count_out) *file_count_out = file_count;
+    return root;
 }
 
 /* Look up a file by absolute path and return pointer + size.

@@ -19,7 +19,7 @@ src/
   boot/           # Multiboot entry, multiboot header definitions
   kernel/         # Core: kernel_main, scheduler, tasks, heap, printk, ELF loader, syscalls, GUI
   cpu/            # GDT, IDT, TSS, PIC, trap handling, vector generation
-  drivers/        # VGA text, VBE framebuffer, serial, keyboard, mouse, RTL8139 NIC
+  drivers/        # VGA text, VBE framebuffer, serial, keyboard, mouse, RTL8139 NIC, ATA/IDE, block device layer
   lib/            # Freestanding string library
   pci/            # PCI bus enumeration and driver registry
   fonts/          # 8x16 bitmap console font
@@ -48,6 +48,8 @@ docs/
 | `make` | Build kernel binary |
 | `make qemu` | Direct kernel boot with QEMU (serial to /tmp/luminary.log) |
 | `make qemucd` | Build GRUB2 ISO and boot from CD-ROM |
+| `make disk` | Create a blank 100MB disk image at `_build/disk.img` |
+| `make qemucd-disk` | Boot ISO with `_build/disk.img` attached as `-hda` |
 | `make console` | QEMU -nographic (requires USE_SERIAL) |
 | `make debug` | QEMU with GDB stub (-s -S) |
 | `make gdb` | Connect GDB to running QEMU |
@@ -122,6 +124,25 @@ On boot: `/` is initrd (read-only, registered via `vfs_mount`), `/dev` is devfs 
 
 Userspace mounts arbitrary tmpfs directories with `mount tmpfs /path` (`SYS_MOUNT 46`) and unmounts with `umount /path` (`SYS_UMOUNT 47`).
 
+## Block Devices
+
+Block device support is split across two layers:
+
+**`drivers/blkdev.c`** — abstraction layer. Maintains a registry of up to 8 `struct blkdev` entries. Each entry has `read_sectors(dev, lba, count, buf)` and `write_sectors` ops plus a `private` pointer for the driver. `blkdev_register_devnode(dev)` creates a `/dev/<name>` chardev node whose `read_op`/`write_op` translate byte offsets to sector-aligned LBA reads/writes (with read-modify-write for partial sectors). The per-slot op function technique (same as `pipe.c`) is used to recover context without a pointer in the VFS op signature.
+
+**`drivers/ata.c`** — ATA PIO driver. Probes primary and secondary IDE channels at boot for up to four drives (hda–hdd). Uses IDENTIFY (0xEC) to detect drive presence and read sector count and model string. Reads and writes use LBA28 PIO mode. Drive interrupts are masked via the `nIEN` bit — pure polling, no IRQ involvement.
+
+Block devices are exposed as standard VFS chardev nodes under `/dev`. `lseek` + `read`/`write` work directly:
+
+```sh
+cat /dev/hda        # stream raw disk content
+stat /dev/hda       # shows disk size in bytes
+```
+
+`ioctl(fd, BLKDEV_IOCTL_GETSIZE, &size)` fills a `uint64_t` with the total byte size. `BLKDEV_IOCTL_GETSECTSZ` returns 512.
+
+QEMU: use `make disk` to create a blank 100MB image, then `make qemucd-disk` to boot with it attached. The PIIX3 IDE controller in QEMU maps to the standard ports (0x1F0/0x3F6) without any PCI BAR programming.
+
 ## GUI
 
 Compositor and window manager running as a kernel task at priority 9. Three-buffer design: per-window backbuffers (written by apps), a clean scene buffer (`back`), and the hardware framebuffer (`fb_hw`). See `docs/gui.md`.
@@ -164,5 +185,11 @@ All userspace programs are ELF32 binaries built with the same `i686-elf-gcc` too
 | User stack top | 0xBFFFF000 | vmm.h |
 | Kernel virtual alloc base | 0xC0000000 | vmm.c |
 | Syscall vector | 0x80 | syscall.h |
+| ATA primary I/O | 0x1F0–0x1F7 | ata.h |
+| ATA primary ctrl | 0x3F6 | ata.h |
+| ATA secondary I/O | 0x170–0x177 | ata.h |
+| ATA secondary ctrl | 0x376 | ata.h |
+| Block device inode base | 300 | blkdev.c |
+| Max block devices | 8 | blkdev.h |
 | GUI max windows | 16 | gui.h |
 | Compositor priority | 9 | gui.c |

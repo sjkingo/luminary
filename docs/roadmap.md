@@ -13,7 +13,7 @@
 - ELF32 loader
 - CPIO initrd, VFS layer, path-based file access
 - fork/exec/waitpid process model
-- Syscall interface (`int 0x80`, 27 syscalls including `mkdir`/`unlink`, `getppid`, `waitpid` with WNOHANG and exit-status propagation; device-specific operations via `SYS_IOCTL` on `/dev/x` and `/dev/sys`)
+- Syscall interface (`int 0x80`, 49 syscalls including `mkdir`/`unlink`, `getppid`, `waitpid` with WNOHANG and exit-status propagation; device-specific operations via `SYS_IOCTL` on `/dev/x`, `/dev/sys`, and block device nodes; `SYS_FSTAT` (48), `SYS_RENAME` (49))
 - `SYS_FCNTL` (44): `F_GETFL`/`F_SETFL` with `O_NONBLOCK` per-fd flag; `SYS_READ` respects the fd flag without needing `SYS_READ_NB`
 - `SYS_MOUNT` (46) / `SYS_UMOUNT` (47): mount/unmount registered filesystem drivers at arbitrary VFS paths; `umount` refuses if nested mounts exist under the target path
 - VFS read-only enforcement: initrd root marked readonly after mount; `vfs_creat`/`vfs_mkdir`/`vfs_unlink`/`vfs_write` return -1 for readonly directories
@@ -39,13 +39,17 @@
 - Per-task CPU accounting: `ticks` and `ticks_window` fields in `struct task`; scheduler increments them on every timer tick for the running task (only when `blocking=false`); `total_ticks` global tracks all ticks since boot; 1-second rolling window (`ticks_window` reset every 1000 ticks) gives `cpu_pct` per task
 - `ps`: tree-view process listing with PID, PPID, PRI, TIME (elapsed since task creation), CPU% (1s rolling window), state (`I`dle/`R`un/`B`lock/`W`ait/`S`usp/`D`ispatchable), and CMD; summary line shows total CPU%, idle%, and uptime in `h:mm:ss` format
 - `uptime`: prints system uptime in `h:mm:ss` format
+- Block device abstraction (`drivers/blkdev.c`): registry of up to 8 devices; byte-offset VFS chardev ops with sector-granular LBA translation; per-slot function technique (same as pipes) for context-free VFS op dispatch; `BLKDEV_IOCTL_GETSIZE`/`BLKDEV_IOCTL_GETSECTSZ`
+- ATA PIO driver (`drivers/ata.c`): probes primary and secondary IDE channels; IDENTIFY-based detection; LBA28 read/write; drive interrupts masked (nIEN); drives registered as `/dev/hda`–`/dev/hdd`
+- VFS improvements: `vfs_alloc_node` falls back to `kmalloc` when the 512-node static pool is exhausted (heap-allocated nodes freed via `kfree`); inode numbers populated from cpio headers for initrd nodes and auto-assigned for runtime-created nodes; `struct vfs_stat` exposes inode; `vfs_rename` with Linux semantics; `mv` userland program
+- `stat` shows inode number; `fstat(fd, &st)` via `SYS_FSTAT (48)`
 
 ## What Luminary Needs
 
 1. **Network stack** — build on RTL8139 driver (has init but no packet I/O or IRQ handler yet)
 2. **i3-style keybinding system** — planned, not yet started
-3. **Persistent filesystem** — `/tmp` is writable but non-persistent. Implementing ext2 or FAT as a `struct fs_ops` driver would give persistence; the mount framework is ready to host it.
-4. **Block device abstraction** — prerequisite for persistent fs; need a `struct blkdev` with `read_blocks`/`write_blocks` ops, registered per device (IDE/ATA or virtio-blk)
+3. **Persistent filesystem** — ext2 as a `struct fs_ops` driver; the mount framework and block device layer are both ready. Implement `ext2_mount` (read superblock, walk inode table, populate VFS tree or lazy-load on lookup) and `ext2_umount`. Format a disk image with `mke2fs` and mount with `mount ext2 /mnt`.
+4. **ATA LBA48** — current ATA driver is LBA28 only (max 128GB). LBA48 support requires using commands `0x24`/`0x34` and writing the high sector count and LBA bytes via the HOB register sequence.
 
 ## Known Bugs
 

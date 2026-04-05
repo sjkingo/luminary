@@ -14,5 +14,6 @@ KERNEL_OBJS +=  kernel/kernel.o \
 		kernel/symtab_gen.o \
 		kernel/syscall.o \
 		kernel/task.o \
+		kernel/cmdline.o \
 		kernel/tmpfs.o \
 		kernel/vfs.o
