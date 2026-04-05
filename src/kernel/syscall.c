@@ -21,6 +21,18 @@
 #include "cpu/x86.h"
 #include "drivers/keyboard.h"
 
+/* Linux open(2) flag bits and fcntl(2) constants */
+#define O_RDONLY   0
+#define O_WRONLY   1
+#define O_RDWR     2
+#define O_CREAT    0x40
+#define O_TRUNC    0x200
+#define O_APPEND   0x400
+#define O_NONBLOCK 0x800
+
+#define F_GETFL 3
+#define F_SETFL 4
+
 /* Validate that a user-supplied pointer range lies entirely within user space.
  * Pass len=0 to check only the start address (e.g. for string pointers where
  * the length is unknown). Returns true if the range is acceptable. */
@@ -108,18 +120,48 @@ static int sys_read(struct trap_frame *frame)
     /* Chardevs: cap at 4096 to limit blocking reads */
     if (vfd->node->flags & VFS_CHARDEV) {
         if (!user_access_ok(buf, len) || len > 4096) return -1;
+        if (vfd->nonblock) running_task->read_nonblock = true;
         uint32_t n = vfs_read(vfd->node, vfd->offset, len, buf);
+        running_task->read_nonblock = false;
         return (int)n;
     }
 
     if (vfd->node->flags & VFS_FILE) {
         if (!user_access_ok(buf, len) || len > 65536) return -1;
+        if (vfd->nonblock) running_task->read_nonblock = true;
         uint32_t n = vfs_read(vfd->node, vfd->offset, len, buf);
+        running_task->read_nonblock = false;
         vfd->offset += n;
         return (int)n;
     }
 
     return -1;
+}
+
+static int sys_fcntl(struct trap_frame *frame)
+{
+    /* EBX=fd, ECX=cmd, EDX=arg */
+    int fd  = (int)frame->ebx;
+    int cmd = (int)frame->ecx;
+    int arg = (int)frame->edx;
+
+    if (fd < 0 || fd >= VFS_FD_MAX) return -1;
+    struct vfs_fd *vfd = &running_task->fds[fd];
+    if (!vfd->open) return -1;
+
+    int flags = vfd->append ? O_APPEND : 0;
+    if (vfd->nonblock) flags |= O_NONBLOCK;
+
+    switch (cmd) {
+    case F_GETFL:
+        return flags;
+    case F_SETFL:
+        vfd->append   = (arg & O_APPEND)   != 0;
+        vfd->nonblock = (arg & O_NONBLOCK)  != 0;
+        return 0;
+    default:
+        return -1;
+    }
 }
 
 static int sys_read_nb(struct trap_frame *frame)
@@ -308,6 +350,49 @@ static int sys_fork(struct trap_frame *frame)
     return (int)child->pid;
 }
 
+static int sys_spawn(struct trap_frame *frame)
+{
+    /* EBX=path, ECX=argv (userland char *[], NULL-terminated, may be NULL) */
+    char resolved[VFS_PATH_MAX];
+    const char *path = resolve_path((const char *)frame->ebx, resolved);
+    if (!path) return -1;
+
+    uint32_t elf_size = 0;
+    const void *elf_data = initrd_get_file(path, &elf_size);
+    if (!elf_data) return -1;
+
+    /* Collect argv from user space */
+    static const char *kargv[32];
+    int argc = 0;
+    uint32_t argv_ptr = frame->ecx;
+    if (argv_ptr && user_access_ok((void *)argv_ptr, 4)) {
+        uint32_t *uargv = (uint32_t *)argv_ptr;
+        while (argc < 31 && uargv[argc] && user_access_ok((void *)uargv[argc], 1)) {
+            kargv[argc] = (const char *)uargv[argc];
+            argc++;
+        }
+    }
+    kargv[argc] = NULL;
+
+    struct task *t = (struct task *)kmalloc(sizeof(struct task));
+    if (!t) return -1;
+
+    create_elf_task(t, (char *)path, 5, elf_data, elf_size);
+    task_open_std_fds(t);
+
+    /* Set cmdline for ps */
+    int pos = 0;
+    for (int i = 0; i < argc && pos < (int)sizeof(t->cmdline) - 1; i++) {
+        if (i > 0 && pos < (int)sizeof(t->cmdline) - 1) t->cmdline[pos++] = ' ';
+        int j = 0;
+        while (kargv[i][j] && pos < (int)sizeof(t->cmdline) - 1)
+            t->cmdline[pos++] = kargv[i][j++];
+    }
+    t->cmdline[pos] = '\0';
+
+    return (int)t->pid;
+}
+
 static int sys_waitpid(struct trap_frame *frame)
 {
     /* EBX = pid, ECX = &status (int *, may be NULL), EDX = flags */
@@ -386,14 +471,6 @@ static int sys_getppid(void)
 }
 
 /* ── VFS syscalls ─────────────────────────────────────────────────────────── */
-
-/* Linux open(2) flag bits (O_CREAT, O_TRUNC, O_APPEND, access mode) */
-#define O_RDONLY  0
-#define O_WRONLY  1
-#define O_RDWR    2
-#define O_CREAT   0x40
-#define O_TRUNC   0x200
-#define O_APPEND  0x400
 
 /* Allocate the lowest available fd in the running task. Returns -1 if full. */
 static int fd_alloc(struct vfs_node *node, bool append)
@@ -631,6 +708,25 @@ static int sys_unlink(struct trap_frame *frame)
     return vfs_unlink(path);
 }
 
+static int sys_mount(struct trap_frame *frame)
+{
+    /* EBX = fstype string, ECX = mountpoint path */
+    const char *fstype = (const char *)frame->ebx;
+    const char *path   = (const char *)frame->ecx;
+    if (!user_access_ok(fstype, 1)) return -1;
+    char resolved[VFS_PATH_MAX];
+    if (!resolve_path(path, resolved)) return -1;
+    return vfs_do_mount(resolved, fstype);
+}
+
+static int sys_umount(struct trap_frame *frame)
+{
+    /* EBX = mountpoint path */
+    char resolved[VFS_PATH_MAX];
+    if (!resolve_path((const char *)frame->ebx, resolved)) return -1;
+    return vfs_do_umount(resolved);
+}
+
 
 /* ── dispatch ─────────────────────────────────────────────────────────────── */
 
@@ -713,6 +809,18 @@ void syscall_handler(struct trap_frame *frame)
         break;
     case SYS_IOCTL:
         ret = sys_ioctl(frame);
+        break;
+    case SYS_FCNTL:
+        ret = sys_fcntl(frame);
+        break;
+    case SYS_SPAWN:
+        ret = sys_spawn(frame);
+        break;
+    case SYS_MOUNT:
+        ret = sys_mount(frame);
+        break;
+    case SYS_UMOUNT:
+        ret = sys_umount(frame);
         break;
     default:
         printk("unknown syscall %d from pid %d\n",

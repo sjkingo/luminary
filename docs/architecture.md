@@ -102,6 +102,22 @@ Unhandled CPU exceptions call `dump_trap_frame()` which prints registers and wal
 
 CPIO newc initrd, parsed by `initrd.c` and mounted read-only at `/` on boot. A VFS layer (`vfs.c`) provides mount table, path resolution, and open/read/readdir/stat/close/creat/mkdir/unlink. Per-task fd tables are stored inline in `struct task`. `vfs_alloc_node()` uses a static pool of 512 nodes with a free-list (`sibling` pointer reused as link) so closed pipe nodes and unlinked file nodes are reclaimed and reused.
 
+### Filesystem drivers and mount points
+
+`struct fs_ops` defines a vtable with `mount` and `umount` callbacks. Drivers register with `vfs_fs_register(fstype, ops)` at init time. `vfs_do_mount(path, fstype)` resolves the path, looks up the driver, calls `fs_ops->mount(mountpoint)`, and records the entry in the mount table. `vfs_do_umount(path)` calls `fs_ops->umount(mountpoint)` which frees the subtree, then removes the table entry.
+
+`vfs_lookup` follows `node->mounted_root` at each step: if a directory node has a filesystem mounted on it, traversal continues into `mounted_root` rather than the node's own children. This makes mounts transparent to all path-based syscalls.
+
+Registered filesystem drivers:
+
+| Driver | fstype | Description |
+|--------|--------|-------------|
+| `tmpfs` (`tmpfs.c`) | `"tmpfs"` | In-memory writable filesystem. `mount` allocates a fresh VFS_DIR root node; files use the standard heap-backed writable node mechanism. `umount` frees the entire subtree. |
+
+On boot: `/` is initrd (read-only, registered via `vfs_mount`), `/dev` is devfs (registered via `vfs_mount`), `/tmp` is mounted as tmpfs via `vfs_do_mount`.
+
+Userspace mounts arbitrary tmpfs directories with `mount tmpfs /path` (`SYS_MOUNT 46`) and unmounts with `umount /path` (`SYS_UMOUNT 47`).
+
 ## GUI
 
 Compositor and window manager running as a kernel task at priority 9. Three-buffer design: per-window backbuffers (written by apps), a clean scene buffer (`back`), and the hardware framebuffer (`fb_hw`). See `docs/gui.md`.

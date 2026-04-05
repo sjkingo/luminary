@@ -1,4 +1,9 @@
-/* mount — display mounted filesystems */
+/* mount — display or create filesystem mounts.
+ *
+ * Usage:
+ *   mount              — list all current mounts
+ *   mount fstype path  — mount filesystem of type fstype at path
+ */
 
 #include "syscall.h"
 #include "sys_dev.h"
@@ -6,10 +11,21 @@
 
 int main(int argc, char **argv)
 {
-    (void)argc; (void)argv;
+    if (argc == 3) {
+        if (mount(argv[1], argv[2]) != 0) {
+            printf("mount: failed to mount %s at %s\n", argv[1], argv[2]);
+            return 1;
+        }
+        return 0;
+    }
+
+    if (argc != 1) {
+        printf("usage: mount [fstype path]\n");
+        return 1;
+    }
 
     int sfd = open("/dev/sys", O_RDWR);
-    if (sfd < 0) { printf("mount: cannot open /dev/sys\n"); exit(1); }
+    if (sfd < 0) { printf("mount: cannot open /dev/sys\n"); return 1; }
 
     char buf[512];
     int n = sys_mounts(sfd, buf, sizeof(buf) - 1);

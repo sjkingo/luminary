@@ -52,7 +52,6 @@ void vfs_free_node(struct vfs_node *n)
     node_free_list = n;
 }
 
-/* ── root ────────────────────────────────────────────────────────────────── */
 static struct vfs_node *vfs_root = NULL;
 
 void vfs_set_root(struct vfs_node *root)
@@ -60,7 +59,149 @@ void vfs_set_root(struct vfs_node *root)
     vfs_root = root;
 }
 
-/* ── path resolution ─────────────────────────────────────────────────────── */
+struct vfs_mount {
+    char             path[VFS_PATH_MAX];
+    char             fstype[16];
+    struct vfs_node *root;      /* NULL for dynamic mounts tracked via mounted_root */
+    struct vfs_node *mountpoint; /* the dir node that hosts this mount */
+};
+
+static struct vfs_mount mount_table[VFS_MOUNT_MAX];
+static int              mount_count = 0;
+
+struct vfs_fs_entry {
+    char          fstype[16];
+    struct fs_ops *ops;
+};
+
+static struct vfs_fs_entry fs_registry[VFS_FS_MAX];
+static int                 fs_registry_count = 0;
+
+void vfs_fs_register(const char *fstype, struct fs_ops *ops)
+{
+    if (fs_registry_count >= VFS_FS_MAX) {
+        printk(MODULE "fs registry full\n");
+        return;
+    }
+    struct vfs_fs_entry *e = &fs_registry[fs_registry_count++];
+    strncpy(e->fstype, fstype, sizeof(e->fstype) - 1);
+    e->fstype[sizeof(e->fstype) - 1] = '\0';
+    e->ops = ops;
+}
+
+static struct fs_ops *fs_lookup_ops(const char *fstype)
+{
+    for (int i = 0; i < fs_registry_count; i++) {
+        if (strcmp(fs_registry[i].fstype, fstype) == 0)
+            return fs_registry[i].ops;
+    }
+    return NULL;
+}
+
+void vfs_mount(const char *path, const char *fstype, struct vfs_node *root)
+{
+    if (mount_count >= VFS_MOUNT_MAX) {
+        printk(MODULE "mount table full\n");
+        return;
+    }
+    struct vfs_mount *m = &mount_table[mount_count++];
+    strncpy(m->path,   path,   VFS_PATH_MAX - 1);
+    strncpy(m->fstype, fstype, sizeof(m->fstype) - 1);
+    m->path[VFS_PATH_MAX - 1]        = '\0';
+    m->fstype[sizeof(m->fstype) - 1] = '\0';
+    m->root       = root;
+    m->mountpoint = NULL;
+}
+
+int vfs_do_mount(const char *path, const char *fstype)
+{
+    struct fs_ops *ops = fs_lookup_ops(fstype);
+    if (!ops) {
+        printk(MODULE "unknown fstype: %s\n", fstype);
+        return -1;
+    }
+
+    struct vfs_node *mp = vfs_lookup(path);
+    if (!mp || !(mp->flags & VFS_DIR)) {
+        printk(MODULE "mount: %s is not a directory\n", path);
+        return -1;
+    }
+    if (mp->mounted_root) {
+        printk(MODULE "mount: %s already has a mount\n", path);
+        return -1;
+    }
+    if (mount_count >= VFS_MOUNT_MAX) {
+        printk(MODULE "mount table full\n");
+        return -1;
+    }
+
+    if (ops->mount(mp) != 0)
+        return -1;
+
+    struct vfs_mount *m = &mount_table[mount_count++];
+    strncpy(m->path,   path,   VFS_PATH_MAX - 1);
+    strncpy(m->fstype, fstype, sizeof(m->fstype) - 1);
+    m->path[VFS_PATH_MAX - 1]        = '\0';
+    m->fstype[sizeof(m->fstype) - 1] = '\0';
+    m->root       = mp->mounted_root;
+    m->mountpoint = mp;
+    return 0;
+}
+
+int vfs_do_umount(const char *path)
+{
+    /* find mount table entry */
+    int idx = -1;
+    for (int i = 0; i < mount_count; i++) {
+        if (mount_table[i].mountpoint &&
+            strcmp(mount_table[i].path, path) == 0) {
+            idx = i;
+            break;
+        }
+    }
+    if (idx < 0) return -1;
+
+    /* Refuse if any other dynamic mount is nested under this path */
+    uint32_t plen = (uint32_t)strlen(path);
+    for (int i = 0; i < mount_count; i++) {
+        if (i == idx || !mount_table[i].mountpoint) continue;
+        const char *mp_path = mount_table[i].path;
+        if (strncmp(mp_path, path, plen) == 0 &&
+            (mp_path[plen] == '/' || mp_path[plen] == '\0') &&
+            mp_path != path) {
+            printk(MODULE "umount: %s has mounts below it\n", path);
+            return -1;
+        }
+    }
+
+    struct vfs_node *mp = mount_table[idx].mountpoint;
+    if (!mp || !mp->mounted_root) return -1;
+
+    struct fs_ops *ops = mp->mounted_root->fs;
+    if (!ops || !ops->umount) return -1;
+
+    if (ops->umount(mp) != 0)
+        return -1;
+
+    /* remove entry from mount table by shifting */
+    for (int i = idx; i < mount_count - 1; i++)
+        mount_table[i] = mount_table[i + 1];
+    mount_count--;
+    return 0;
+}
+
+int vfs_get_mounts(struct vfs_mount_info *out, int max)
+{
+    int n = mount_count < max ? mount_count : max;
+    for (int i = 0; i < n; i++) {
+        strncpy(out[i].path,   mount_table[i].path,   VFS_PATH_MAX - 1);
+        strncpy(out[i].fstype, mount_table[i].fstype, 15);
+        out[i].path[VFS_PATH_MAX - 1] = '\0';
+        out[i].fstype[15]             = '\0';
+        out[i].readonly = mount_table[i].root ? mount_table[i].root->readonly : false;
+    }
+    return n;
+}
 
 /* Walk one path component. Looks for a child of dir named 'name' (not
  * null-terminated — length is given by len). */
@@ -83,6 +224,8 @@ struct vfs_node *vfs_lookup(const char *path)
     if (!path || path[0] != '/') return NULL;
 
     struct vfs_node *cur = vfs_root;
+    if (cur->mounted_root) cur = cur->mounted_root;
+
     const char *p = path + 1; /* skip leading '/' */
 
     while (*p) {
@@ -101,6 +244,9 @@ struct vfs_node *vfs_lookup(const char *path)
 
         cur = dir_child(cur, p, len);
         if (!cur) return NULL;
+
+        /* follow mount point if this dir has a filesystem mounted on it */
+        if (cur->mounted_root) cur = cur->mounted_root;
 
         p = end;
     }
@@ -194,6 +340,7 @@ uint32_t vfs_write(struct vfs_node *node, uint32_t offset,
         return node->write_op(offset, len, buf);
     }
     if (!(node->flags & VFS_FILE) || !node->writable) return 0;
+    if (node->parent && node->parent->readonly) return 0;
 
     uint32_t end = offset + len;
     if (end < offset) return 0; /* overflow */
@@ -245,6 +392,7 @@ struct vfs_node *vfs_creat(const char *path)
         parent = vfs_lookup(parent_path);
     }
     if (!parent || !(parent->flags & VFS_DIR)) return NULL;
+    if (parent->readonly) return NULL;
 
     /* Find or allocate node */
     struct vfs_node *n = dir_child(parent, base, (uint32_t)strlen(base));
@@ -300,6 +448,7 @@ struct vfs_node *vfs_mkdir(const char *path)
         parent = vfs_lookup(parent_path);
     }
     if (!parent || !(parent->flags & VFS_DIR)) return NULL;
+    if (parent->readonly) return NULL;
 
     uint32_t blen = (uint32_t)strlen(base);
     if (dir_child(parent, base, blen)) return NULL; /* already exists */
@@ -324,6 +473,7 @@ int vfs_unlink(const char *path)
 
     struct vfs_node *parent = n->parent;
     if (!parent) return -1;
+    if (parent->readonly) return -1;
 
     /* Unlink from parent's children list */
     if (parent->children == n) {

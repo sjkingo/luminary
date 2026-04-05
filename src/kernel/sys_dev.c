@@ -103,14 +103,27 @@ static int32_t sys_control_op(struct vfs_node *node, uint32_t request, void *arg
         if (!user_access_ok(r, sizeof(struct sys_ctl_mounts))) return -1;
         if (!r->buf || r->len == 0) return -1;
         if (!user_access_ok(r->buf, r->len)) return -1;
-        const char *text =
-            "MOUNT  TYPE    FS    OPTIONS\n"
-            "/      initrd  cpio  rw\n"
-            "/dev   devfs         rw\n";
+
+        struct vfs_mount_info mounts[VFS_MOUNT_MAX];
+        int nmounts = vfs_get_mounts(mounts, VFS_MOUNT_MAX);
+
         uint32_t pos = 0;
-        while (*text && pos < r->len - 1)
-            r->buf[pos++] = *text++;
-        r->buf[pos] = '\0';
+        char *buf = r->buf;
+        uint32_t buflen = r->len - 1;
+
+        const char *hdr = "MOUNT\t\tTYPE    OPTIONS\n";
+        while (*hdr && pos < buflen) buf[pos++] = *hdr++;
+
+        for (int i = 0; i < nmounts && pos < buflen; i++) {
+            const char *opts = mounts[i].readonly ? "ro" : "rw";
+            char line[64];
+            int n = sprintf(line, "%-8s\t%-7s %s\n",
+                            mounts[i].path, mounts[i].fstype, opts);
+            for (int j = 0; j < n && pos < buflen; j++)
+                buf[pos++] = line[j];
+        }
+
+        buf[pos] = '\0';
         r->written = pos;
         return 0;
     }

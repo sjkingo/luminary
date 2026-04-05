@@ -33,6 +33,10 @@
 #define SYS_MKDIR       38
 #define SYS_UNLINK      39
 #define SYS_IOCTL       43
+#define SYS_FCNTL       44
+#define SYS_SPAWN       45
+#define SYS_MOUNT       46
+#define SYS_UMOUNT      47
 
 #define WNOHANG         1   /* waitpid flag: return -1 immediately if child hasn't exited */
 
@@ -61,12 +65,17 @@ struct vfs_stat {
 #define SEEK_END 2
 
 /* open() flags — Linux i386 values */
-#define O_RDONLY  0
-#define O_WRONLY  1
-#define O_RDWR    2
-#define O_CREAT   0x40
-#define O_TRUNC   0x200
-#define O_APPEND  0x400
+#define O_RDONLY   0
+#define O_WRONLY   1
+#define O_RDWR     2
+#define O_CREAT    0x40
+#define O_TRUNC    0x200
+#define O_APPEND   0x400
+#define O_NONBLOCK 0x800
+
+/* fcntl() commands */
+#define F_GETFL 3
+#define F_SETFL 4
 
 static inline int syscall0(int num)
 {
@@ -129,6 +138,16 @@ static inline int getpid(void)
 static inline int ioctl(int fd, unsigned int request, void *arg)
 {
     return syscall3(SYS_IOCTL, (unsigned int)fd, request, (unsigned int)arg);
+}
+
+static inline int fcntl(int fd, int cmd, int arg)
+{
+    return syscall3(SYS_FCNTL, (unsigned int)fd, (unsigned int)cmd, (unsigned int)arg);
+}
+
+static inline int spawn(const char *path, char *const argv[])
+{
+    return syscall2(SYS_SPAWN, (unsigned int)path, (unsigned int)argv);
 }
 
 static inline int kill(unsigned int pid)
@@ -248,5 +267,17 @@ static inline int mkdir(const char *path)
 static inline int unlink(const char *path)
 {
     return syscall1(SYS_UNLINK, (unsigned int)path);
+}
+
+/* mount: mount filesystem fstype at path; returns 0 or -1 */
+static inline int mount(const char *fstype, const char *path)
+{
+    return syscall2(SYS_MOUNT, (unsigned int)fstype, (unsigned int)path);
+}
+
+/* umount: unmount filesystem at path; returns 0 or -1 */
+static inline int umount(const char *path)
+{
+    return syscall1(SYS_UMOUNT, (unsigned int)path);
 }
 

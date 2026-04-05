@@ -109,6 +109,7 @@ void init_devfs(void)
     dev_dir->flags = VFS_DIR;
     dev_dir->inode = 99;
     vfs_add_child(root, dev_dir);
+    vfs_mount("/dev", "devfs", dev_dir);
 
     /* /dev/stdin — readable chardev backed by keyboard */
     dev_stdin = vfs_alloc_node();

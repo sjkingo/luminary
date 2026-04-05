@@ -67,8 +67,8 @@ void rtl8139_init(struct pci_device_location *loc)
     printk(MODULE "mac %02x:%02x:%02x:%02x:%02x:%02x, ready\n",
            mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
 
-    /* Enable interrupts for the chip */
-    outb_16(iobase + RTL_PORT_IMR, 0x0005); // Tx OK and Rx OK
+    /* Leave all interrupts masked until a real IRQ handler is registered */
+    outb_16(iobase + RTL_PORT_IMR, 0x0000);
 
     /* Configure tx and rx buffers */
     outb_32(iobase + RTL_PORT_RBSTART, (uintptr_t)buffer_rx);

@@ -9,6 +9,12 @@
  *                 a kmalloc'd buffer when writable is set.
  *   VFS_DIR     — directory; children/sibling chain.
  *   VFS_CHARDEV — character device; I/O dispatched through read_op/write_op.
+ *
+ * Mount points:
+ *   When a filesystem is mounted at a directory node, that node's mounted_root
+ *   is set to the root node of the mounted filesystem. vfs_lookup follows
+ *   mounted_root at each step, so paths transparently traverse mount points.
+ *   The node's fs pointer identifies the filesystem driver that owns it.
  */
 #pragma once
 
@@ -22,6 +28,21 @@
 #define VFS_NAME_MAX  128
 #define VFS_PATH_MAX  256
 #define VFS_FD_MAX     32   /* open file descriptors per task */
+
+struct vfs_node;
+
+/* Filesystem driver vtable. Registered via vfs_fs_register().
+ * NULL ops fall back to the built-in VFS tree behaviour. */
+struct fs_ops {
+    /* Called when this fs is mounted at mountpoint. Should initialise the
+     * subtree rooted at mountpoint->mounted_root. Returns 0 on success. */
+    int (*mount)(struct vfs_node *mountpoint);
+
+    /* Called when the fs is unmounted. Should free all nodes in the subtree
+     * below mountpoint->mounted_root, then clear mounted_root. Returns 0 on
+     * success, -1 if the mount point is busy (open fds exist underneath). */
+    int (*umount)(struct vfs_node *mountpoint);
+};
 
 struct vfs_dirent {
     char     name[VFS_NAME_MAX];
@@ -40,6 +61,7 @@ struct vfs_node {
      * buffer of capacity buf_cap; the node owns the allocation. */
     const uint8_t *data;
     bool           writable;    /* true  → heap-backed, mutable */
+    bool           readonly;    /* true  → directory rejects creat/mkdir/unlink/write */
     uint32_t       buf_cap;     /* allocated capacity of data buffer */
 
     /* Character device I/O ops — NULL for regular files */
@@ -48,6 +70,11 @@ struct vfs_node {
 
     /* ioctl control op — NULL if device does not support control requests */
     int32_t (*control_op)(struct vfs_node *node, uint32_t request, void *arg);
+
+    /* Mount point: non-NULL when another filesystem is mounted here.
+     * vfs_lookup follows this pointer instead of walking children. */
+    struct vfs_node *mounted_root;
+    struct fs_ops   *fs;            /* filesystem driver that owns this node */
 
     /* Children (directories only): singly-linked list */
     struct vfs_node *children;  /* first child */
@@ -58,7 +85,8 @@ struct vfs_node {
 /* ── open file descriptor ─────────────────────────────────────────────────── */
 struct vfs_fd {
     bool          open;
-    bool          append;   /* O_APPEND: writes always go to end of file */
+    bool          append;    /* O_APPEND: writes always go to end of file */
+    bool          nonblock;  /* O_NONBLOCK: reads return 0 instead of blocking */
     struct vfs_node *node;
     uint32_t      offset;   /* current read/write position (files) */
     uint32_t      dir_idx;  /* current child index (dirs, for readdir) */
@@ -68,6 +96,34 @@ struct vfs_fd {
 
 /* Set the root of the VFS tree */
 void vfs_set_root(struct vfs_node *root);
+
+#define VFS_MOUNT_MAX 16
+#define VFS_FS_MAX    8
+
+struct vfs_mount_info {
+    char path[VFS_PATH_MAX];
+    char fstype[16];
+    bool readonly;
+};
+
+/* Register a filesystem driver by name. Must be called before vfs_do_mount. */
+void vfs_fs_register(const char *fstype, struct fs_ops *ops);
+
+/* Mount filesystem fstype at path. path must name an existing directory.
+ * Calls fs_ops->mount, records the mount, and updates the mount table.
+ * Returns 0 on success, -1 on error. */
+int vfs_do_mount(const char *path, const char *fstype);
+
+/* Unmount the filesystem mounted at path. Calls fs_ops->umount.
+ * Returns 0 on success, -1 if nothing is mounted there or unmount refused. */
+int vfs_do_umount(const char *path);
+
+/* Record a static (kernel-internal) mount in the mount table for display only.
+ * Used by initrd/devfs which manage their own nodes directly. */
+void vfs_mount(const char *path, const char *fstype, struct vfs_node *root);
+
+/* Fill out[0..max-1] with registered mount info. Returns count filled. */
+int vfs_get_mounts(struct vfs_mount_info *out, int max);
 
 /* Resolve an absolute path to a node. Returns NULL if not found. */
 struct vfs_node *vfs_lookup(const char *path);

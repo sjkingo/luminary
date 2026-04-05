@@ -34,6 +34,10 @@ Userspace macros (in `userland/syscall.h`):
 | 38 | SYS_MKDIR | EBX=path | 0 or -1 | Create directory; parent must exist |
 | 39 | SYS_UNLINK | EBX=path | 0 or -1 | Remove regular file |
 | 43 | SYS_IOCTL | EBX=fd, ECX=request, EDX=arg | int32 or -1 | Device control: dispatch to node's control_op |
+| 44 | SYS_FCNTL | EBX=fd, ECX=cmd, EDX=arg | int or -1 | File control: F_GETFL returns flags; F_SETFL sets O_APPEND/O_NONBLOCK |
+| 45 | SYS_SPAWN | EBX=path, ECX=argv | new pid or -1 | Create independent process; no parent relationship, no waitpid required |
+| 46 | SYS_MOUNT | EBX=fstype, ECX=path | 0 or -1 | Mount registered filesystem at path (must be an existing directory) |
+| 47 | SYS_UMOUNT | EBX=path | 0 or -1 | Unmount filesystem at path; fails if open fds exist under the mount |
 
 ## Device Nodes
 
@@ -78,4 +82,8 @@ Request codes and argument structs are defined in `userland/sys_dev.h`.
 - **Adding new device operations** never requires a new syscall number — register a chardev under `/dev` via `vfs_register_dev()` and implement a `control_op`.
 - **SYS_READ_NB (23)** is non-blocking: returns 0 immediately if no data. Used by the shell's Ctrl+C wait loop.
 - **SYS_TASK_DONE (34)** walks the scheduler queue; returns 1 if pid is absent.
+- **SYS_FCNTL (44)** supports `F_GETFL`/`F_SETFL` with `O_APPEND` (0x400) and `O_NONBLOCK` (0x800). `O_NONBLOCK` on an fd makes `SYS_READ` behave like `SYS_READ_NB` for that fd.
+- **SYS_SPAWN (45)** creates a new independent process from an ELF at `path`. Unlike fork+exec, the spawned task has no parent (ppid=0), is not waited on, and runs at priority 5.
+- **SYS_MOUNT (46)** calls `vfs_do_mount(path, fstype)` in the kernel. The filesystem driver must have been registered with `vfs_fs_register()`. Currently registered: `tmpfs`.
+- **SYS_UMOUNT (47)** calls `vfs_do_umount(path)`. The kernel calls `fs_ops->umount()` on the mounted root; all nodes in the subtree are freed. Fails if the fs driver rejects the unmount (e.g. busy fds).
 - Extra stack args convention is retired — all new operations use ioctl structs.
