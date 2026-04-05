@@ -8,7 +8,6 @@ DISK_IMG    = $(BUILD_DIR)/disk.img
 
 EMULATOR    = qemu-system-i386
 QEMU_ARGS   = -m 512 -net nic,model=rtl8139 -net user -serial file:/tmp/luminary.log
-DISK_ARGS   = -hda $(DISK_IMG)
 
 .PHONY: all
 all: bootiso
@@ -40,42 +39,23 @@ bootiso: kernel initrd
 		INITRD_IMG=$(abspath $(INITRD_IMG)) \
 		ISO_OUT=$(abspath $(ISO_OUT))
 
-.PHONY: qemu
-qemu: kernel initrd
-	$(EMULATOR) -kernel $(KERNEL_BIN) -initrd $(INITRD_IMG) $(QEMU_ARGS)
-
 .PHONY: disk
 disk: | $(BUILD_DIR)
 	dd if=/dev/zero of=$(DISK_IMG) bs=512 count=204800
-	printf '\x55\xaa' | dd of=$(DISK_IMG) bs=1 seek=510 conv=notrunc
-	printf '\x80\x00\x00\x00\x83\x00\x00\x00\x00\x08\x00\x00\x00\x18\x03\x00' \
-		| dd of=$(DISK_IMG) bs=1 seek=446 conv=notrunc
-	@echo "disk: created $(DISK_IMG) (100MB, MBR with partition 1 at LBA 2048, 202752 sectors)"
+	python3 tools/mkdisk.py $(DISK_IMG)
 
-.PHONY: qemucd
-qemucd: bootiso
-	$(EMULATOR) -cdrom $(ISO_OUT) $(QEMU_ARGS)
+$(DISK_IMG): | $(BUILD_DIR)
+	dd if=/dev/zero of=$(DISK_IMG) bs=512 count=204800
+	python3 tools/mkdisk.py $(DISK_IMG)
+
+.PHONY: qemu
+qemu: bootiso $(DISK_IMG)
+	$(EMULATOR) -cdrom $(ISO_OUT) -hda $(DISK_IMG) -boot d $(QEMU_ARGS)
 	cat /tmp/luminary.log
-
-.PHONY: qemucd-disk
-qemucd-disk: bootiso $(DISK_IMG)
-	$(EMULATOR) -cdrom $(ISO_OUT) $(QEMU_ARGS) $(DISK_ARGS)
-	cat /tmp/luminary.log
-
-.PHONY: qemucd-debug
-qemucd-debug: bootiso
-	$(EMULATOR) -cdrom $(ISO_OUT) $(QEMU_ARGS) -d cpu_reset -no-reboot 2>&1 | tee /tmp/luminary-reset.log
-	cat /tmp/luminary.log
-
-.PHONY: console
-console: kernel initrd
-	$(EMULATOR) -kernel $(KERNEL_BIN) -initrd $(INITRD_IMG) -nographic $(QEMU_ARGS) &
-	sleep 2
-	pkill qemu-system-*
 
 .PHONY: debug
-debug: kernel initrd
-	$(EMULATOR) -kernel $(KERNEL_BIN) -initrd $(INITRD_IMG) -s -S $(QEMU_ARGS)
+debug: bootiso $(DISK_IMG)
+	$(EMULATOR) -cdrom $(ISO_OUT) -hda $(DISK_IMG) -boot d -s -S $(QEMU_ARGS)
 
 .PHONY: gdb
 gdb:

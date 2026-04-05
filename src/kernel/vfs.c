@@ -616,6 +616,8 @@ void vfs_add_child(struct vfs_node *parent, struct vfs_node *child)
 
 struct vfs_node *vfs_get_root(void)
 {
+    if (vfs_root && vfs_root->mounted_root)
+        return vfs_root->mounted_root;
     return vfs_root;
 }
 

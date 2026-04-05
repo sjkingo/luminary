@@ -1,8 +1,8 @@
-/* initrd: cpio "newc" (SVR4 without CRC) parser.
+/* initrd: cpio "newc" (SVR4 without CRC) filesystem driver.
  *
  * Parses the cpio archive passed as a multiboot module, builds a VFS tree,
- * and mounts it at "/". The VFS nodes point directly into the cpio data
- * (zero-copy for file contents).
+ * and exposes it as a registered "initrd" filesystem driver. Mounts are
+ * zero-copy: file data pointers point directly into the cpio buffer.
  *
  * cpio newc format per entry:
  *   - 110-byte ASCII header
@@ -20,7 +20,6 @@
 
 #define MODULE "initrd: "
 
-/* ── cpio newc header (all fields are ASCII hex, no separators) ──────────── */
 #define CPIO_MAGIC "070701"
 #define CPIO_MAGIC_LEN 6
 #define CPIO_HDR_SIZE 110
@@ -42,7 +41,6 @@ struct cpio_hdr {
     char c_check[8];
 };
 
-/* Parse an 8-char ASCII hex field. */
 static uint32_t hex8(const char *s)
 {
     uint32_t v = 0;
@@ -58,33 +56,22 @@ static uint32_t hex8(const char *s)
     return v;
 }
 
-/* Round up to the nearest 4-byte boundary. */
 static uint32_t align4(uint32_t x) { return (x + 3) & ~3u; }
 
-/* ── VFS tree helpers ────────────────────────────────────────────────────── */
-
-/* Ensure all intermediate directories exist for a path component, creating
- * them as needed under root. Returns the direct parent directory node. */
 static struct vfs_node *ensure_dir(struct vfs_node *root, const char *path)
 {
-    /* path is a full absolute path like "/usr/bin/sh".
-     * Walk each component; create dir nodes that don't exist yet. */
     struct vfs_node *cur = root;
     const char *p = path;
 
-    /* skip leading '/' */
     while (*p == '/') p++;
 
     while (*p) {
-        /* find next component */
         const char *end = p;
         while (*end && *end != '/') end++;
         uint32_t len = (uint32_t)(end - p);
 
-        /* skip the last component — that's the file/dir itself */
         if (!*end) break;
 
-        /* look for existing child */
         struct vfs_node *child = NULL;
         struct vfs_node *c = cur->children;
         while (c) {
@@ -111,7 +98,6 @@ static struct vfs_node *ensure_dir(struct vfs_node *root, const char *path)
     return cur;
 }
 
-/* Find or create a node named 'name' under parent dir. */
 static struct vfs_node *find_or_create(struct vfs_node *parent, const char *name,
                                         uint8_t flags)
 {
@@ -133,18 +119,15 @@ static struct vfs_node *find_or_create(struct vfs_node *parent, const char *name
     return n;
 }
 
-/* ── public entry point ──────────────────────────────────────────────────── */
-
-struct vfs_node *initrd_init(const void *data, uint32_t size,
-                             uint32_t *file_count_out)
+static struct vfs_node *initrd_parse(const void *data, uint32_t size,
+                                     uint32_t *file_count_out)
 {
-    /* Create root directory node */
     struct vfs_node *root = vfs_alloc_node();
     if (!root) panic("initrd: out of VFS nodes");
     root->name[0] = '/';
     root->name[1] = '\0';
     root->flags   = VFS_DIR;
-    root->parent  = root; /* root's parent is itself */
+    root->parent  = root;
 
     const uint8_t *base  = (const uint8_t *)data;
     const uint8_t *end   = base + size;
@@ -154,7 +137,6 @@ struct vfs_node *initrd_init(const void *data, uint32_t size,
     while (cur + CPIO_HDR_SIZE <= end) {
         const struct cpio_hdr *hdr = (const struct cpio_hdr *)cur;
 
-        /* Validate magic */
         if (memcmp(hdr->c_magic, CPIO_MAGIC, CPIO_MAGIC_LEN) != 0) {
             printk(MODULE "bad magic at offset 0x%lx, stopping\n",
                    (uint32_t)(cur - base));
@@ -164,18 +146,11 @@ struct vfs_node *initrd_init(const void *data, uint32_t size,
         uint32_t namesize = hex8(hdr->c_namesize);
         uint32_t filesize = hex8(hdr->c_filesize);
 
-        /* Filename immediately follows the header */
         const char *name = (const char *)(cur + CPIO_HDR_SIZE);
 
-        /* Sentinel: "TRAILER!!!" marks end of archive */
         if (namesize >= 11 && memcmp(name, "TRAILER!!!", 10) == 0)
             break;
 
-        /* File data follows name, both padded to 4-byte boundary from
-         * the start of the header:
-         *   header_end = cur + CPIO_HDR_SIZE
-         *   name_end   = header_end + namesize  (includes NUL)
-         *   data_start = align4(CPIO_HDR_SIZE + namesize) from cur */
         uint32_t data_offset = align4(CPIO_HDR_SIZE + namesize);
         const uint8_t *file_data = cur + data_offset;
         uint32_t next_offset     = data_offset + align4(filesize);
@@ -185,23 +160,18 @@ struct vfs_node *initrd_init(const void *data, uint32_t size,
             break;
         }
 
-        /* Skip "." (the archive itself) */
         if (namesize == 2 && name[0] == '.') {
             cur += next_offset;
             continue;
         }
 
-        /* Strip leading "./" that some tools add */
         const char *entry_name = name;
         if (namesize > 2 && entry_name[0] == '.' && entry_name[1] == '/')
             entry_name += 2;
 
-        /* Determine type from cpio mode bits */
         uint32_t mode  = hex8(hdr->c_mode);
         bool is_dir    = (mode & 0170000) == 0040000;
 
-        /* Find parent directory, creating intermediates as needed */
-        /* Build a temporary path with a leading slash so ensure_dir works */
         char fullpath[VFS_PATH_MAX];
         fullpath[0] = '/';
         uint32_t enlen = (uint32_t)strlen(entry_name);
@@ -215,7 +185,6 @@ struct vfs_node *initrd_init(const void *data, uint32_t size,
             break;
         }
 
-        /* Extract the final component name */
         const char *basename = entry_name;
         for (const char *s = entry_name; *s; s++)
             if (*s == '/') basename = s + 1;
@@ -240,8 +209,58 @@ struct vfs_node *initrd_init(const void *data, uint32_t size,
     return root;
 }
 
-/* Look up a file by absolute path and return pointer + size.
- * Used by the kernel to load ELF binaries from the VFS. */
+static const void *initrd_data = NULL;
+static uint32_t    initrd_data_size = 0;
+
+static struct fs_ops initrd_ops;
+
+static void initrd_free_tree(struct vfs_node *n)
+{
+    if (!n) return;
+    struct vfs_node *c = n->children;
+    while (c) {
+        struct vfs_node *next = c->sibling;
+        initrd_free_tree(c);
+        c = next;
+    }
+    /* do not free n->data: zero-copy into multiboot module memory */
+    vfs_free_node(n);
+}
+
+static int initrd_mount(struct vfs_node *mountpoint)
+{
+    if (!initrd_data) return -1;
+    uint32_t file_count = 0;
+    struct vfs_node *root = initrd_parse(initrd_data, initrd_data_size, &file_count);
+    if (!root) return -1;
+    root->readonly = true;
+    root->fs       = &initrd_ops;
+    mountpoint->mounted_root = root;
+    DBGK("initrd: mounted %ld files\n", file_count);
+    return 0;
+}
+
+static int initrd_umount(struct vfs_node *mountpoint)
+{
+    struct vfs_node *root = mountpoint->mounted_root;
+    if (!root) return -1;
+    initrd_free_tree(root);
+    mountpoint->mounted_root = NULL;
+    return 0;
+}
+
+static struct fs_ops initrd_ops = {
+    .mount  = initrd_mount,
+    .umount = initrd_umount,
+};
+
+void init_initrd(const void *data, uint32_t size)
+{
+    initrd_data      = data;
+    initrd_data_size = size;
+    vfs_fs_register("initrd", &initrd_ops);
+}
+
 const void *initrd_get_file(const char *path, uint32_t *size_out)
 {
     struct vfs_node *n = vfs_lookup(path);

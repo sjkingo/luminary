@@ -9,7 +9,8 @@
 
 #define MODULE "cmdline: "
 
-static char raw_buf[CMDLINE_MAX];
+static char raw_buf[CMDLINE_MAX];  /* original, unmodified */
+static char parse_buf[CMDLINE_MAX]; /* working copy, NUL-patched by parser */
 
 static struct {
     char *key;
@@ -28,11 +29,12 @@ void cmdline_init(const char *cmdline_str)
 
     strncpy(raw_buf, cmdline_str, CMDLINE_MAX - 1);
     raw_buf[CMDLINE_MAX - 1] = '\0';
+    strncpy(parse_buf, raw_buf, CMDLINE_MAX);
 
     DBGK("cmdline: %s\n", raw_buf);
 
-    /* Parse in-place: split on spaces, split each token on '=' */
-    char *p = raw_buf;
+    /* Parse in-place on working copy: split on spaces, split each token on '=' */
+    char *p = parse_buf;
     while (*p && param_count < PARAM_MAX) {
         while (*p == ' ') p++;
         if (*p == '\0') break;

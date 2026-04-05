@@ -181,15 +181,21 @@ void kernel_main(struct multiboot_info *mb, uint32_t start, uint32_t stack, uint
         }
 
         uint32_t initrd_size = initrd_mod->mod_end - initrd_mod->mod_start;
-        uint32_t initrd_files = 0;
-        struct vfs_node *initrd_root = initrd_init(
-            (const void *)initrd_mod->mod_start, initrd_size, &initrd_files);
-        if (!initrd_root)
-            panic("initrd: failed to parse cpio archive");
 
-        vfs_set_root(initrd_root);
-        vfs_mount("/", "initrd", initrd_root);
-        initrd_root->readonly = true;
+        init_initrd((const void *)initrd_mod->mod_start, initrd_size);
+
+        struct vfs_node *bare_root = vfs_alloc_node();
+        if (!bare_root) panic("initrd: out of VFS nodes for root");
+        bare_root->name[0] = '/';
+        bare_root->name[1] = '\0';
+        bare_root->flags   = VFS_DIR;
+        bare_root->parent  = bare_root;
+        vfs_set_root(bare_root);
+
+        if (vfs_do_mount("/", "initrd") != 0)
+            panic("initrd: failed to mount cpio archive");
+
+        printk("initrd: rootfs mounted at / (%ld bytes)\n", initrd_size);
 
         init_tmpfs();
         struct vfs_node *tmp_dir = vfs_lookup("/tmp");
@@ -199,13 +205,10 @@ void kernel_main(struct multiboot_info *mb, uint32_t start, uint32_t stack, uint
             tmp_dir->name[0] = 't'; tmp_dir->name[1] = 'm';
             tmp_dir->name[2] = 'p'; tmp_dir->name[3] = '\0';
             tmp_dir->flags   = VFS_DIR;
-            vfs_add_child(initrd_root, tmp_dir);
+            vfs_add_child(bare_root->mounted_root, tmp_dir);
         }
         if (vfs_do_mount("/tmp", "tmpfs") != 0)
             panic("initrd: failed to mount /tmp as tmpfs");
-
-        printk("initrd: rootfs mounted at / (%ld bytes, %ld files)\n",
-               initrd_size, initrd_files);
 
         init_devfs();
         init_dev_sys();
@@ -219,6 +222,17 @@ void kernel_main(struct multiboot_info *mb, uint32_t start, uint32_t stack, uint
         spawn_init(init_elf, init_size);
     } else {
         /* root= specified — mount block device as root (requires ext2 driver) */
+        if (mb_info->mods_count > 0)
+            panic("root= and initrd module both present");
+
+        struct vfs_node *bare_root = vfs_alloc_node();
+        if (!bare_root) panic("root: out of VFS nodes for root");
+        bare_root->name[0] = '/';
+        bare_root->name[1] = '\0';
+        bare_root->flags   = VFS_DIR;
+        bare_root->parent  = bare_root;
+        vfs_set_root(bare_root);
+
         init_devfs();
         init_dev_sys();
         init_dev_x();
