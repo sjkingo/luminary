@@ -222,14 +222,14 @@ uint32_t initrd_init(const void *data, uint32_t size)
             if (*s == '/') basename = s + 1;
 
         if (is_dir) {
-            /* Ensure the directory node itself exists */
-            find_or_create(parent, basename, VFS_DIR);
+            struct vfs_node *n = find_or_create(parent, basename, VFS_DIR);
+            if (n) n->inode = hex8(hdr->c_ino);
         } else {
-            /* Regular file */
             struct vfs_node *n = find_or_create(parent, basename, VFS_FILE);
             if (n) {
-                n->size = filesize;
-                n->data = file_data;
+                n->inode = hex8(hdr->c_ino);
+                n->size  = filesize;
+                n->data  = file_data;
                 file_count++;
             }
         }

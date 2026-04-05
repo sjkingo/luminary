@@ -670,6 +670,31 @@ static int sys_unlink(struct trap_frame *frame)
     return vfs_unlink(path);
 }
 
+static int sys_fstat(struct trap_frame *frame)
+{
+    int fd = (int)frame->ebx;
+    struct vfs_stat *out = (struct vfs_stat *)frame->ecx;
+
+    if (fd < 0 || fd >= VFS_FD_MAX) return -1;
+    if (!user_access_ok(out, sizeof(struct vfs_stat))) return -1;
+
+    struct vfs_fd *vfd = &running_task->fds[fd];
+    if (!vfd->open || !vfd->node) return -1;
+
+    return vfs_fstat(vfd->node, out);
+}
+
+static int sys_rename(struct trap_frame *frame)
+{
+    char old_resolved[VFS_PATH_MAX];
+    char new_resolved[VFS_PATH_MAX];
+    const char *old_path = resolve_path((const char *)frame->ebx, old_resolved);
+    const char *new_path = resolve_path((const char *)frame->ecx, new_resolved);
+
+    if (!old_path || !new_path) return -1;
+    return vfs_rename(old_path, new_path);
+}
+
 static int sys_mount(struct trap_frame *frame)
 {
     /* EBX = fstype string, ECX = mountpoint path */
@@ -781,6 +806,12 @@ void syscall_handler(struct trap_frame *frame)
         break;
     case SYS_UMOUNT:
         ret = sys_umount(frame);
+        break;
+    case SYS_FSTAT:
+        ret = sys_fstat(frame);
+        break;
+    case SYS_RENAME:
+        ret = sys_rename(frame);
         break;
     default:
         printk("unknown syscall %d from pid %d\n",

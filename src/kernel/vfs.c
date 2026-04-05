@@ -35,22 +35,35 @@ struct vfs_node *vfs_alloc_node(void)
         memset(n, 0, sizeof(*n));
         return n;
     }
-    if (node_pool_used >= VFS_NODE_POOL_SIZE) {
-        printk(MODULE "node pool exhausted\n");
+    if (node_pool_used < VFS_NODE_POOL_SIZE) {
+        struct vfs_node *n = &node_pool[node_pool_used++];
+        memset(n, 0, sizeof(*n));
+        return n;
+    }
+    struct vfs_node *n = kmalloc(sizeof(struct vfs_node));
+    if (!n) {
+        printk(MODULE "node alloc failed\n");
         return NULL;
     }
-    struct vfs_node *n = &node_pool[node_pool_used++];
     memset(n, 0, sizeof(*n));
+    n->heap_alloc = true;
     return n;
 }
 
 void vfs_free_node(struct vfs_node *n)
 {
     if (!n) return;
+    bool was_heap = n->heap_alloc;
     memset(n, 0, sizeof(*n));
+    if (was_heap) {
+        kfree(n);
+        return;
+    }
     n->sibling     = node_free_list;
     node_free_list = n;
 }
+
+static uint32_t next_inode = 1000;
 
 static struct vfs_node *vfs_root = NULL;
 
@@ -418,6 +431,7 @@ struct vfs_node *vfs_creat(const char *path)
     if (blen >= VFS_NAME_MAX) blen = VFS_NAME_MAX - 1;
     memcpy(n->name, base, blen);
     n->name[blen] = '\0';
+    n->inode    = next_inode++;
     n->flags    = VFS_FILE;
     n->writable = true;
     vfs_add_child(parent, n);
@@ -458,6 +472,7 @@ struct vfs_node *vfs_mkdir(const char *path)
     if (blen >= VFS_NAME_MAX) blen = VFS_NAME_MAX - 1;
     memcpy(n->name, base, blen);
     n->name[blen] = '\0';
+    n->inode = next_inode++;
     n->flags = VFS_DIR;
     vfs_add_child(parent, n);
     return n;
@@ -490,6 +505,98 @@ int vfs_unlink(const char *path)
         kfree((void *)n->data);
 
     vfs_free_node(n);
+    return 0;
+}
+
+/* Detach child from parent's children list without freeing it. */
+static void vfs_detach_child(struct vfs_node *parent, struct vfs_node *child)
+{
+    if (parent->children == child) {
+        parent->children = child->sibling;
+    } else {
+        struct vfs_node *s = parent->children;
+        while (s && s->sibling != child) s = s->sibling;
+        if (s) s->sibling = child->sibling;
+    }
+    child->sibling = NULL;
+    child->parent  = NULL;
+}
+
+/* ── vfs_rename ───────────────────────────────────────────────────────────── */
+int vfs_rename(const char *old_path, const char *new_path)
+{
+    if (!old_path || !new_path) return -1;
+
+    struct vfs_node *old_node = vfs_lookup(old_path);
+    if (!old_node) return -1;
+
+    /* Refuse to rename root */
+    if (!old_node->parent || old_node->parent == old_node) return -1;
+
+    /* Same path — no-op */
+    if (strcmp(old_path, new_path) == 0) return 0;
+
+    /* Refuse to move a directory into itself */
+    uint32_t old_len = (uint32_t)strlen(old_path);
+    if ((old_node->flags & VFS_DIR) &&
+        strncmp(new_path, old_path, old_len) == 0 &&
+        new_path[old_len] == '/') {
+        return -1;
+    }
+
+    /* Derive new parent path and new basename */
+    const char *new_base = new_path;
+    for (const char *s = new_path; *s; s++)
+        if (*s == '/') new_base = s + 1;
+    if (*new_base == '\0') return -1;
+
+    uint32_t new_parent_len = (uint32_t)(new_base - new_path);
+    if (new_parent_len > 1) new_parent_len--; /* strip trailing slash */
+
+    struct vfs_node *new_parent;
+    if (new_parent_len == 0) {
+        new_parent = vfs_root;
+    } else {
+        char new_parent_path[VFS_PATH_MAX];
+        if (new_parent_len >= VFS_PATH_MAX) return -1;
+        memcpy(new_parent_path, new_path, new_parent_len);
+        new_parent_path[new_parent_len] = '\0';
+        new_parent = vfs_lookup(new_parent_path);
+    }
+    if (!new_parent || !(new_parent->flags & VFS_DIR)) return -1;
+    if (new_parent->readonly) return -1;
+    if (old_node->parent->readonly) return -1;
+
+    struct vfs_node *new_node = vfs_lookup(new_path);
+
+    if (new_node) {
+        /* Refuse to overwrite device nodes */
+        if (new_node->flags & VFS_CHARDEV) return -1;
+
+        /* Type mismatch: file over dir or dir over file */
+        bool old_is_dir = !!(old_node->flags & VFS_DIR);
+        bool new_is_dir = !!(new_node->flags & VFS_DIR);
+        if (old_is_dir != new_is_dir) return -1;
+
+        /* Directory over directory: target must be empty */
+        if (new_is_dir && new_node->children) return -1;
+
+        /* Detach and free the target */
+        vfs_detach_child(new_parent, new_node);
+        if (new_node->writable && new_node->buf_cap > 0)
+            kfree((void *)new_node->data);
+        vfs_free_node(new_node);
+    }
+
+    /* Detach old node from its current parent, re-parent under new_parent */
+    vfs_detach_child(old_node->parent, old_node);
+
+    uint32_t blen = (uint32_t)strlen(new_base);
+    if (blen >= VFS_NAME_MAX) blen = VFS_NAME_MAX - 1;
+    memcpy(old_node->name, new_base, blen);
+    old_node->name[blen] = '\0';
+
+    vfs_add_child(new_parent, old_node);
     return 0;
 }
 
@@ -531,8 +638,18 @@ int vfs_stat(const char *path, struct vfs_stat *out)
 {
     struct vfs_node *n = vfs_lookup(path);
     if (!n) return -1;
-    out->size = n->size;
-    out->type = n->flags;
+    out->size  = n->size;
+    out->type  = n->flags;
+    out->inode = n->inode;
+    return 0;
+}
+
+int vfs_fstat(struct vfs_node *node, struct vfs_stat *out)
+{
+    if (!node) return -1;
+    out->size  = node->size;
+    out->type  = node->flags;
+    out->inode = node->inode;
     return 0;
 }
 
@@ -566,7 +683,7 @@ struct vfs_node *vfs_register_dev(const char *name, uint32_t inode,
     memcpy(n->name, name, nlen);
     n->name[nlen] = '\0';
     n->flags      = VFS_FILE | VFS_CHARDEV;
-    n->inode      = inode;
+    n->inode      = inode ? inode : next_inode++;
     n->read_op    = read_op;
     n->write_op   = write_op;
     n->control_op = control_op;

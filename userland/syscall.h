@@ -36,6 +36,8 @@
 #define SYS_FCNTL       44
 #define SYS_MOUNT       46
 #define SYS_UMOUNT      47
+#define SYS_FSTAT       48
+#define SYS_RENAME      49
 
 #define WNOHANG         1   /* waitpid flag: return -1 immediately if child hasn't exited */
 
@@ -54,8 +56,9 @@ struct vfs_dirent {
 
 /* struct vfs_stat (must match kernel/vfs.h layout) */
 struct vfs_stat {
-    unsigned int size;
+    unsigned int  size;
     unsigned char type;
+    unsigned int  inode;
 };
 
 /* SEEK constants */
@@ -274,5 +277,17 @@ static inline int mount(const char *fstype, const char *path)
 static inline int umount(const char *path)
 {
     return syscall1(SYS_UMOUNT, (unsigned int)path);
+}
+
+/* fstat: stat an open fd; returns 0 or -1 */
+static inline int fstat(int fd, struct vfs_stat *st)
+{
+    return syscall2(SYS_FSTAT, (unsigned int)fd, (unsigned int)st);
+}
+
+/* rename: rename or move old_path to new_path; returns 0 or -1 */
+static inline int rename(const char *old_path, const char *new_path)
+{
+    return syscall2(SYS_RENAME, (unsigned int)old_path, (unsigned int)new_path);
 }
 

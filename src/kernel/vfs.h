@@ -62,6 +62,7 @@ struct vfs_node {
     const uint8_t *data;
     bool           writable;    /* true  → heap-backed, mutable */
     bool           readonly;    /* true  → directory rejects creat/mkdir/unlink/write */
+    bool           heap_alloc;  /* true  → node was kmalloc'd, not from static pool */
     uint32_t       buf_cap;     /* allocated capacity of data buffer */
 
     /* Character device I/O ops — NULL for regular files */
@@ -143,8 +144,10 @@ struct vfs_node *vfs_readdir(struct vfs_node *node, uint32_t index);
 struct vfs_stat {
     uint32_t size;
     uint8_t  type;   /* VFS_FILE or VFS_DIR */
+    uint32_t inode;
 };
 int vfs_stat(const char *path, struct vfs_stat *out);
+int vfs_fstat(struct vfs_node *node, struct vfs_stat *out);
 
 /* Write up to len bytes to node at offset. Returns bytes written.
  * Only meaningful for VFS_CHARDEV nodes; regular files are read-only. */
@@ -177,6 +180,14 @@ struct vfs_node *vfs_mkdir(const char *path);
 /* Remove a regular file node at path. Frees its heap buffer if writable.
  * Returns 0 on success, -1 on error (not found, is a directory, is a chardev). */
 int vfs_unlink(const char *path);
+
+/* Rename or move old_path to new_path. Follows Linux rename(2) semantics:
+ * - If new_path is an existing file it is replaced atomically.
+ * - If new_path is an existing empty directory and old_path is a directory,
+ *   new_path is replaced. Non-empty target directory returns -1.
+ * - Moving a directory into itself (new_path is under old_path) returns -1.
+ * Returns 0 on success, -1 on error. */
+int vfs_rename(const char *old_path, const char *new_path);
 
 /* Dispatch an ioctl control request to node->control_op.
  * Returns -1 if the node has no control_op. */

@@ -35,8 +35,10 @@
 #define SYS_FCNTL       44  /* fcntl(fd, cmd, arg) -> int or -1 */
 #define SYS_MOUNT       46  /* mount(fstype, path) -> 0 or -1 */
 #define SYS_UMOUNT      47  /* umount(path) -> 0 or -1 */
+#define SYS_FSTAT       48  /* fstat(fd, stat_ptr) -> 0 or -1 */
+#define SYS_RENAME      49  /* rename(old_path, new_path) -> 0 or -1 */
 
-#define SYS_MAX         47
+#define SYS_MAX         49
 
 /* Handle a syscall. Called from trap_handler when trapno == SYSCALL_VECTOR. */
 void syscall_handler(struct trap_frame *frame);

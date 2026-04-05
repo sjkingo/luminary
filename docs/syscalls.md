@@ -37,6 +37,8 @@ Userspace macros (in `userland/syscall.h`):
 | 44 | SYS_FCNTL | EBX=fd, ECX=cmd, EDX=arg | int or -1 | File control: F_GETFL returns flags; F_SETFL sets O_APPEND/O_NONBLOCK |
 | 46 | SYS_MOUNT | EBX=fstype, ECX=path | 0 or -1 | Mount registered filesystem at path (must be an existing directory) |
 | 47 | SYS_UMOUNT | EBX=path | 0 or -1 | Unmount filesystem at path; fails if nested mounts exist underneath |
+| 48 | SYS_FSTAT | EBX=fd, ECX=stat_ptr | 0 or -1 | Stat an open file descriptor |
+| 49 | SYS_RENAME | EBX=old_path, ECX=new_path | 0 or -1 | Rename or move a file or directory |
 
 ## Device Nodes
 
@@ -85,3 +87,5 @@ Request codes and argument structs are defined in `userland/sys_dev.h`.
 - **SYS_MOUNT (46)** calls `vfs_do_mount(path, fstype)` in the kernel. The filesystem driver must have been registered with `vfs_fs_register()`. Currently registered: `tmpfs`.
 - **SYS_UMOUNT (47)** calls `vfs_do_umount(path)`. The kernel calls `fs_ops->umount()` on the mounted root; all nodes in the subtree are freed. Fails if the fs driver rejects the unmount (e.g. busy fds).
 - Extra stack args convention is retired — all new operations use ioctl structs.
+- **SYS_FSTAT (48)** is the fd-based variant of SYS_STAT. Fills the same `struct vfs_stat` (size, type, inode).
+- **SYS_RENAME (49)** follows Linux `rename(2)` semantics: atomically replaces an existing file target; replaces an empty directory target when both old and new are directories; refuses to move a directory into itself.

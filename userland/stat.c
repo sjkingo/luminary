@@ -15,7 +15,7 @@ int main(int argc, char **argv)
         printf("stat: not found: %s\n", argv[1]);
         return 1;
     }
-    printf("%s: %s, %u bytes\n", argv[1],
-           (st.type & VFS_DIR) ? "directory" : "file", st.size);
+    printf("%s: %s, inode %u, %u bytes\n", argv[1],
+           (st.type & VFS_DIR) ? "directory" : "file", st.inode, st.size);
     return 0;
 }
