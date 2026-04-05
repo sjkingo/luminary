@@ -3,6 +3,7 @@ KERNEL_OBJS +=  kernel/kernel.o \
 		kernel/pipe.o \
 		kernel/elf.o \
 		kernel/gui.o \
+		kernel/sys_dev.o \
 		kernel/heap.o \
 		kernel/initrd.o \
 		kernel/pmm.o \

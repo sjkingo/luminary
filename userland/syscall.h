@@ -9,45 +9,30 @@
 #endif
 
 #define SYS_NOP         0
-#define SYS_EXIT_TASK   1   /* exit_task() - kill calling task */
+#define SYS_EXIT_TASK   1
 #define SYS_READ        3
 #define SYS_WRITE       4
-#define SYS_OPEN        5   /* open(path) -> fd or -1 */
-#define SYS_CLOSE       6   /* close(fd) -> 0 or -1 */
-#define SYS_PS          7   /* ps(buf, len) -> bytes written or -1 */
-#define SYS_WIN_CREATE      8
-#define SYS_WIN_DESTROY     9
-#define SYS_WIN_FILL_RECT   10
-#define SYS_WIN_DRAW_TEXT   11
-#define SYS_WIN_FLIP        12
-#define SYS_WIN_POLL_EVENT  13
-#define SYS_MOUSE_GET       14
-#define SYS_WIN_DRAW_RECT   15
-#define SYS_WIN_GET_SIZE    19
-#define SYS_GETPID      20  /* getpid() -> pid */
-#define SYS_HALT        21  /* halt() - shut down */
-#define SYS_UPTIME      22  /* uptime() -> ms */
-#define SYS_KILL        17  /* kill(pid) -> 0 or -1 */
-#define SYS_YIELD       18  /* yield() - give up CPU slice */
-#define SYS_LSEEK       24  /* lseek(fd, offset, whence) -> offset or -1 */
-#define SYS_READDIR     25  /* readdir(fd, dirent_ptr) -> 1/0/-1 */
-#define SYS_STAT        26  /* stat(path, stat_ptr) -> 0/-1 */
-#define SYS_MOUNT       27  /* mount() -> prints mount table, returns 0 */
-#define SYS_EXEC        28  /* exec(path, argv) - exec in-place -> 0 or -1 */
-#define SYS_FORK        29  /* fork() -> child PID in parent, 0 in child */
-#define SYS_WAITPID     30  /* waitpid(pid) -> pid on child exit, -1 on error */
-#define SYS_READ_NB     23  /* read_nb(fd, buf, len) -> bytes or 0 if pipe empty (non-blocking) */
-#define SYS_PIPE        32  /* pipe(int fds[2]) -> 0 or -1 */
-#define SYS_DUP2        33  /* dup2(oldfd, newfd) -> newfd or -1 */
-#define SYS_TASK_DONE   34  /* task_done(pid) -> 1 if pid gone, 0 if still running */
-#define SYS_CHDIR       35  /* chdir(path) -> 0 or -1 */
-#define SYS_GETCWD      36  /* getcwd(buf, len) -> 0 or -1 */
-#define SYS_GETPPID     37  /* getppid() -> parent PID, 0 if no parent */
-#define SYS_MKDIR       38  /* mkdir(path) -> 0 or -1 */
-#define SYS_UNLINK      39  /* unlink(path) -> 0 or -1 */
-#define SYS_GUI_SET_BG              40  /* gui_set_bg(pixels, w, h) -> 0 or -1 */
-#define SYS_GUI_SET_DESKTOP_COLOR   41  /* gui_set_desktop_color(r, g, b) -> 0 */
-#define SYS_REBOOT                  42  /* reboot() - reboot the machine */
+#define SYS_OPEN        5
+#define SYS_CLOSE       6
+#define SYS_KILL        17
+#define SYS_YIELD       18
+#define SYS_GETPID      20
+#define SYS_READ_NB     23
+#define SYS_LSEEK       24
+#define SYS_READDIR     25
+#define SYS_STAT        26
+#define SYS_EXEC        28
+#define SYS_FORK        29
+#define SYS_WAITPID     30
+#define SYS_PIPE        32
+#define SYS_DUP2        33
+#define SYS_TASK_DONE   34
+#define SYS_CHDIR       35
+#define SYS_GETCWD      36
+#define SYS_GETPPID     37
+#define SYS_MKDIR       38
+#define SYS_UNLINK      39
+#define SYS_IOCTL       43
 
 #define WNOHANG         1   /* waitpid flag: return -1 immediately if child hasn't exited */
 
@@ -136,31 +121,14 @@ static inline int read(int fd, char *buf, unsigned int len)
     return syscall3(SYS_READ, (unsigned int)fd, (unsigned int)buf, len);
 }
 
-static inline int uptime(void)
-{
-    return syscall0(SYS_UPTIME);
-}
-
 static inline int getpid(void)
 {
     return syscall0(SYS_GETPID);
 }
 
-static inline void halt(void)
+static inline int ioctl(int fd, unsigned int request, void *arg)
 {
-    syscall0(SYS_HALT);
-    for (;;);
-}
-
-static inline void reboot(void)
-{
-    syscall0(SYS_REBOOT);
-    for (;;);
-}
-
-static inline int ps(char *buf, unsigned int len)
-{
-    return syscall2(SYS_PS, (unsigned int)buf, len);
+    return syscall3(SYS_IOCTL, (unsigned int)fd, request, (unsigned int)arg);
 }
 
 static inline int kill(unsigned int pid)
@@ -234,11 +202,6 @@ static inline int vfs_stat(const char *path, struct vfs_stat *st)
     return syscall2(SYS_STAT, (unsigned int)path, (unsigned int)st);
 }
 
-static inline int mount(void)
-{
-    return syscall0(SYS_MOUNT);
-}
-
 /* pipe: creates a pipe; fds[0]=read end, fds[1]=write end */
 static inline int pipe(int fds[2])
 {
@@ -287,17 +250,3 @@ static inline int unlink(const char *path)
     return syscall1(SYS_UNLINK, (unsigned int)path);
 }
 
-/* gui_set_bg: set desktop background from 32-bit ARGB pixel buffer.
- * pixels must be w*h uint32_t values. Kernel copies the data.
- * Returns 0 on success, -1 on failure. */
-static inline int gui_set_bg(const unsigned int *pixels, unsigned int w, unsigned int h)
-{
-    return syscall3(SYS_GUI_SET_BG, (unsigned int)pixels, w, h);
-}
-
-/* gui_set_desktop_color: set the letterbox/desktop fill colour (r, g, b in 0-255).
- * Takes effect immediately; persists until changed. */
-static inline int gui_set_desktop_color(unsigned int r, unsigned int g, unsigned int b)
-{
-    return syscall3(SYS_GUI_SET_DESKTOP_COLOR, r, g, b);
-}

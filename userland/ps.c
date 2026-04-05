@@ -1,6 +1,7 @@
 /* ps — list running tasks in a tree view */
 
 #include "syscall.h"
+#include "sys_dev.h"
 #include "libc/stdio.h"
 #include "libc/string.h"
 
@@ -99,8 +100,12 @@ int main(int argc, char **argv)
 {
     (void)argc; (void)argv;
 
+    int sfd = open("/dev/sys", O_RDWR);
+    if (sfd < 0) { printf("ps: cannot open /dev/sys\n"); exit(1); }
+
     char buf[2048];
-    int n = ps(buf, sizeof(buf) - 1);
+    int n = sys_ps(sfd, buf, sizeof(buf) - 1);
+    vfs_close(sfd);
     if (n <= 0) return 1;
     buf[n] = '\0';
 

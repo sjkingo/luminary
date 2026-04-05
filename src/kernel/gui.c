@@ -22,6 +22,8 @@
 #include "kernel/sched.h"
 #include "kernel/task.h"
 #include "kernel/syscall.h"
+#include "kernel/vfs.h"
+#include "kernel/x.h"
 #include "drivers/fbdev.h"
 #include "drivers/vbe.h"
 #include "drivers/mouse.h"
@@ -1520,4 +1522,91 @@ void init_gui(void)
 
     DBGK("subsystem ready (%ldx%ld %d bpp)\n",
          (uint32_t)fb_w, (uint32_t)fb_h, fb_depth);
+}
+
+/* ── /dev/x device ───────────────────────────────────────────────────────── */
+
+/* read_op: return current mouse state as struct x_mouse_state */
+static uint32_t x_read_op(uint32_t offset, uint32_t len, void *buf)
+{
+    (void)offset;
+    if (len < sizeof(struct x_mouse_state)) return 0;
+    struct x_mouse_state *ms = (struct x_mouse_state *)buf;
+    ms->x       = mouse_x;
+    ms->y       = mouse_y;
+    ms->buttons = (uint32_t)mouse_buttons;
+    return sizeof(struct x_mouse_state);
+}
+
+static int32_t x_control_op(struct vfs_node *node, uint32_t request, void *arg)
+{
+    (void)node;
+    switch (request) {
+    case X_WIN_CREATE: {
+        struct x_win_create *r = (struct x_win_create *)arg;
+        if (!r) return -1;
+        return gui_window_create(r->x, r->y, r->w, r->h, r->title);
+    }
+    case X_WIN_DESTROY: {
+        struct x_win_destroy *r = (struct x_win_destroy *)arg;
+        if (!r) return -1;
+        gui_window_destroy(r->id);
+        return 0;
+    }
+    case X_WIN_FILL_RECT: {
+        struct x_win_rect *r = (struct x_win_rect *)arg;
+        if (!r) return -1;
+        gui_window_fill_rect(r->id, r->x, r->y, r->w, r->h, r->color);
+        return 0;
+    }
+    case X_WIN_DRAW_RECT: {
+        struct x_win_rect *r = (struct x_win_rect *)arg;
+        if (!r) return -1;
+        gui_window_draw_rect(r->id, r->x, r->y, r->w, r->h, r->color);
+        return 0;
+    }
+    case X_WIN_DRAW_TEXT: {
+        struct x_win_text *r = (struct x_win_text *)arg;
+        if (!r || !r->str) return -1;
+        gui_window_draw_text(r->id, r->x, r->y, r->str, r->fgcolor, r->bgcolor);
+        return 0;
+    }
+    case X_WIN_FLIP: {
+        struct x_win_flip *r = (struct x_win_flip *)arg;
+        if (!r) return -1;
+        gui_window_flip(r->id);
+        return 0;
+    }
+    case X_WIN_POLL_EVENT: {
+        struct x_win_poll_event *r = (struct x_win_poll_event *)arg;
+        if (!r) return -1;
+        return gui_window_poll_event(r->id, (struct gui_event *)r->ev);
+    }
+    case X_WIN_GET_SIZE: {
+        struct x_win_get_size *r = (struct x_win_get_size *)arg;
+        if (!r) return -1;
+        return gui_window_get_size(r->id, &r->w, &r->h);
+    }
+    case X_SET_BG: {
+        struct x_set_bg *r = (struct x_set_bg *)arg;
+        if (!r || !r->pixels || r->w == 0 || r->h == 0) return -1;
+        gui_set_bg(r->pixels, r->w, r->h);
+        return 0;
+    }
+    case X_SET_DESKTOP_COLOR: {
+        struct x_set_desktop_color *r = (struct x_set_desktop_color *)arg;
+        if (!r) return -1;
+        gui_set_desktop_color(r->r, r->g, r->b);
+        return 0;
+    }
+    default:
+        return -1;
+    }
+}
+
+void init_dev_x(void)
+{
+    if (!vfs_register_dev("x", 110, x_read_op, NULL, x_control_op))
+        panic("init_dev_x: failed to register /dev/x");
+    printk("devfs: /dev/x registered\n");
 }

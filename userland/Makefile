@@ -35,8 +35,6 @@ $(BIN_DIR)/%: $(CRT0) %.o $(LIBC)
 %.o: %.c syscall.h
 	$(CC) $(CFLAGS) -c $< -o $@
 
-gui.o: gui.c gui.h syscall.h
-term.o: term.c gui.h syscall.h
 
 clean:
 	rm -f *.o $(LIBC_OBJS) $(LIBC)

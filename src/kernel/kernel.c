@@ -17,6 +17,7 @@
 #include "kernel/vmm.h"
 #include "kernel/vfs.h"
 #include "kernel/dev.h"
+#include "kernel/sys_dev.h"
 #include "kernel/initrd.h"
 #include "pci/pci.h"
 
@@ -174,6 +175,8 @@ void kernel_main(struct multiboot_info *mb, uint32_t start, uint32_t stack, uint
     printk("initrd: rootfs mounted at / from initrd (%ld bytes in %ld files)\n",
            initrd_size, initrd_files);
     init_devfs();
+    init_dev_sys();
+    init_dev_x();
 
     /* Load /bin/init from the VFS */
     uint32_t init_size = 0;

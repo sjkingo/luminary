@@ -14,6 +14,7 @@
  */
 
 #include "syscall.h"
+#include "x.h"
 #include "libc/stdio.h"
 
 #define MAX_W   1280
@@ -67,18 +68,23 @@ int main(int argc, char **argv)
         exit(1);
     }
 
+    int xfd = open("/dev/x", O_RDWR);
+    if (xfd < 0) {
+        printf("wallpaper: cannot open /dev/x\n");
+        exit(1);
+    }
+
     /* Optional second arg: desktop fill colour "r,g,b" */
     if (argc >= 3) {
         const char *s = argv[2];
         unsigned int r = 0, g = 0, b = 0;
-        /* parse three decimal numbers separated by commas */
         while (*s >= '0' && *s <= '9') r = r * 10 + (unsigned int)(*s++ - '0');
         if (*s++ != ',') { printf("wallpaper: invalid colour '%s', expected r,g,b\n", argv[2]); exit(1); }
         while (*s >= '0' && *s <= '9') g = g * 10 + (unsigned int)(*s++ - '0');
         if (*s++ != ',') { printf("wallpaper: invalid colour '%s', expected r,g,b\n", argv[2]); exit(1); }
         while (*s >= '0' && *s <= '9') b = b * 10 + (unsigned int)(*s++ - '0');
         if (*s != '\0')  { printf("wallpaper: invalid colour '%s', expected r,g,b\n", argv[2]); exit(1); }
-        gui_set_desktop_color(r, g, b);
+        x_set_desktop_color(xfd, r, g, b);
     }
 
     int fd = open(argv[1], O_RDONLY);
@@ -158,8 +164,9 @@ int main(int argc, char **argv)
 
     vfs_close(fd);
 
-    if (gui_set_bg(argb_buf, (unsigned int)img_w, (unsigned int)img_h) < 0)
-        printf("wallpaper: gui_set_bg failed\n");
+    if (x_set_bg(xfd, argb_buf, (unsigned int)img_w, (unsigned int)img_h) < 0)
+        printf("wallpaper: x_set_bg failed\n");
 
+    vfs_close(xfd);
     return 0;
 }

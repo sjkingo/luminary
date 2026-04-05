@@ -385,3 +385,41 @@ int vfs_stat(const char *path, struct vfs_stat *out)
     out->type = n->flags;
     return 0;
 }
+
+/* ── ioctl ───────────────────────────────────────────────────────────────── */
+int32_t vfs_ioctl(struct vfs_node *node, uint32_t request, void *arg)
+{
+    if (!node || !node->control_op) return -1;
+    return node->control_op(node, request, arg);
+}
+
+/* ── vfs_register_dev ────────────────────────────────────────────────────── */
+struct vfs_node *vfs_register_dev(const char *name, uint32_t inode,
+    uint32_t (*read_op)(uint32_t, uint32_t, void *),
+    uint32_t (*write_op)(uint32_t, uint32_t, const void *),
+    int32_t  (*control_op)(struct vfs_node *, uint32_t, void *))
+{
+    struct vfs_node *dev_dir = vfs_lookup("/dev");
+    if (!dev_dir) {
+        printk(MODULE "vfs_register_dev: /dev not found\n");
+        return NULL;
+    }
+
+    struct vfs_node *n = vfs_alloc_node();
+    if (!n) {
+        printk(MODULE "vfs_register_dev: node pool exhausted\n");
+        return NULL;
+    }
+
+    uint32_t nlen = (uint32_t)strlen(name);
+    if (nlen >= VFS_NAME_MAX) nlen = VFS_NAME_MAX - 1;
+    memcpy(n->name, name, nlen);
+    n->name[nlen] = '\0';
+    n->flags      = VFS_FILE | VFS_CHARDEV;
+    n->inode      = inode;
+    n->read_op    = read_op;
+    n->write_op   = write_op;
+    n->control_op = control_op;
+    vfs_add_child(dev_dir, n);
+    return n;
+}

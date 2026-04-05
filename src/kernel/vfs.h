@@ -46,6 +46,9 @@ struct vfs_node {
     uint32_t (*read_op)(uint32_t offset, uint32_t len, void *buf);
     uint32_t (*write_op)(uint32_t offset, uint32_t len, const void *buf);
 
+    /* ioctl control op — NULL if device does not support control requests */
+    int32_t (*control_op)(struct vfs_node *node, uint32_t request, void *arg);
+
     /* Children (directories only): singly-linked list */
     struct vfs_node *children;  /* first child */
     struct vfs_node *sibling;   /* next sibling */
@@ -118,3 +121,15 @@ struct vfs_node *vfs_mkdir(const char *path);
 /* Remove a regular file node at path. Frees its heap buffer if writable.
  * Returns 0 on success, -1 on error (not found, is a directory, is a chardev). */
 int vfs_unlink(const char *path);
+
+/* Dispatch an ioctl control request to node->control_op.
+ * Returns -1 if the node has no control_op. */
+int32_t vfs_ioctl(struct vfs_node *node, uint32_t request, void *arg);
+
+/* Allocate a chardev node, attach ops, and add it under /dev.
+ * /dev must already exist (init_devfs must have run).
+ * Returns the new node, or NULL on failure. */
+struct vfs_node *vfs_register_dev(const char *name, uint32_t inode,
+    uint32_t (*read_op)(uint32_t, uint32_t, void *),
+    uint32_t (*write_op)(uint32_t, uint32_t, const void *),
+    int32_t  (*control_op)(struct vfs_node *, uint32_t, void *));

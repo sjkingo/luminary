@@ -473,17 +473,6 @@ void sched_free_stale_stack(void)
 /* sched_saved_esp is declared in traps.S (.bss); expose for sched_check_frame */
 extern uint32_t sched_saved_esp;
 
-/* Called from sched_enter_trapret (via scratch stack) to validate the
- * frame about to be restored. */
-void sched_dbg_frame(uint32_t word0, uint32_t word1)
-{
-    DBGK("sched_dbg_frame: pid=%d word0=0x%lx word1=0x%lx\n",
-         running_task ? (int)running_task->pid : -1, word0, word1);
-}
-
-void sched_check_frame(void)
-{
-}
 
 void (*task_death_hook)(uint32_t pid) = NULL;
 
@@ -611,7 +600,7 @@ void task_kill(struct task *t)
         stale_stack = (void *)dead_stack_base;
 
         DBGK("task_kill: self-kill pid %d, jumping to pid %d esp=0x%lx\n",
-             dead_pid, running_task->pid, running_task->esp);
+             dead_pid, running_task->pid, (unsigned long)running_task->esp);
         asm volatile(
             "movl %0, %%esp\n\t"
             "jmp sched_enter_trapret\n\t"
@@ -710,7 +699,7 @@ struct task *task_fork(struct trap_frame *frame)
      * running_task->esp is only updated on context switch, so it may be
      * stale. The frame pointer IS the current kernel stack position. */
     DBGK("task_fork: frame=0x%lx frame->ds=0x%lx frame->eip=0x%lx frame->cs=0x%lx\n",
-         (uint32_t)frame, frame->ds, frame->eip, frame->cs);
+         (unsigned long)frame, (unsigned long)frame->ds, (unsigned long)frame->eip, (unsigned long)frame->cs);
     uint32_t parent_frame_esp = (uint32_t)frame;
     uint32_t stack_offset = parent_frame_esp - running_task->stack_base;
     child->esp = child->stack_base + stack_offset;
@@ -722,7 +711,7 @@ struct task *task_fork(struct trap_frame *frame)
     child_frame->eax = 0;
 
     DBGK("task_fork: child_frame=0x%lx ds=0x%lx eip=0x%lx cs=0x%lx\n",
-         (uint32_t)child_frame, child_frame->ds, child_frame->eip, child_frame->cs);
+         (unsigned long)child_frame, (unsigned long)child_frame->ds, (unsigned long)child_frame->eip, (unsigned long)child_frame->cs);
     uint32_t child_frame_page_virt = (uint32_t)child_frame & ~0xFFF;
     uint32_t child_frame_page_phys = vmm_get_phys(child_frame_page_virt);
     DBGK("task_fork: child_frame page_virt=0x%lx page_phys=0x%lx\n",
@@ -734,8 +723,8 @@ struct task *task_fork(struct trap_frame *frame)
     enable_interrupts();
 
     DBGK("fork: pid %d -> child pid %d, child->esp=0x%lx stack_base=0x%lx offset=%ld\n",
-         running_task->pid, child->pid, child->esp, child->stack_base,
-         child->esp - child->stack_base);
+         running_task->pid, child->pid, (unsigned long)child->esp, (unsigned long)child->stack_base,
+         (unsigned long)(child->esp - child->stack_base));
     return child;
 }
 

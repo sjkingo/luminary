@@ -10,8 +10,10 @@
  */
 
 #include "syscall.h"
-#include "gui.h"
+#include "x.h"
 #include "libc/stdio.h"
+
+static int xfd = -1;
 
 #define TERM_COLS   80
 #define TERM_ROWS   24
@@ -191,15 +193,15 @@ static void render_row(int wid, int row)
     buf[TERM_COLS] = '\0';
 
     unsigned int y = (unsigned int)(row * FONT_H);
-    win_fill_rect(wid, 0, y, CLIENT_W, FONT_H, COL_BG);
-    win_draw_text(wid, 0, y, buf, COL_FG, COL_BG);
+    win_fill_rect(xfd, wid, 0, y, CLIENT_W, FONT_H, COL_BG);
+    win_draw_text(xfd, wid, 0, y, buf, COL_FG, COL_BG);
 
     /* Draw block cursor on the cursor cell when in live view */
     if (scroll_offset == 0 && row == cur_row) {
         unsigned int cx = (unsigned int)(cur_col * FONT_W);
         char cell[2] = { buf[cur_col], '\0' };
-        win_fill_rect(wid, cx, y, FONT_W, FONT_H, COL_FG);
-        win_draw_text(wid, cx, y, cell, COL_BG, COL_FG);
+        win_fill_rect(xfd, wid, cx, y, FONT_W, FONT_H, COL_FG);
+        win_draw_text(xfd, wid, cx, y, cell, COL_BG, COL_FG);
     }
 }
 
@@ -215,7 +217,7 @@ static void render_dirty(int wid)
         }
     }
     if (any)
-        win_flip(wid);
+        win_flip(xfd, wid);
 }
 
 static void render_all(int wid)
@@ -249,15 +251,22 @@ int main(int argc, char **argv)
     int stdin_wr  = shell_in[1];
     int stdout_rd = shell_out[0];
 
-    int wid = win_create(40, 40, CLIENT_W + GUI_CHROME_W, CLIENT_H + GUI_CHROME_H, "Terminal");
+    xfd = open("/dev/x", O_RDWR);
+    if (xfd < 0) {
+        vfs_close(stdin_wr);
+        vfs_close(stdout_rd);
+        return 1;
+    }
+
+    int wid = win_create(xfd, 40, 40, CLIENT_W + GUI_CHROME_W, CLIENT_H + GUI_CHROME_H, "Terminal");
     if (wid < 0) {
         vfs_close(stdin_wr);
         vfs_close(stdout_rd);
         return 1;
     }
 
-    win_fill_rect(wid, 0, 0, CLIENT_W, CLIENT_H, COL_BG);
-    win_flip(wid);
+    win_fill_rect(xfd, wid, 0, 0, CLIENT_W, CLIENT_H, COL_BG);
+    win_flip(xfd, wid);
 
     char readbuf[256];
     struct gui_event ev;
@@ -274,7 +283,7 @@ int main(int argc, char **argv)
         }
 
         /* Handle GUI events */
-        while (win_poll_event(wid, &ev)) {
+        while (win_poll_event(xfd, wid, &ev)) {
             if (ev.type == GUI_EVENT_CLOSE) {
                 running = 0;
                 break;
@@ -307,6 +316,7 @@ int main(int argc, char **argv)
 
     vfs_close(stdin_wr);
     vfs_close(stdout_rd);
-    win_destroy(wid);
+    win_destroy(xfd, wid);
+    vfs_close(xfd);
     return 0;
 }

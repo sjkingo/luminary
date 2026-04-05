@@ -13,7 +13,6 @@
 #include "kernel/task.h"
 #include "kernel/sched.h"
 #include "kernel/heap.h"
-#include "kernel/gui.h"
 #include "kernel/vmm.h"
 #include "kernel/vfs.h"
 #include "kernel/initrd.h"
@@ -21,8 +20,6 @@
 #include "cpu/traps.h"
 #include "cpu/x86.h"
 #include "drivers/keyboard.h"
-#include "drivers/mouse.h"
-#include "drivers/fbdev.h"
 
 /* Validate that a user-supplied pointer range lies entirely within user space.
  * Pass len=0 to check only the start address (e.g. for string pointers where
@@ -70,14 +67,18 @@ static int sys_write(struct trap_frame *frame)
 }
 
 
-static int sys_win_get_size(struct trap_frame *frame)
+static int sys_ioctl(struct trap_frame *frame)
 {
-    int id       = (int)frame->ebx;
-    uint32_t *pw = (uint32_t *)frame->ecx;
-    uint32_t *ph = (uint32_t *)frame->edx;
-    if (!user_access_ok(pw, sizeof(uint32_t)) ||
-        !user_access_ok(ph, sizeof(uint32_t))) return -1;
-    return gui_window_get_size(id, pw, ph);
+    /* EBX=fd, ECX=request, EDX=arg (user pointer or scalar) */
+    int fd          = (int)frame->ebx;
+    uint32_t req    = frame->ecx;
+    void *arg       = (void *)frame->edx;
+
+    if (fd < 0 || fd >= VFS_FD_MAX) return -1;
+    struct vfs_fd *vfd = &running_task->fds[fd];
+    if (!vfd->open || !vfd->node) return -1;
+
+    return (int)vfs_ioctl(vfd->node, req, arg);
 }
 
 
@@ -144,177 +145,11 @@ static int sys_read_nb(struct trap_frame *frame)
     return -1;
 }
 
-static int sys_uptime(void)
-{
-    return (int)timekeeper.uptime_ms;
-}
-
 static int sys_getpid(void)
 {
     return (int)running_task->pid;
 }
 
-static int sys_halt(void)
-{
-    printk("system halted by pid %d\n", running_task->pid);
-    extern void cpu_halt(void);
-    cpu_halt();
-    return 0; /* unreachable */
-}
-
-static int sys_reboot(void)
-{
-    printk("system reboot requested by pid %d\n", running_task->pid);
-    extern void cpu_reboot(void);
-    cpu_reboot();
-    return 0; /* unreachable */
-}
-
-static int sys_ps(struct trap_frame *frame)
-{
-    /* EBX = buf, ECX = buflen — format process list into userland buffer */
-    char *buf = (char *)frame->ebx;
-    unsigned int buflen = (unsigned int)frame->ecx;
-
-    if (!user_access_ok(buf, buflen) || buflen == 0) return -1;
-
-    unsigned int pos = 0;
-    char tmp[128];
-
-    /* Header — tab-separated for easy parsing */
-    const char *hdr = "PID\tPPID\tPRIO\tTIME\tCMD\n";
-    unsigned int i = 0;
-    while (hdr[i] && pos < buflen - 1) buf[pos++] = hdr[i++];
-
-    /* Collect tasks into a local array, then emit in PID order */
-    struct task *tasks[64];
-    int ntasks = 0;
-    struct task *t = sched_queue;
-    while (t && ntasks < 64) {
-        tasks[ntasks++] = t;
-        t = t->next;
-    }
-
-    /* Insertion sort by pid ascending */
-    for (int i = 1; i < ntasks; i++) {
-        struct task *key = tasks[i];
-        int j = i - 1;
-        while (j >= 0 && tasks[j]->pid > key->pid) {
-            tasks[j + 1] = tasks[j];
-            j--;
-        }
-        tasks[j + 1] = key;
-    }
-
-    for (int i = 0; i < ntasks && pos < buflen - 1; i++) {
-        t = tasks[i];
-        unsigned int age_s = t->created / 1000;
-        const char *cmd = t->cmdline[0] ? t->cmdline : t->name;
-        int n = sprintf(tmp, "%d\t%d\t%d\t%lu\t%s\n",
-                        t->pid, t->ppid, t->prio_s, (unsigned long)age_s, cmd);
-        for (int j = 0; j < n && pos < buflen - 1; j++)
-            buf[pos++] = tmp[j];
-    }
-    buf[pos] = '\0';
-    return (int)pos;
-}
-
-/* ── GUI syscall helpers ─────────────────────────────────────────────────── */
-
-/* Read a uint32_t from user stack at offset bytes past uesp.
- * Extra args pushed before int $0x80 are at [uesp+0], [uesp+4], [uesp+8]...
- * so the first extra arg is at offset 0, second at 4, third at 8. */
-static uint32_t user_stack_arg(struct trap_frame *frame, unsigned int offset)
-{
-    uint32_t *usp = (uint32_t *)frame->uesp;
-    return usp[offset / 4];
-}
-
-static int sys_win_create(struct trap_frame *frame)
-{
-    /* EBX=x, ECX=y, EDX=w, [uesp+0]=h, [uesp+4]=title_ptr */
-    int32_t  x        = (int32_t)frame->ebx;
-    int32_t  y        = (int32_t)frame->ecx;
-    uint32_t w        = frame->edx;
-    uint32_t h        = user_stack_arg(frame, 0);
-    const char *title = (const char *)user_stack_arg(frame, 4);
-
-    if (!user_access_ok(title, 1) || w == 0 || h == 0) return -1;
-    return gui_window_create(x, y, w, h, title);
-}
-
-static int sys_win_destroy(struct trap_frame *frame)
-{
-    gui_window_destroy((int)frame->ebx);
-    return 0;
-}
-
-static int sys_win_fill_rect(struct trap_frame *frame)
-{
-    /* EBX=id, ECX=x, EDX=y, [uesp+0]=w, [uesp+4]=h, [uesp+8]=color */
-    int      id    = (int)frame->ebx;
-    uint32_t x     = frame->ecx;
-    uint32_t y     = frame->edx;
-    uint32_t w     = user_stack_arg(frame, 0);
-    uint32_t h     = user_stack_arg(frame, 4);
-    uint32_t color = user_stack_arg(frame, 8);
-    gui_window_fill_rect(id, x, y, w, h, color);
-    return 0;
-}
-
-static int sys_win_draw_rect(struct trap_frame *frame)
-{
-    /* EBX=id, ECX=x, EDX=y, [uesp+0]=w, [uesp+4]=h, [uesp+8]=color */
-    int      id    = (int)frame->ebx;
-    uint32_t x     = frame->ecx;
-    uint32_t y     = frame->edx;
-    uint32_t w     = user_stack_arg(frame, 0);
-    uint32_t h     = user_stack_arg(frame, 4);
-    uint32_t color = user_stack_arg(frame, 8);
-    gui_window_draw_rect(id, x, y, w, h, color);
-    return 0;
-}
-
-static int sys_win_draw_text(struct trap_frame *frame)
-{
-    /* EBX=id, ECX=x, EDX=y, [uesp+0]=str_ptr, [uesp+4]=fgcolor, [uesp+8]=bgcolor */
-    int         id      = (int)frame->ebx;
-    uint32_t    x       = frame->ecx;
-    uint32_t    y       = frame->edx;
-    const char *str     = (const char *)user_stack_arg(frame, 0);
-    uint32_t    fgcolor = user_stack_arg(frame, 4);
-    uint32_t    bgcolor = user_stack_arg(frame, 8);
-
-    if (!user_access_ok(str, 1)) return -1;
-    gui_window_draw_text(id, x, y, str, fgcolor, bgcolor);
-    return 0;
-}
-
-static int sys_win_flip(struct trap_frame *frame)
-{
-    gui_window_flip((int)frame->ebx);
-    return 0;
-}
-
-static int sys_win_poll_event(struct trap_frame *frame)
-{
-    /* EBX=id, ECX=ptr to struct gui_event in user space */
-    int id = (int)frame->ebx;
-    struct gui_event *ev = (struct gui_event *)frame->ecx;
-    if (!user_access_ok(ev, sizeof(struct gui_event))) return -1;
-    return gui_window_poll_event(id, ev);
-}
-
-static int sys_mouse_get(struct trap_frame *frame)
-{
-    /* EBX=ptr to struct { uint32_t x, y; uint8_t buttons; } in user space */
-    uint32_t *buf = (uint32_t *)frame->ebx;
-    if (!user_access_ok(buf, 3 * sizeof(uint32_t))) return -1;
-    buf[0] = mouse_x;
-    buf[1] = mouse_y;
-    buf[2] = (uint32_t)mouse_buttons;
-    return 1;
-}
 
 static int sys_kill(struct trap_frame *frame)
 {
@@ -741,15 +576,6 @@ static int sys_stat(struct trap_frame *frame)
     return vfs_stat(path, out);
 }
 
-static int sys_mount(struct trap_frame *frame)
-{
-    (void)frame;
-    /* Print VFS mount information to the kernel console */
-    printk("mount:\n");
-    printk("  /     initrd  cpio  rw\n");
-    printk("  /dev  devfs         rw\n");
-    return 0;
-}
 
 /* Resolve a user-supplied path against the running task's cwd.
  * Returns pointer to out_buf (VFS_PATH_MAX bytes) on success, NULL on error. */
@@ -802,26 +628,6 @@ static int sys_unlink(struct trap_frame *frame)
     return vfs_unlink(path);
 }
 
-static int sys_gui_set_bg(struct trap_frame *frame)
-{
-    /* EBX = pixel buffer ptr, ECX = width, EDX = height */
-    const uint32_t *pixels = (const uint32_t *)frame->ebx;
-    uint32_t w = frame->ecx;
-    uint32_t h = frame->edx;
-
-    if (w == 0 || h == 0 || !user_access_ok(pixels, w * h * sizeof(uint32_t)))
-        return -1;
-
-    gui_set_bg(pixels, w, h);
-    return 0;
-}
-
-static int sys_gui_set_desktop_color(struct trap_frame *frame)
-{
-    /* EBX = r, ECX = g, EDX = b (0–255 each) */
-    gui_set_desktop_color(frame->ebx & 0xFF, frame->ecx & 0xFF, frame->edx & 0xFF);
-    return 0;
-}
 
 /* ── dispatch ─────────────────────────────────────────────────────────────── */
 
@@ -842,53 +648,14 @@ void syscall_handler(struct trap_frame *frame)
     case SYS_READ_NB:
         ret = sys_read_nb(frame);
         break;
-    case SYS_UPTIME:
-        ret = sys_uptime();
-        break;
     case SYS_GETPID:
         ret = sys_getpid();
-        break;
-    case SYS_HALT:
-        ret = sys_halt();
-        break;
-    case SYS_REBOOT:
-        ret = sys_reboot();
-        break;
-    case SYS_PS:
-        ret = sys_ps(frame);
-        break;
-    case SYS_WIN_CREATE:
-        ret = sys_win_create(frame);
-        break;
-    case SYS_WIN_DESTROY:
-        ret = sys_win_destroy(frame);
-        break;
-    case SYS_WIN_FILL_RECT:
-        ret = sys_win_fill_rect(frame);
-        break;
-    case SYS_WIN_DRAW_RECT:
-        ret = sys_win_draw_rect(frame);
-        break;
-    case SYS_WIN_DRAW_TEXT:
-        ret = sys_win_draw_text(frame);
-        break;
-    case SYS_WIN_FLIP:
-        ret = sys_win_flip(frame);
-        break;
-    case SYS_WIN_POLL_EVENT:
-        ret = sys_win_poll_event(frame);
-        break;
-    case SYS_MOUSE_GET:
-        ret = sys_mouse_get(frame);
         break;
     case SYS_KILL:
         ret = sys_kill(frame);
         break;
     case SYS_YIELD:
         ret = sys_yield();
-        break;
-    case SYS_WIN_GET_SIZE:
-        ret = sys_win_get_size(frame);
         break;
     case SYS_OPEN:
         ret = sys_open(frame);
@@ -904,9 +671,6 @@ void syscall_handler(struct trap_frame *frame)
         break;
     case SYS_STAT:
         ret = sys_stat(frame);
-        break;
-    case SYS_MOUNT:
-        ret = sys_mount(frame);
         break;
     case SYS_EXEC:
         ret = sys_exec(frame);
@@ -944,11 +708,8 @@ void syscall_handler(struct trap_frame *frame)
     case SYS_UNLINK:
         ret = sys_unlink(frame);
         break;
-    case SYS_GUI_SET_BG:
-        ret = sys_gui_set_bg(frame);
-        break;
-    case SYS_GUI_SET_DESKTOP_COLOR:
-        ret = sys_gui_set_desktop_color(frame);
+    case SYS_IOCTL:
+        ret = sys_ioctl(frame);
         break;
     default:
         printk("unknown syscall %d from pid %d\n",

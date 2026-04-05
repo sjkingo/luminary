@@ -53,6 +53,9 @@ struct window {
 /* Initialise the GUI subsystem and start the compositor kernel task */
 void init_gui(void);
 
+/* Register /dev/x chardev — call after init_devfs() */
+void init_dev_x(void);
+
 /* The compositor task entry point (run as a kernel task) */
 void compositor_task(void);
 
