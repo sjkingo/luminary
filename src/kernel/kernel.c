@@ -218,6 +218,8 @@ void kernel_main(struct multiboot_info *mb, uint32_t start, uint32_t stack, uint
         init_dev_sys();
         init_dev_x();
         init_ata();
+        blkdev_register_all_devnodes();
+        init_ext2();
 
         uint32_t init_size = 0;
         const void *init_elf = initrd_get_file("/bin/init", &init_size);

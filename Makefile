@@ -48,19 +48,17 @@ bootiso: kernel initrd
 		INITRD_IMG=$(abspath $(INITRD_IMG)) \
 		ISO_OUT=$(abspath $(ISO_OUT))
 
-.PHONY: disk
-disk: | $(BUILD_DIR)
-	dd if=/dev/zero of=$(DISK_IMG) bs=512 count=204800
-	python3 tools/mkdisk.py $(DISK_IMG)
 
-$(DISK_IMG): | $(BUILD_DIR)
-	dd if=/dev/zero of=$(DISK_IMG) bs=512 count=204800
+$(DISK_IMG): | $(BIN_DIR) $(BUILD_DIR)
+	$(MAKE) -C userland BIN_DIR=$(abspath $(BIN_DIR))
+	cp -r rootfs/. $(ROOTFS_DIR)/
+	dd if=/dev/zero of=$(DISK_IMG) bs=512 count=$(EXT2FS_TOTAL_SECTS)
 	python3 tools/mkdisk.py $(DISK_IMG)
-
-.PHONY: ext2fs
-ext2fs: initrd $(DISK_IMG)
 	$(MKE2FS) -t ext2 -b 1024 -E offset=$(EXT2FS_OFFSET) -d $(ROOTFS_DIR) -F $(DISK_IMG) $(EXT2FS_BLOCKS)
 	@echo "ext2fs: formatted and populated $(DISK_IMG) from $(ROOTFS_DIR)"
+
+.PHONY: ext2fs
+ext2fs: $(DISK_IMG)
 
 .PHONY: bootiso-ext2
 bootiso-ext2: kernel ext2fs
