@@ -28,6 +28,9 @@ libc/%.o: libc/%.c libc/string.h libc/stdio.h libc/stdlib.h
 $(BIN_DIR)/%: $(CRT0) %.o $(LIBC)
 	$(CC) $(LDFLAGS) -o $@ $(CRT0) $*.o $(LIBC)
 
+# Prevent make's built-in .c -> executable rule from firing
+%: %.c
+
 # Compile rules
 %.o: %.c syscall.h
 	$(CC) $(CFLAGS) -c $< -o $@

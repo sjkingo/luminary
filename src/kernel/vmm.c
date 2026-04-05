@@ -43,6 +43,8 @@ void vmm_map_page_in(uint32_t dir_phys, uint32_t virt, uint32_t phys, uint32_t f
      * region and directly accessible by physical address. */
     if (!(dir[pd_index] & PTE_PRESENT)) {
         uint32_t pt_frame = pmm_alloc_frame_zone(PMM_ZONE_LOW);
+        DBGK("vmm_map_page_in: new PT pdi=0x%lx pt=0x%lx virt=0x%lx dir=0x%lx\n",
+             pd_index, pt_frame, virt, dir_phys);
         memset((void *)pt_frame, 0, PAGE_SIZE);
         dir[pd_index] = pt_frame | PTE_PRESENT | PTE_WRITE | (flags & PTE_USER);
     } else if (dir_phys != (uint32_t)page_directory &&
@@ -52,6 +54,8 @@ void vmm_map_page_in(uint32_t dir_phys, uint32_t virt, uint32_t phys, uint32_t f
          * table. Allocate a private copy for this task instead. */
         uint32_t kern_pt = dir[pd_index] & 0xFFFFF000;
         uint32_t pt_frame = pmm_alloc_frame_zone(PMM_ZONE_LOW);
+        DBGK("vmm_map_page_in: private PT copy pdi=0x%lx kern_pt=0x%lx new_pt=0x%lx virt=0x%lx dir=0x%lx\n",
+             pd_index, kern_pt, pt_frame, virt, dir_phys);
         memcpy((void *)pt_frame, (void *)kern_pt, PAGE_SIZE);
         dir[pd_index] = pt_frame | PTE_PRESENT | PTE_WRITE | (flags & PTE_USER);
     } else if ((flags & PTE_USER) && !(dir[pd_index] & PTE_USER)) {
@@ -68,6 +72,9 @@ void vmm_unmap_page_in(uint32_t dir_phys, uint32_t virt)
     uint32_t *dir = (uint32_t *)dir_phys;
     uint32_t pd_index = virt >> 22;
     uint32_t pt_index = (virt >> 12) & 0x3FF;
+
+    if (virt >= 0xc0a10000 && virt < 0xc0a15000)
+        DBGK("vmm_unmap_page_in: virt=0x%lx dir=0x%lx\n", virt, dir_phys);
 
     if (!(dir[pd_index] & PTE_PRESENT))
         return;
@@ -307,6 +314,7 @@ uint32_t vmm_create_page_dir(void)
     /* Allocate from ZONE_LOW so the directory frame is within the
      * identity-mapped region and directly accessible by physical address. */
     uint32_t dir_frame = pmm_alloc_frame_zone(PMM_ZONE_LOW);
+    DBGK("vmm_create_page_dir: dir_frame=0x%lx\n", dir_frame);
     uint32_t *dir = (uint32_t *)dir_frame;
     memcpy(dir, page_directory, PAGE_SIZE);
     return dir_frame;
@@ -334,6 +342,7 @@ uint32_t vmm_clone_page_dir(uint32_t src_dir_phys)
 
         /* Allocate a private page table for the child (ZONE_LOW, directly accessible) */
         uint32_t new_pt_phys = pmm_alloc_frame_zone(PMM_ZONE_LOW);
+        DBGK("vmm_clone_page_dir: new user PT pdi=0x%lx new_pt=0x%lx\n", pdi, new_pt_phys);
         memset((void *)new_pt_phys, 0, PAGE_SIZE);
         uint32_t *new_pt = (uint32_t *)new_pt_phys;
 
@@ -384,8 +393,8 @@ int vmm_cow_fault(uint32_t dir_phys, uint32_t fault_addr)
     uint32_t old_frame = pt[pti] & 0xFFFFF000;
     uint32_t flags     = pt[pti] & 0xFFF;
 
-    DBGK("cow_fault: virt=0x%lx old_frame=0x%lx refcount=%lu\n",
-         fault_addr, old_frame, pmm_refcount_get(old_frame));
+    DBGK("cow_fault: virt=0x%lx old_frame=0x%lx refcount=%lu dir_phys=0x%lx\n",
+         fault_addr, old_frame, pmm_refcount_get(old_frame), dir_phys);
 
     if (pmm_refcount_get(old_frame) == 1) {
         /* Sole owner: just make it writable, no copy needed */
@@ -394,6 +403,7 @@ int vmm_cow_fault(uint32_t dir_phys, uint32_t fault_addr)
         /* Shared (refcount > 1): allocate new frame, copy content, remap.
          * Release our reference to the old frame. */
         uint32_t new_frame = pmm_alloc_frame();
+        DBGK("cow_fault: new_frame=0x%lx\n", new_frame);
         void *old_kp = vmm_kmap(old_frame);
         void *new_kp = vmm_kmap(new_frame);
         memcpy(new_kp, old_kp, PAGE_SIZE);

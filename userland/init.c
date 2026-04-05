@@ -21,5 +21,6 @@ int main(int argc, char **argv)
             waitpid(pid, NULL, 0);
         }
         /* shell died, loop and respawn */
+        printf("init: " INIT_CHILD " (pid %d) died, respawning\n\n", pid);
     }
 }

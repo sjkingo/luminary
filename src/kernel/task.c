@@ -87,6 +87,7 @@ static uint8_t *kstack_alloc(void)
     uint8_t *base = alloc + PAGE_SIZE;
     /* Write canary at the bottom of the usable stack */
     *(uint32_t *)base = KSTACK_CANARY;
+    DBGK("kstack_alloc: base=0x%lx canary=0x%lx\n", (uint32_t)base, *(uint32_t *)base);
     return base;
 }
 
@@ -469,10 +470,26 @@ void sched_free_stale_stack(void)
     }
 }
 
+/* sched_saved_esp is declared in traps.S (.bss); expose for sched_check_frame */
+extern uint32_t sched_saved_esp;
+
+/* Called from sched_enter_trapret (via scratch stack) to validate the
+ * frame about to be restored. */
+void sched_dbg_frame(uint32_t word0, uint32_t word1)
+{
+    DBGK("sched_dbg_frame: pid=%d word0=0x%lx word1=0x%lx\n",
+         running_task ? (int)running_task->pid : -1, word0, word1);
+}
+
+void sched_check_frame(void)
+{
+}
+
 void (*task_death_hook)(uint32_t pid) = NULL;
 
 void task_kill(struct task *t)
 {
+    DBGK("task_kill: killing pid %d (%s), running_task=%d\n", t->pid, t->name, running_task->pid);
     if (t->pid == PID_IDLE)
         panic("task_kill: cannot kill idle task");
 
@@ -502,33 +519,62 @@ void task_kill(struct task *t)
     if (task_death_hook)
         task_death_hook(t->pid);
 
+    /* Save pid and stack base before respawn_init() overwrites task_init */
+    unsigned int dead_pid = t->pid;
+    uint32_t dead_stack_base = t->stack_base;
+
     /* destroy task's page directory (frees user page tables and frames) */
     if (t->page_dir_phys != vmm_get_kernel_page_dir())
         vmm_destroy_page_dir(t->page_dir_phys);
 
-    /* if the killed task is init, respawn it immediately */
+    /* if the killed task is init, respawn it immediately.
+     * respawn_init() memsets &task_init and creates a fresh task, so all
+     * fields of *t (including pid and stack_base) are overwritten. Use the
+     * saved dead_pid / dead_stack_base from here on — never t->pid etc. */
     if (t == &task_init)
         respawn_init();
 
-    /* Wake any task waiting for this pid */
-    {
-        unsigned int dead_pid = t->pid;
-        struct task *waiter = sched_queue;
-        while (waiter) {
-            if (waiter->wait_pid == (int)dead_pid) {
-                waiter->wait_pid    = -1;
-                waiter->wait_done   = true;
-                waiter->exit_status = t->exit_status;
-                waiter->prio_d      = waiter->prio_s; /* unsuspend */
-            }
-            waiter = waiter->next;
+    /* Wake any task waiting for this pid before killing children,
+     * so waiters are notified even if a child kill doesn't return. */
+    DBGK("task_kill: waking waiters for pid %d\n", dead_pid);
+    struct task *waiter = sched_queue;
+    while (waiter) {
+        if (waiter->wait_pid == (int)dead_pid) {
+            DBGK("task_kill: waking pid %d (was waiting for %d)\n", waiter->pid, dead_pid);
+            waiter->wait_pid    = -1;
+            waiter->wait_done   = true;
+            waiter->exit_status = t->exit_status;
+            waiter->prio_d      = waiter->prio_s;
         }
+        waiter = waiter->next;
     }
+
+    /* Kill all direct children. Collect first, safe against queue mutation.
+     * If a child is running_task its task_kill won't return — kill it last. */
+    struct task *children[64];
+    int nchildren = 0;
+    struct task *c = sched_queue;
+    while (c && nchildren < 64) {
+        if (c->ppid == dead_pid)
+            children[nchildren++] = c;
+        c = c->next;
+    }
+    DBGK("task_kill: pid %d has %d children\n", dead_pid, nchildren);
+    struct task *self_child = NULL;
+    for (int i = 0; i < nchildren; i++) {
+        if (children[i] == running_task)
+            self_child = children[i];
+        else
+            task_kill(children[i]);
+    }
+    if (self_child)
+        task_kill(self_child); /* does not return */
 
     /* if we killed the running task, force a context switch.
      * We pick a new task and jump directly to its saved state,
      * bypassing the normal scheduler path since the current
      * trap frame belongs to the dead task. */
+    DBGK("task_kill: pid %d done, t==running_task: %d\n", dead_pid, t == running_task);
     if (t == running_task) {
         /* pick the first schedulable task */
         struct task *next = sched_queue;
@@ -555,16 +601,17 @@ void task_kill(struct task *t)
          * We must NOT free the dying task's kernel stack before switching
          * ESP — a spurious/NMI interrupt between kfree and the movl would
          * use the freed stack. Free it after we are on the new stack. */
-        uint32_t old_stack = t->stack_base;
-        t->stack_base = 0;
-
         vmm_switch_page_dir(running_task->page_dir_phys);
         tss_set_kernel_stack(running_task->stack_base + TASK_STACK_SIZE);
 
         /* Queue the old stack for freeing — traps.S will call
-         * sched_free_stale_stack() after switching to the new ESP. */
-        stale_stack = (void *)old_stack;
+         * sched_free_stale_stack() after switching to the new ESP.
+         * Use dead_stack_base (saved before respawn_init may have
+         * overwritten t->stack_base with the new init's stack). */
+        stale_stack = (void *)dead_stack_base;
 
+        DBGK("task_kill: self-kill pid %d, jumping to pid %d esp=0x%lx\n",
+             dead_pid, running_task->pid, running_task->esp);
         asm volatile(
             "movl %0, %%esp\n\t"
             "jmp sched_enter_trapret\n\t"
@@ -574,10 +621,13 @@ void task_kill(struct task *t)
         __builtin_unreachable();
     }
 
-    /* Killed a different task — free its stack and re-enable interrupts. */
-    if (t->stack_base != 0)
-        kstack_free((uint8_t *)t->stack_base);
-    enable_interrupts();
+    /* Killed a different task — free its stack.
+     * Do NOT re-enable interrupts here: callers (sys_kill, cascade) may hold
+     * interrupts disabled across multiple task_kill calls, and enabling mid-
+     * cascade would let the scheduler switch away from the caller's stack.
+     * Use dead_stack_base (saved before respawn_init may have overwritten t). */
+    if (dead_stack_base != 0)
+        kstack_free((uint8_t *)dead_stack_base);
 }
 
 struct task *task_fork(struct trap_frame *frame)
@@ -615,9 +665,43 @@ struct task *task_fork(struct trap_frame *frame)
 
     /* Deep-copy the address space (kernel page dir now includes kstack mapping) */
     child->page_dir_phys = vmm_clone_page_dir(running_task->page_dir_phys);
+    uint32_t dbg_kstack_top = (uint32_t)kstack + TASK_STACK_SIZE - PAGE_SIZE;
+    uint32_t dbg_pdi = dbg_kstack_top >> 22;
+    uint32_t dbg_pti = (dbg_kstack_top >> 12) & 0x3FF;
+    uint32_t *dbg_child_dir = (uint32_t *)child->page_dir_phys;
+    uint32_t dbg_child_pde  = dbg_child_dir[dbg_pdi];
+    uint32_t dbg_kern_pde   = ((uint32_t *)vmm_get_kernel_page_dir())[dbg_pdi];
+    DBGK("task_fork: kstack_top=0x%lx pdi=0x%lx child_pde=0x%lx kern_pde=0x%lx shared=%d\n",
+         dbg_kstack_top, dbg_pdi, dbg_child_pde, dbg_kern_pde,
+         (dbg_child_pde & 0xFFFFF000) == (dbg_kern_pde & 0xFFFFF000));
+    if (dbg_child_pde & 1) {
+        uint32_t *dbg_pt = (uint32_t *)(dbg_child_pde & 0xFFFFF000);
+        DBGK("task_fork: child PTE[%ld]=0x%lx\n", dbg_pti, dbg_pt[dbg_pti]);
+    }
 
     uint8_t *parent_kstack = (uint8_t *)running_task->stack_base;
+    uint32_t dbg_cr3, dbg_top_pte;
+    asm volatile("mov %%cr3, %0" : "=r"(dbg_cr3));
+    uint32_t dbg_top_virt = (uint32_t)kstack + TASK_STACK_SIZE - PAGE_SIZE;
+    uint32_t *dbg_cr3_dir = (uint32_t *)dbg_cr3;
+    uint32_t dbg_cr3_pde = dbg_cr3_dir[dbg_top_virt >> 22];
+    if (dbg_cr3_pde & 1) {
+        uint32_t *dbg_cr3_pt = (uint32_t *)(dbg_cr3_pde & 0xFFFFF000);
+        dbg_top_pte = dbg_cr3_pt[(dbg_top_virt >> 12) & 0x3FF];
+    } else {
+        dbg_top_pte = 0;
+    }
+    DBGK("task_fork: before memcpy CR3=0x%lx top_virt=0x%lx top_pte=0x%lx canary=0x%lx\n",
+         dbg_cr3, dbg_top_virt, dbg_top_pte, *(uint32_t *)kstack);
     memcpy(kstack, parent_kstack, TASK_STACK_SIZE);
+    if (dbg_cr3_pde & 1) {
+        uint32_t *dbg_cr3_pt = (uint32_t *)(dbg_cr3_pde & 0xFFFFF000);
+        dbg_top_pte = dbg_cr3_pt[(dbg_top_virt >> 12) & 0x3FF];
+    }
+    uint32_t dbg_frame_offset = (uint32_t)frame - running_task->stack_base;
+    uint32_t dbg_child_frame_addr = (uint32_t)kstack + dbg_frame_offset;
+    DBGK("task_fork: after memcpy top_pte=0x%lx canary=0x%lx frame_at_0x%lx=0x%lx\n",
+         dbg_top_pte, *(uint32_t *)kstack, dbg_child_frame_addr, *(uint32_t *)dbg_child_frame_addr);
 
     child->stack_base = (unsigned int)kstack;
     child->stack_hwm  = (unsigned int)(kstack + TASK_STACK_SIZE);
@@ -625,6 +709,8 @@ struct task *task_fork(struct trap_frame *frame)
     /* Use the current syscall trap frame as the saved ESP.
      * running_task->esp is only updated on context switch, so it may be
      * stale. The frame pointer IS the current kernel stack position. */
+    DBGK("task_fork: frame=0x%lx frame->ds=0x%lx frame->eip=0x%lx frame->cs=0x%lx\n",
+         (uint32_t)frame, frame->ds, frame->eip, frame->cs);
     uint32_t parent_frame_esp = (uint32_t)frame;
     uint32_t stack_offset = parent_frame_esp - running_task->stack_base;
     child->esp = child->stack_base + stack_offset;
@@ -635,12 +721,21 @@ struct task *task_fork(struct trap_frame *frame)
     struct trap_frame *child_frame = (struct trap_frame *)child->esp;
     child_frame->eax = 0;
 
+    DBGK("task_fork: child_frame=0x%lx ds=0x%lx eip=0x%lx cs=0x%lx\n",
+         (uint32_t)child_frame, child_frame->ds, child_frame->eip, child_frame->cs);
+    uint32_t child_frame_page_virt = (uint32_t)child_frame & ~0xFFF;
+    uint32_t child_frame_page_phys = vmm_get_phys(child_frame_page_virt);
+    DBGK("task_fork: child_frame page_virt=0x%lx page_phys=0x%lx\n",
+         child_frame_page_virt, child_frame_page_phys);
+
     /* Insert child into scheduler after parent */
     insert_task_sorted(child, child->prio_s);
 
     enable_interrupts();
 
-    DBGK("fork: pid %d -> child pid %d\n", running_task->pid, child->pid);
+    DBGK("fork: pid %d -> child pid %d, child->esp=0x%lx stack_base=0x%lx offset=%ld\n",
+         running_task->pid, child->pid, child->esp, child->stack_base,
+         child->esp - child->stack_base);
     return child;
 }
 

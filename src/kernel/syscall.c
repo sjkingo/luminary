@@ -518,6 +518,7 @@ static int sys_waitpid(struct trap_frame *frame)
 
     running_task->wait_done = false;
     if (status) *status = running_task->exit_status;
+    DBGK("waitpid: pid %d unblocked, returning %d\n", running_task->pid, target_pid);
     return target_pid;
 }
 

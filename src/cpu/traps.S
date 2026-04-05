@@ -10,6 +10,7 @@
 
 .section .bss
 .align 16
+.globl sched_saved_esp
 sched_saved_esp:        .space 4
                         .space 4096     # scratch stack for sched_free_stale_stack call
 sched_scratch_stack_top:
@@ -73,6 +74,13 @@ alltraps:
     # clear prev_task
     movl $0, prev_task
 
+    # log first two words at new ESP before entering trapret
+    # C call: sched_dbg_frame(word0, word1) — args pushed right-to-left
+    pushl 4(%esp)    # arg1 = [esp+4] = second word; esp -= 4
+    pushl 4(%esp)    # arg0 = [esp+4] = original [esp] = first word; esp -= 4
+    call sched_dbg_frame
+    addl $8, %esp
+
     # fall through into sched_enter_trapret
 
 # Entry point for task_kill: ESP already points at the new task's trap frame.
@@ -84,6 +92,7 @@ sched_enter_trapret:
     # then restore frame pointer before restoring context.
     movl %esp, sched_saved_esp
     movl $sched_scratch_stack_top, %esp
+    call sched_check_frame
     call sched_free_stale_stack
     movl sched_saved_esp, %esp
 

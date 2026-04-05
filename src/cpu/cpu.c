@@ -152,9 +152,15 @@ static void stack_trace_from(uint32_t ebp, int max_frames,
 {
     printk("Kernel stack trace:\n");
     for (int i = 0; i < max_frames && ebp != 0; i++) {
+        /* EBP must point into the kernel stack before we dereference it */
+        if (stack_base && stack_top &&
+            (ebp < stack_base || ebp + 8 > stack_top))
+            break;
+
         uint32_t *frame = (uint32_t *)ebp;
         uint32_t ret_eip = frame[1];
 
+        /* EIP must be in kernel code (0x100000 .. 0xC0000000) */
         if (ret_eip < 0x100000 || ret_eip >= 0xC0000000u)
             break;
 
