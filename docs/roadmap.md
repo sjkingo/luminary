@@ -47,12 +47,13 @@
 - ATA PIO driver (`drivers/ata.c`): probes primary and secondary IDE channels; IDENTIFY-based detection; LBA28 read/write; drive interrupts masked (nIEN); drives registered as `/dev/hda`–`/dev/hdd`
 - VFS improvements: `vfs_alloc_node` falls back to `kmalloc` when the 512-node static pool is exhausted (heap-allocated nodes freed via `kfree`); inode numbers populated from cpio headers for initrd nodes and auto-assigned for runtime-created nodes; `struct vfs_stat` exposes inode; `vfs_rename` with Linux semantics; `mv` userland program
 - `stat` shows inode number; `fstat(fd, &st)` via `SYS_FSTAT (48)`
+- ext2 filesystem driver (`src/fs/ext2.c`): registered as `"ext2"`; `ext2_mount` reads the superblock and block group descriptors, eagerly walks the directory tree from inode 2, and populates the VFS tree; file data read/written on demand via per-slot op functions (same pattern as blkdev/pipe); write support for already-allocated blocks (no block allocation or bitmap updates); `ext2_umount` frees the VFS subtree and clears the slot table; boot with `root=/dev/hda1` in the GRUB entry or `mount ext2 /dev/hda1 /mnt` from userland
 
 ## What Luminary Needs
 
 1. **Network stack** — build on RTL8139 driver (has init but no packet I/O or IRQ handler yet)
 2. **i3-style keybinding system** — planned, not yet started
-3. **Persistent filesystem** — ext2 as a `struct fs_ops` driver; the mount framework, block device layer, partition probing, and cmdline `root=` parsing are all in place. Implement `ext2_mount` (read superblock, walk inode table, populate VFS tree or lazy-load on lookup) and `ext2_umount`. Format a partition with `mke2fs` and boot with `root=/dev/hda1` in the GRUB entry.
+3. **ext2 block allocation** — write support currently only handles already-allocated blocks; growing files or creating new ones requires bitmap updates and block allocation in the ext2 driver
 4. **ATA LBA48** — current ATA driver is LBA28 only (max 128GB). LBA48 support requires using commands `0x24`/`0x34` and writing the high sector count and LBA bytes via the HOB register sequence.
 
 ## Known Bugs
