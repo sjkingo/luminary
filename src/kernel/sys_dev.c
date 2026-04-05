@@ -4,14 +4,25 @@
  * Programs open /dev/sys and issue ioctl() calls with SYS_CTL_* request codes.
  */
 
+#include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
 
 #include "kernel/kernel.h"
+#include "kernel/vmm.h"
 #include "kernel/vfs.h"
 #include "kernel/sched.h"
 #include "kernel/task.h"
 #include "kernel/sys_dev.h"
+
+static inline bool user_access_ok(const void *ptr, uint32_t len)
+{
+    uint32_t addr = (uint32_t)ptr;
+    if (addr < USER_SPACE_START) return false;
+    if (addr >= USER_SPACE_END)  return false;
+    if (len > 1 && len > USER_SPACE_END - addr) return false;
+    return true;
+}
 
 /* ── control op ──────────────────────────────────────────────────────────── */
 
@@ -34,14 +45,16 @@ static int32_t sys_control_op(struct vfs_node *node, uint32_t request, void *arg
 
     case SYS_CTL_UPTIME: {
         uint32_t *out = (uint32_t *)arg;
-        if (!out) return -1;
+        if (!user_access_ok(out, sizeof(uint32_t))) return -1;
         *out = (uint32_t)timekeeper.uptime_ms;
         return 0;
     }
 
     case SYS_CTL_PS: {
         struct sys_ctl_ps *r = (struct sys_ctl_ps *)arg;
-        if (!r || !r->buf || r->len == 0) return -1;
+        if (!user_access_ok(r, sizeof(struct sys_ctl_ps))) return -1;
+        if (!r->buf || r->len == 0) return -1;
+        if (!user_access_ok(r->buf, r->len)) return -1;
 
         char *buf = r->buf;
         uint32_t buflen = r->len;
@@ -87,7 +100,9 @@ static int32_t sys_control_op(struct vfs_node *node, uint32_t request, void *arg
 
     case SYS_CTL_MOUNTS: {
         struct sys_ctl_mounts *r = (struct sys_ctl_mounts *)arg;
-        if (!r || !r->buf || r->len == 0) return -1;
+        if (!user_access_ok(r, sizeof(struct sys_ctl_mounts))) return -1;
+        if (!r->buf || r->len == 0) return -1;
+        if (!user_access_ok(r->buf, r->len)) return -1;
         const char *text =
             "MOUNT  TYPE    FS    OPTIONS\n"
             "/      initrd  cpio  rw\n"

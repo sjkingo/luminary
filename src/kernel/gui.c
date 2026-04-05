@@ -1545,6 +1545,8 @@ static int32_t x_control_op(struct vfs_node *node, uint32_t request, void *arg)
     case X_WIN_CREATE: {
         struct x_win_create *r = (struct x_win_create *)arg;
         if (!r) return -1;
+        if (!r->title || (uint32_t)r->title < USER_SPACE_START
+                      || (uint32_t)r->title >= USER_SPACE_END) return -1;
         return gui_window_create(r->x, r->y, r->w, r->h, r->title);
     }
     case X_WIN_DESTROY: {
@@ -1568,6 +1570,8 @@ static int32_t x_control_op(struct vfs_node *node, uint32_t request, void *arg)
     case X_WIN_DRAW_TEXT: {
         struct x_win_text *r = (struct x_win_text *)arg;
         if (!r || !r->str) return -1;
+        if ((uint32_t)r->str < USER_SPACE_START
+         || (uint32_t)r->str >= USER_SPACE_END) return -1;
         gui_window_draw_text(r->id, r->x, r->y, r->str, r->fgcolor, r->bgcolor);
         return 0;
     }
@@ -1590,6 +1594,8 @@ static int32_t x_control_op(struct vfs_node *node, uint32_t request, void *arg)
     case X_SET_BG: {
         struct x_set_bg *r = (struct x_set_bg *)arg;
         if (!r || !r->pixels || r->w == 0 || r->h == 0) return -1;
+        if ((uint32_t)r->pixels < USER_SPACE_START
+         || (uint32_t)r->pixels >= USER_SPACE_END) return -1;
         gui_set_bg(r->pixels, r->w, r->h);
         return 0;
     }

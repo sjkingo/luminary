@@ -78,6 +78,9 @@ static int sys_ioctl(struct trap_frame *frame)
     struct vfs_fd *vfd = &running_task->fds[fd];
     if (!vfd->open || !vfd->node) return -1;
 
+    /* If arg is non-NULL it must point into user space. */
+    if (arg && !user_access_ok(arg, 1)) return -1;
+
     return (int)vfs_ioctl(vfd->node, req, arg);
 }
 
