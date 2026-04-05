@@ -45,15 +45,14 @@ docs/
 
 | Target | Description |
 |--------|-------------|
-| `make` | Build kernel binary |
-| `make qemu` | Direct kernel boot with QEMU (serial to /tmp/luminary.log) |
-| `make qemucd` | Build GRUB2 ISO and boot from CD-ROM |
-| `make disk` | Create a blank 100MB disk image at `_build/disk.img` |
-| `make qemucd-disk` | Boot ISO with `_build/disk.img` attached as `-hda` |
-| `make console` | QEMU -nographic (requires USE_SERIAL) |
-| `make debug` | QEMU with GDB stub (-s -S) |
+| `make` | Build GRUB2 ISO |
+| `make qemu` | Build ISO + disk image, boot from CD-ROM with `-hda` attached (GRUB menu selects initrd or disk boot) |
+| `make disk` | Create (or force-recreate) a blank 100MB MBR-partitioned disk image at `_build/disk.img` via `tools/mkdisk.py` |
+| `make debug` | Same as `qemu` but with GDB stub (`-s -S`) |
 | `make gdb` | Connect GDB to running QEMU |
 | `make clean` | Clean build artifacts |
+
+`_build/disk.img` is created automatically on first `make qemu` if it does not exist. `make disk` force-recreates it. The disk image has one MBR partition (type 0x83, LBA 2048+202752 sectors); partition table is written by `tools/mkdisk.py`.
 
 ## Memory Model
 
@@ -118,11 +117,14 @@ Registered filesystem drivers:
 
 | Driver | fstype | Description |
 |--------|--------|-------------|
+| `initrd` (`initrd.c`) | `"initrd"` | Read-only cpio newc archive. `init_initrd(data, size)` saves the cpio pointer and registers the driver. `mount` re-parses the archive into a new VFS subtree (zero-copy: file data pointers into the multiboot module buffer). `umount` frees the node tree without touching the data buffer. |
 | `tmpfs` (`tmpfs.c`) | `"tmpfs"` | In-memory writable filesystem. `mount` allocates a fresh VFS_DIR root node; files use the standard heap-backed writable node mechanism. `umount` frees the entire subtree. |
 
-On boot: `/` is initrd (read-only, registered via `vfs_mount`), `/dev` is devfs (registered via `vfs_mount`), `/tmp` is mounted as tmpfs via `vfs_do_mount`.
+Boot paths (selected by GRUB menu entry):
+- **initrd**: `init_initrd` registers the driver; a bare root node is allocated and set as VFS root; `vfs_do_mount("/", "initrd")` populates it; `/tmp` is mounted as tmpfs; `/dev` is devfs.
+- **root=**: bare root node allocated; devfs and ATA initialised; block device located via `blkdev_find`; ext2 mount pending (panics until implemented). `root=` and an initrd module being present simultaneously is a panic.
 
-Userspace mounts arbitrary tmpfs directories with `mount tmpfs /path` (`SYS_MOUNT 46`) and unmounts with `umount /path` (`SYS_UMOUNT 47`).
+Userspace mounts filesystems with `mount fstype path` (`SYS_MOUNT 46`) and unmounts with `umount path` (`SYS_UMOUNT 47`). The type string is passed directly to the kernel driver registry — no hardcoded list in userland. Example: `mount initrd /mnt` re-parses the initrd cpio at `/mnt`.
 
 ## Block Devices
 
@@ -141,7 +143,7 @@ stat /dev/hda       # shows disk size in bytes
 
 `ioctl(fd, BLKDEV_IOCTL_GETSIZE, &size)` fills a `uint64_t` with the total byte size. `BLKDEV_IOCTL_GETSECTSZ` returns 512.
 
-QEMU: use `make disk` to create a blank 100MB image, then `make qemucd-disk` to boot with it attached. The PIIX3 IDE controller in QEMU maps to the standard ports (0x1F0/0x3F6) without any PCI BAR programming.
+QEMU: `make qemu` boots the GRUB2 ISO with the disk image attached as `-hda`. The GRUB menu has two entries: initrd boot and disk boot (`root=/dev/hda1`). The PIIX3 IDE controller in QEMU maps to the standard ports (0x1F0/0x3F6) without any PCI BAR programming.
 
 ## GUI
 

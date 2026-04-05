@@ -1,4 +1,5 @@
 #include <stdbool.h>
+#include <string.h>
 
 #include "boot/multiboot.h"
 #include "cpu/pic.h"
@@ -76,8 +77,10 @@ static void print_startup_banner(void)
     printk("   |_|_|     \n");
     printk("   |===|     %d MB memory available\n", mem_available());
     const char *cl = cmdline_raw();
-    if (cl && cl[0])
+    if (cl && cl[0] && strchr(cl, '='))
         printk("   |===|     cmdline: %s\n", cl);
+    if (mb_mods_count() > 0)
+        printk("   |===|     initrd: %ld module(s)\n", mb_mods_count());
     printk("    \\_/      \n");
     printk("\n");
 }
@@ -157,15 +160,15 @@ void kernel_main(struct multiboot_info *mb, uint32_t start, uint32_t stack, uint
 
     if (!root_dev) {
         /* No root= on cmdline — boot from initrd */
-        if (mb_info->mods_count == 0)
+        if (mb_mods_count() == 0)
             panic("no multiboot modules and no root= cmdline - cannot boot");
 
         struct multiboot_mod_entry *mods =
             (struct multiboot_mod_entry *)mb_info->mods_addr;
 
         /* Find the initrd module: look for one tagged "initrd", else use last */
-        struct multiboot_mod_entry *initrd_mod = &mods[mb_info->mods_count - 1];
-        for (uint32_t i = 0; i < mb_info->mods_count; i++) {
+        struct multiboot_mod_entry *initrd_mod = &mods[mb_mods_count() - 1];
+        for (uint32_t i = 0; i < mb_mods_count(); i++) {
             const char *modcmd = (const char *)mods[i].string;
             if (modcmd) {
                 const char *p = modcmd;
@@ -222,7 +225,7 @@ void kernel_main(struct multiboot_info *mb, uint32_t start, uint32_t stack, uint
         spawn_init(init_elf, init_size);
     } else {
         /* root= specified — mount block device as root (requires ext2 driver) */
-        if (mb_info->mods_count > 0)
+        if (mb_mods_count() > 0)
             panic("root= and initrd module both present");
 
         struct vfs_node *bare_root = vfs_alloc_node();

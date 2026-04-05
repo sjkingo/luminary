@@ -7,7 +7,8 @@ ISO_OUT     = $(BUILD_DIR)/boot.iso
 DISK_IMG    = $(BUILD_DIR)/disk.img
 
 EMULATOR    = qemu-system-i386
-QEMU_ARGS   = -m 512 -net nic,model=rtl8139 -net user -serial file:/tmp/luminary.log
+QEMU_ARGS   = -m 512 -net nic,model=rtl8139 -net user -serial file:/tmp/luminary.log \
+		-cdrom $(ISO_OUT) -drive file=$(DISK_IMG),format=raw,index=0,media=disk -boot d
 
 .PHONY: all
 all: bootiso
@@ -50,12 +51,13 @@ $(DISK_IMG): | $(BUILD_DIR)
 
 .PHONY: qemu
 qemu: bootiso $(DISK_IMG)
-	$(EMULATOR) -cdrom $(ISO_OUT) -hda $(DISK_IMG) -boot d $(QEMU_ARGS)
+	$(EMULATOR) $(QEMU_ARGS)
 	cat /tmp/luminary.log
 
-.PHONY: debug
-debug: bootiso $(DISK_IMG)
-	$(EMULATOR) -cdrom $(ISO_OUT) -hda $(DISK_IMG) -boot d -s -S $(QEMU_ARGS)
+.PHONY: qemu-debug
+qemu-debug: bootiso $(DISK_IMG)
+	$(EMULATOR) -s -S $(QEMU_ARGS)
+	cat /tmp/luminary.log
 
 .PHONY: gdb
 gdb:

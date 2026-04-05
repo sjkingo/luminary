@@ -88,6 +88,11 @@ enum mmap_memory_types {
 
 extern struct multiboot_info *mb_info;
 
+static inline unsigned long mb_mods_count(void)
+{
+    return (mb_info->flags & (1 << 3)) ? mb_info->mods_count : 0;
+}
+
 static inline int mem_available(void)
 {
     /* from Multiboot: "The value returned for upper memory is maximally the

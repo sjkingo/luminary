@@ -19,6 +19,10 @@
 - VFS read-only enforcement: initrd root marked readonly after mount; `vfs_creat`/`vfs_mkdir`/`vfs_unlink`/`vfs_write` return -1 for readonly directories
 - VFS filesystem driver framework: `struct fs_ops` vtable (`mount`/`umount`), `vfs_fs_register()`, `vfs_do_mount()`/`vfs_do_umount()`; `vfs_lookup` transparently follows `mounted_root` pointers at each traversal step
 - tmpfs (`src/kernel/tmpfs.c`): registered filesystem driver; `mount` allocates a fresh writable VFS subtree, `umount` recursively frees it; mounted at `/tmp` on boot via `vfs_do_mount`
+- initrd (`src/kernel/initrd.c`): registered filesystem driver (`"initrd"`); `init_initrd(data, size)` saves the cpio pointer and registers ops; `mount` re-parses the cpio newc archive zero-copy into a VFS subtree; `umount` frees node tree without touching the data buffer; boot uses `vfs_do_mount("/", "initrd")`; userland can `mount initrd /path` to expose the archive at any mountpoint; kernel panics if `root=` and an initrd module are both present
+- Kernel cmdline parsing (`src/kernel/cmdline.c`): GRUB2 multiboot cmdline split into key=value tokens; `cmdline_get(key)` for lookups; `cmdline_raw()` for display; shown in startup banner
+- MBR partition probing (`drivers/part.c`): reads sector 0, validates 0x55AA signature, registers up to 4 primary partitions as child blkdevs (`hda1`–`hda4`)
+- Dual boot paths: initrd (no `root=`) or block device (`root=/dev/hdXN`); `make qemu` boots GRUB2 ISO with disk image attached; GRUB menu switches between the two
 - PS/2 keyboard driver with ring buffer
 - PS/2 mouse driver (IRQ12, absolute position tracking)
 - GUI compositor: three-buffer rendering, window management, drag, resize, close, statusbar/taskbar, focus-follows-mouse, resize cursor sprites, console window
@@ -48,7 +52,7 @@
 
 1. **Network stack** — build on RTL8139 driver (has init but no packet I/O or IRQ handler yet)
 2. **i3-style keybinding system** — planned, not yet started
-3. **Persistent filesystem** — ext2 as a `struct fs_ops` driver; the mount framework and block device layer are both ready. Implement `ext2_mount` (read superblock, walk inode table, populate VFS tree or lazy-load on lookup) and `ext2_umount`. Format a disk image with `mke2fs` and mount with `mount ext2 /mnt`.
+3. **Persistent filesystem** — ext2 as a `struct fs_ops` driver; the mount framework, block device layer, partition probing, and cmdline `root=` parsing are all in place. Implement `ext2_mount` (read superblock, walk inode table, populate VFS tree or lazy-load on lookup) and `ext2_umount`. Format a partition with `mke2fs` and boot with `root=/dev/hda1` in the GRUB entry.
 4. **ATA LBA48** — current ATA driver is LBA28 only (max 128GB). LBA48 support requires using commands `0x24`/`0x34` and writing the high sector count and LBA bytes via the HOB register sequence.
 
 ## Known Bugs
