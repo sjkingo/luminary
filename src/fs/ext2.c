@@ -142,6 +142,14 @@ static void ext2_read_block(uint32_t block_no, void *buf)
     g_dev->read_sectors(g_dev, lba, nsects, buf);
 }
 
+/* Read run_len contiguous physical blocks starting at block_no into buf. */
+static void ext2_read_blocks(uint32_t block_no, uint32_t run_len, void *buf)
+{
+    uint32_t lba    = (block_no * g_block_size) / BLKDEV_SECTOR_SIZE;
+    uint32_t nsects = (run_len  * g_block_size) / BLKDEV_SECTOR_SIZE;
+    g_dev->read_sectors(g_dev, lba, nsects, buf);
+}
+
 static void ext2_write_block(uint32_t block_no, const void *buf)
 {
     uint32_t byte_off = block_no * g_block_size;
@@ -241,6 +249,58 @@ static int ext2_alloc_slot(uint32_t ino, const struct ext2_inode *inode,
     return -1;
 }
 
+/* Indirect block cache shared across block lookups within one read call. */
+struct ext2_ind_cache {
+    uint32_t ptrs_per_block;
+    uint32_t *ind1_buf;   uint32_t ind1_phys;
+    uint32_t *ind2l1_buf; uint32_t ind2l1_phys;
+    uint32_t *ind2l2_buf; uint32_t ind2l2_phys;
+};
+
+/* Translate logical block index to physical block number using cached indirect
+ * tables.  Returns 0 on sparse block or error. */
+static uint32_t ext2_blk_lookup(struct ext2_inode *inode,
+                                 struct ext2_ind_cache *c,
+                                 uint32_t blk_idx)
+{
+    uint32_t ppb = c->ptrs_per_block;
+
+    if (blk_idx < 12)
+        return inode->i_block[blk_idx];
+
+    if (blk_idx < 12 + ppb) {
+        uint32_t ind = inode->i_block[12];
+        if (!ind) return 0;
+        if (ind != c->ind1_phys) {
+            if (!c->ind1_buf) { c->ind1_buf = kmalloc(g_block_size); if (!c->ind1_buf) return 0; }
+            ext2_read_block(ind, c->ind1_buf);
+            c->ind1_phys = ind;
+        }
+        return c->ind1_buf[blk_idx - 12];
+    }
+
+    uint32_t idx = blk_idx - 12 - ppb;
+    uint32_t ind = inode->i_block[13];
+    if (!ind) return 0;
+    if (ind != c->ind2l1_phys) {
+        if (!c->ind2l1_buf) { c->ind2l1_buf = kmalloc(g_block_size); if (!c->ind2l1_buf) return 0; }
+        ext2_read_block(ind, c->ind2l1_buf);
+        c->ind2l1_phys = ind;
+    }
+    uint32_t l2 = c->ind2l1_buf[idx / ppb];
+    if (!l2) return 0;
+    if (l2 != c->ind2l2_phys) {
+        if (!c->ind2l2_buf) { c->ind2l2_buf = kmalloc(g_block_size); if (!c->ind2l2_buf) return 0; }
+        ext2_read_block(l2, c->ind2l2_buf);
+        c->ind2l2_phys = l2;
+    }
+    return c->ind2l2_buf[idx % ppb];
+}
+
+/* Maximum blocks to batch-read in one ext2_read_blocks call (128KB for 1KB
+ * blocks, 512KB for 4KB blocks).  Keeps the run buffer in the slab range. */
+#define EXT2_READ_RUN_MAX 128
+
 static uint32_t ext2_do_read(int slot, uint32_t off, uint32_t len, void *buf)
 {
     struct ext2_slot *s = &g_slots[slot];
@@ -249,25 +309,76 @@ static uint32_t ext2_do_read(int slot, uint32_t off, uint32_t len, void *buf)
     if (off >= file_size) return 0;
     if (off + len > file_size) len = file_size - off;
 
-    uint8_t *bbuf    = kmalloc(g_block_size);
-    if (!bbuf) return 0;
+    uint32_t t0 = timekeeper.uptime_ms;
+
+    struct ext2_ind_cache c;
+    c.ptrs_per_block = g_block_size / 4;
+    c.ind1_buf    = NULL; c.ind1_phys    = 0;
+    c.ind2l1_buf  = NULL; c.ind2l1_phys  = 0;
+    c.ind2l2_buf  = NULL; c.ind2l2_phys  = 0;
+
+    /* Cap to slab max (4096 bytes) to avoid vmm_alloc_pages overhead. */
+    uint32_t rbuf_blocks = (len + g_block_size - 1) / g_block_size;
+    uint32_t slab_max_blocks = 4096 / g_block_size;
+    if (slab_max_blocks < 1) slab_max_blocks = 1;
+    if (rbuf_blocks > slab_max_blocks) rbuf_blocks = slab_max_blocks;
+    uint8_t *rbuf = kmalloc(rbuf_blocks * g_block_size);
+    if (!rbuf) return 0;
 
     uint32_t done = 0;
+    uint32_t n_batches = 0;
+    uint32_t n_sectors = 0;
+    uint32_t t_lookup = 0, t_ata = 0, t_memcpy = 0;
+
     while (done < len) {
-        uint32_t blk_idx  = (off + done) / g_block_size;
-        uint32_t blk_off  = (off + done) % g_block_size;
-        uint32_t to_copy  = g_block_size - blk_off;
-        if (to_copy > len - done) to_copy = len - done;
+        uint32_t blk_idx = (off + done) / g_block_size;
+        uint32_t blk_off = (off + done) % g_block_size;
 
-        uint32_t phys = ext2_file_block(&s->inode, blk_idx);
-        if (!phys) break;
+        uint32_t tl0 = timekeeper.uptime_ms;
+        uint32_t phys0 = ext2_blk_lookup(&s->inode, &c, blk_idx);
+        t_lookup += timekeeper.uptime_ms - tl0;
 
-        ext2_read_block(phys, bbuf);
-        memcpy((uint8_t *)buf + done, bbuf + blk_off, to_copy);
+        if (!phys0) {
+            DBGK("ext2_do_read: blk_idx=%lu phys=0, stopping\n", blk_idx);
+            break;
+        }
+
+        /* Scan forward for consecutive physical blocks. */
+        uint32_t run = 1;
+        uint32_t blocks_left = (len - done + g_block_size - 1) / g_block_size;
+        uint32_t max_run = blocks_left < rbuf_blocks ? blocks_left : rbuf_blocks;
+        if (blk_off == 0) {
+            tl0 = timekeeper.uptime_ms;
+            while (run < max_run) {
+                uint32_t next = ext2_blk_lookup(&s->inode, &c, blk_idx + run);
+                if (next != phys0 + run) break;
+                run++;
+            }
+            t_lookup += timekeeper.uptime_ms - tl0;
+        }
+
+        uint32_t ta0 = timekeeper.uptime_ms;
+        ext2_read_blocks(phys0, run, rbuf);
+        t_ata += timekeeper.uptime_ms - ta0;
+        n_batches++;
+        n_sectors += run * (g_block_size / BLKDEV_SECTOR_SIZE);
+
+        uint32_t tm0 = timekeeper.uptime_ms;
+        uint32_t run_bytes = run * g_block_size - blk_off;
+        uint32_t to_copy   = run_bytes < (len - done) ? run_bytes : (len - done);
+        memcpy((uint8_t *)buf + done, rbuf + blk_off, to_copy);
+        t_memcpy += timekeeper.uptime_ms - tm0;
         done += to_copy;
     }
 
-    kfree(bbuf);
+    uint32_t total = timekeeper.uptime_ms - t0;
+    DBGK("ext2_do_read: %lu bytes in %lu ms (lookup=%lu ata=%lu memcpy=%lu) batches=%lu sectors=%lu\n",
+         done, total, t_lookup, t_ata, t_memcpy, n_batches, n_sectors);
+
+    if (c.ind1_buf)   kfree(c.ind1_buf);
+    if (c.ind2l1_buf) kfree(c.ind2l1_buf);
+    if (c.ind2l2_buf) kfree(c.ind2l2_buf);
+    kfree(rbuf);
     return done;
 }
 

@@ -670,28 +670,23 @@ struct task *task_fork(struct trap_frame *frame)
     }
 
     uint8_t *parent_kstack = (uint8_t *)running_task->stack_base;
-    uint32_t dbg_cr3, dbg_top_pte;
-    asm volatile("mov %%cr3, %0" : "=r"(dbg_cr3));
-    uint32_t dbg_top_virt = (uint32_t)kstack + TASK_STACK_SIZE - PAGE_SIZE;
-    uint32_t *dbg_cr3_dir = (uint32_t *)dbg_cr3;
-    uint32_t dbg_cr3_pde = dbg_cr3_dir[dbg_top_virt >> 22];
-    if (dbg_cr3_pde & 1) {
-        uint32_t *dbg_cr3_pt = (uint32_t *)(dbg_cr3_pde & 0xFFFFF000);
-        dbg_top_pte = dbg_cr3_pt[(dbg_top_virt >> 12) & 0x3FF];
-    } else {
-        dbg_top_pte = 0;
+
+    /* Copy parent kstack to child page-by-page via physical addresses.
+     * kstack and parent_kstack may share the same virtual address (the vmm
+     * free-list can reuse a range freed by a previous task), so a plain
+     * memcpy under the parent CR3 would be a no-op.  vmm_get_phys resolves
+     * through the kernel page directory (which always has the correct
+     * mappings), and vmm_kmap gives us a distinct virtual window onto each
+     * child physical frame so the write actually lands on the right page. */
+    for (uint32_t i = 0; i < TASK_STACK_SIZE / PAGE_SIZE; i++) {
+        uint32_t child_phys = vmm_get_phys((uint32_t)kstack + i * PAGE_SIZE);
+        void *kp = vmm_kmap(child_phys);
+        memcpy(kp, parent_kstack + i * PAGE_SIZE, PAGE_SIZE);
+        vmm_kunmap(kp);
     }
-    DBGK("task_fork: before memcpy CR3=0x%lx top_virt=0x%lx top_pte=0x%lx canary=0x%lx\n",
-         dbg_cr3, dbg_top_virt, dbg_top_pte, *(uint32_t *)kstack);
-    memcpy(kstack, parent_kstack, TASK_STACK_SIZE);
-    if (dbg_cr3_pde & 1) {
-        uint32_t *dbg_cr3_pt = (uint32_t *)(dbg_cr3_pde & 0xFFFFF000);
-        dbg_top_pte = dbg_cr3_pt[(dbg_top_virt >> 12) & 0x3FF];
-    }
-    uint32_t dbg_frame_offset = (uint32_t)frame - running_task->stack_base;
-    uint32_t dbg_child_frame_addr = (uint32_t)kstack + dbg_frame_offset;
-    DBGK("task_fork: after memcpy top_pte=0x%lx canary=0x%lx frame_at_0x%lx=0x%lx\n",
-         dbg_top_pte, *(uint32_t *)kstack, dbg_child_frame_addr, *(uint32_t *)dbg_child_frame_addr);
+    DBGK("task_fork: kstack copy done child_virt=0x%lx parent_virt=0x%lx alias=%ld\n",
+         (uint32_t)kstack, (uint32_t)parent_kstack,
+         (uint32_t)(kstack == parent_kstack));
 
     child->stack_base = (unsigned int)kstack;
     child->stack_hwm  = (unsigned int)(kstack + TASK_STACK_SIZE);
@@ -706,17 +701,17 @@ struct task *task_fork(struct trap_frame *frame)
     child->esp = child->stack_base + stack_offset;
 
     /* Set child's return value (EAX in trap frame) to 0.
-     * The trap frame is embedded in the kernel stack at the same offset
-     * as in the parent's stack. */
-    struct trap_frame *child_frame = (struct trap_frame *)child->esp;
+     * The trap frame sits on the child's kstack at stack_offset from base.
+     * child->esp may alias the parent's virtual address (same virt, different
+     * phys), so we must write through a kmap window, not through the pointer. */
+    uint32_t child_frame_phys = vmm_get_phys(child->esp & ~0xFFFu) | (child->esp & 0xFFFu);
+    void *child_frame_kp = vmm_kmap(child_frame_phys & ~0xFFFu);
+    struct trap_frame *child_frame = (struct trap_frame *)((uint8_t *)child_frame_kp + (child->esp & 0xFFFu));
     child_frame->eax = 0;
-
-    DBGK("task_fork: child_frame=0x%lx ds=0x%lx eip=0x%lx cs=0x%lx\n",
-         (unsigned long)child_frame, (unsigned long)child_frame->ds, (unsigned long)child_frame->eip, (unsigned long)child_frame->cs);
-    uint32_t child_frame_page_virt = (uint32_t)child_frame & ~0xFFF;
-    uint32_t child_frame_page_phys = vmm_get_phys(child_frame_page_virt);
-    DBGK("task_fork: child_frame page_virt=0x%lx page_phys=0x%lx\n",
-         child_frame_page_virt, child_frame_page_phys);
+    DBGK("task_fork: child_frame phys=0x%lx ds=0x%lx eip=0x%lx cs=0x%lx\n",
+         child_frame_phys, (unsigned long)child_frame->ds,
+         (unsigned long)child_frame->eip, (unsigned long)child_frame->cs);
+    vmm_kunmap(child_frame_kp);
 
     /* Insert child into scheduler after parent */
     insert_task_sorted(child, child->prio_s);

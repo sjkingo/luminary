@@ -46,7 +46,7 @@ struct bmp_dib_hdr {
 
 /* Static BSS buffers — not on the stack */
 static unsigned int  argb_buf[MAX_W * MAX_H];
-static unsigned char raw_row[MAX_W * 4];  /* max bytes per raw BMP row */
+static unsigned char raw_buf[MAX_W * MAX_H * 4]; /* raw pixel data, read in one shot */
 
 static int read_exact(int fd, void *buf, unsigned int len)
 {
@@ -141,22 +141,27 @@ int main(int argc, char **argv)
     /* Seek to pixel data */
     vfs_lseek(fd, fhdr.data_offset, 0);
 
-    /* Read rows and convert to ARGB, storing in correct display order */
+    /* Read all pixel data in one shot into raw_buf, then convert to ARGB. */
+    unsigned int total_raw = (unsigned int)img_h * row_stride;
+    if (total_raw > sizeof(raw_buf)) {
+        printf("wallpaper: image too large for buffer\n");
+        vfs_close(fd);
+        exit(1);
+    }
+    if (read_exact(fd, raw_buf, total_raw) < 0) {
+        printf("wallpaper: unexpected end of file\n");
+        vfs_close(fd);
+        exit(1);
+    }
+
     for (int y = 0; y < img_h; y++) {
-        /* BMP bottom-up: row 0 in file = bottom row of image */
         int dst_y = bottom_up ? (img_h - 1 - y) : y;
-
-        if (read_exact(fd, raw_row, row_stride) < 0) {
-            printf("wallpaper: unexpected end of file\n");
-            vfs_close(fd);
-            exit(1);
-        }
-
+        unsigned char *src = raw_buf + (unsigned int)y * row_stride;
         unsigned int *dst = argb_buf + (unsigned int)dst_y * (unsigned int)img_w;
         for (int x = 0; x < img_w; x++) {
-            unsigned char b = raw_row[x * bpp + 0];
-            unsigned char g = raw_row[x * bpp + 1];
-            unsigned char r = raw_row[x * bpp + 2];
+            unsigned char b = src[x * bpp + 0];
+            unsigned char g = src[x * bpp + 1];
+            unsigned char r = src[x * bpp + 2];
             dst[x] = 0xFF000000u | ((unsigned int)r << 16) |
                      ((unsigned int)g << 8) | b;
         }

@@ -22,6 +22,7 @@
 #include "kernel/sched.h"
 #include "kernel/task.h"
 #include "kernel/syscall.h"
+#include "kernel/heap.h"
 #include "kernel/vfs.h"
 #include "kernel/x.h"
 #include "drivers/fbdev.h"
@@ -444,7 +445,9 @@ void gui_set_bg(const uint32_t *pixels, uint32_t w, uint32_t h)
     uint32_t capacity = bg_raw_nframes * PAGE_SIZE;
     if (nbytes > capacity) { gui_wake_scene(); return; }
 
+    uint32_t tmc0 = timekeeper.uptime_ms;
     memcpy(bg_raw, pixels, nbytes);
+    DBGK("gui_set_bg: memcpy %lu bytes in %lu ms\n", nbytes, timekeeper.uptime_ms - tmc0);
     bg_raw_w     = w;
     bg_raw_h     = h;
     bg_raw_valid = true;
@@ -482,16 +485,28 @@ static void bg_scale_pending(void)
     if (!bg_scaled || dst_w * dst_h * sizeof(uint32_t) > bg_scaled_nframes * PAGE_SIZE)
         return;
 
+    /* Precompute source-x lookup table to avoid per-pixel division. */
+    uint32_t *src_x_lut = kmalloc(dst_w * sizeof(uint32_t));
+    if (!src_x_lut) return;
+    for (uint32_t x = 0; x < dst_w; x++)
+        src_x_lut[x] = (x + x_off) * w / full_w;
+
+    DBGK("bg_scale: src=%lux%lu dst=%lux%lu full=%lux%lu\n", w, h, dst_w, dst_h, full_w, full_h);
+    uint32_t ts0 = timekeeper.uptime_ms;
+
     /* Enable interrupts during the scale loop so the timer IRQ fires
      * normally — this loop takes ~10ms and would otherwise stall everything. */
     enable_interrupts();
     for (uint32_t y = 0; y < dst_h; y++) {
         uint32_t src_y = (y + y_off) * h / full_h;
+        const uint32_t *src_row = bg_raw + src_y * w;
         uint32_t *dst_row = bg_scaled + y * dst_w;
         for (uint32_t x = 0; x < dst_w; x++)
-            dst_row[x] = bg_raw[src_y * w + (x + x_off) * w / full_w];
+            dst_row[x] = src_row[src_x_lut[x]];
     }
     disable_interrupts();
+    kfree(src_x_lut);
+    DBGK("bg_scale: done in %lu ms\n", timekeeper.uptime_ms - ts0);
 
     bg_raw_valid    = false;
     bg_dst_x = dst_x; bg_dst_y = dst_y;
@@ -1432,6 +1447,9 @@ int gui_window_get_size(int id, uint32_t *cw, uint32_t *ch)
 static void gui_start_compositor(void)
 {
     if (compositor_task_ptr) return; /* already running */
+
+    DBGK("gui_start_compositor: back=0x%lx fb_h=%ld fb_pitch=%ld\n",
+         (uint32_t)back, (uint32_t)fb_h, (uint32_t)fb_pitch);
 
     /* back buffer was pre-allocated in init_gui(); just activate it */
     if (back) {

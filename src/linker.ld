@@ -39,6 +39,8 @@ SECTIONS
         *(.kstack)
     }
 
+    kernel_image_end = .;
+
     /* Throw away some sections */
     /DISCARD/ :
     {

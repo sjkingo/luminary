@@ -81,4 +81,4 @@ gdb:
 clean:
 	$(MAKE) -C src clean
 	$(MAKE) -C userland clean
-	rm -rf $(BUILD_DIR)
+	rm -rf $(BUILD_DIR) /tmp/luminary.log

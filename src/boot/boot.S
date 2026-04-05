@@ -30,7 +30,7 @@ multiboot_entry:
     cli
 
     movl $mbhdr, %eax
-    movl $kernel_end, %ecx
+    movl $kernel_image_end, %ecx
     movl $kstack + STACKSIZE, %esp
 
     push %ecx

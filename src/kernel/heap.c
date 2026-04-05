@@ -148,8 +148,6 @@ void *kmalloc(uint32_t size)
 
         overflow_table[slot].virt    = (uint32_t)virt;
         overflow_table[slot].nframes = nframes;
-        DBGK("%s:%d(%s) overflow alloc %ld frames at 0x%lx (size=%ld)\n",
-             path_basename(file), line, func, nframes, (uint32_t)virt, size);
         return virt;
     }
 
@@ -159,11 +157,8 @@ void *kmalloc(uint32_t size)
     for (uint32_t i = 0; i < cls->n_pages; i++) {
         if (cls->pages[i].n_free == 0) continue;
         void *ptr = slab_page_alloc(&cls->pages[i], cls->obj_size);
-        if (ptr) {
-            DBGK("%s:%d(%s) slab[%ld] alloc at 0x%lx (size=%ld)\n",
-                 path_basename(file), line, func, cls->obj_size, (uint32_t)ptr, size);
+        if (ptr)
             return ptr;
-        }
     }
 
     /* No free slot — grow the class */
@@ -174,10 +169,7 @@ void *kmalloc(uint32_t size)
     }
 
     /* Allocate from the newly added page */
-    void *ptr = slab_page_alloc(&cls->pages[cls->n_pages - 1], cls->obj_size);
-    DBGK("%s:%d(%s) slab[%ld] alloc (new page) at 0x%lx (size=%ld)\n",
-         path_basename(file), line, func, cls->obj_size, (uint32_t)ptr, size);
-    return ptr;
+    return slab_page_alloc(&cls->pages[cls->n_pages - 1], cls->obj_size);
 }
 
 #ifdef DEBUG
@@ -196,8 +188,6 @@ void kfree(void *ptr)
             vmm_free_pages((void *)addr, overflow_table[i].nframes);
             overflow_table[i].virt    = 0;
             overflow_table[i].nframes = 0;
-            DBGK("%s:%d(%s) overflow free at 0x%lx\n",
-                 path_basename(file), line, func, addr);
             return;
         }
     }
@@ -226,8 +216,6 @@ void kfree(void *ptr)
             }
             sp->bitmap[w] &= ~(1u << bit);
             sp->n_free++;
-            DBGK("%s:%d(%s) slab[%ld] free slot %ld at 0x%lx\n",
-                 path_basename(file), line, func, cls->obj_size, slot, addr);
             return;
         }
     }

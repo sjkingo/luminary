@@ -46,6 +46,10 @@ static uint8_t ata_poll(uint16_t io_base, uint16_t ctrl_base)
     return st;
 }
 
+/* Maximum sectors per ATA PIO command (LBA28: 0 = 256, but we cap at 255
+ * to keep the count in a uint8_t without ambiguity). */
+#define ATA_MAX_SECTORS_PER_CMD 255
+
 static uint32_t ata_read_sectors(struct blkdev *dev, uint32_t lba,
                                  uint32_t count, void *buf)
 {
@@ -54,42 +58,48 @@ static uint32_t ata_read_sectors(struct blkdev *dev, uint32_t lba,
     uint16_t ctrl  = drv->ctrl_base;
     uint8_t  slave = drv->slave;
     uint8_t *dst   = (uint8_t *)buf;
+    uint32_t done  = 0;
 
-    for (uint32_t i = 0; i < count; i++) {
-        uint32_t cur_lba = lba + i;
+    while (done < count) {
+        uint32_t batch = count - done;
+        if (batch > ATA_MAX_SECTORS_PER_CMD)
+            batch = ATA_MAX_SECTORS_PER_CMD;
+        uint32_t cur_lba = lba + done;
 
-        /* Wait for drive to be ready */
         uint8_t st = ata_poll(base, ctrl);
         if (st & ATA_SR_ERR) {
-            DBGK("read error before sector %ld (lba %ld), status 0x%lx\n",
-                 (uint32_t)i, cur_lba, (uint32_t)st);
-            return i;
+            DBGK("read error before lba %ld, status 0x%lx\n",
+                 cur_lba, (uint32_t)st);
+            return done;
         }
 
         outb(base + ATA_REG_HDDEVSEL,
              0xE0 | (slave << 4) | ((cur_lba >> 24) & 0x0F));
-        outb(base + ATA_REG_SECCOUNT, 1);
+        outb(base + ATA_REG_SECCOUNT, (uint8_t)batch);
         outb(base + ATA_REG_LBA0,  (uint8_t)(cur_lba));
         outb(base + ATA_REG_LBA1,  (uint8_t)(cur_lba >> 8));
         outb(base + ATA_REG_LBA2,  (uint8_t)(cur_lba >> 16));
         outb(base + ATA_REG_COMMAND, ATA_CMD_READ_PIO);
 
-        st = ata_poll(base, ctrl);
-        if (st & ATA_SR_ERR) {
-            DBGK("read error on sector %ld (lba %ld), status 0x%lx, err 0x%lx\n",
-                 (uint32_t)i, cur_lba, (uint32_t)st,
-                 (uint32_t)inb(base + ATA_REG_ERROR));
-            return i;
-        }
-        if (!(st & ATA_SR_DRQ)) {
-            DBGK("DRQ not set after read command, lba %ld, status 0x%lx\n",
-                 cur_lba, (uint32_t)st);
-            return i;
+        for (uint32_t i = 0; i < batch; i++) {
+            st = ata_poll(base, ctrl);
+            if (st & ATA_SR_ERR) {
+                DBGK("read error on sector %ld (lba %ld), status 0x%lx, err 0x%lx\n",
+                     done + i, cur_lba + i, (uint32_t)st,
+                     (uint32_t)inb(base + ATA_REG_ERROR));
+                return done + i;
+            }
+            if (!(st & ATA_SR_DRQ)) {
+                DBGK("DRQ not set after read command, lba %ld, status 0x%lx\n",
+                     cur_lba + i, (uint32_t)st);
+                return done + i;
+            }
+            uint16_t *words = (uint16_t *)(dst + (done + i) * BLKDEV_SECTOR_SIZE);
+            for (int w = 0; w < 256; w++)
+                words[w] = inb_16(base + ATA_REG_DATA);
         }
 
-        uint16_t *words = (uint16_t *)(dst + i * BLKDEV_SECTOR_SIZE);
-        for (int w = 0; w < 256; w++)
-            words[w] = inb_16(base + ATA_REG_DATA);
+        done += batch;
     }
 
     return count;
