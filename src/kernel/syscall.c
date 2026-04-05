@@ -63,12 +63,12 @@ static int sys_write(struct trap_frame *frame)
     struct vfs_fd *vfd = &running_task->fds[fd];
     if (!vfd->open || !vfd->node) return -1;
 
-    if (vfd->node->flags & VFS_CHARDEV) {
+    if ((vfd->node->flags & VFS_CHARDEV) && !(vfd->node->flags & VFS_FILE)) {
         vfs_write(vfd->node, 0, len, buf);
         return (int)len;
     }
 
-    if ((vfd->node->flags & VFS_FILE) && vfd->node->writable) {
+    if (vfd->node->flags & (VFS_FILE | VFS_CHARDEV)) {
         uint32_t off = vfd->append ? vfd->node->size : vfd->offset;
         uint32_t n = vfs_write(vfd->node, off, len, buf);
         vfd->offset = off + n;
@@ -119,16 +119,17 @@ static int sys_read(struct trap_frame *frame)
     struct vfs_fd *vfd = &running_task->fds[fd];
     if (!vfd->open || !vfd->node) return -1;
 
-    /* Chardevs: cap at 4096 to limit blocking reads */
-    if (vfd->node->flags & VFS_CHARDEV) {
+    /* Pure chardevs (devices, pipes): no offset tracking, cap at 4096 */
+    if ((vfd->node->flags & VFS_CHARDEV) && !(vfd->node->flags & VFS_FILE)) {
         if (!user_access_ok(buf, len) || len > 4096) return -1;
         if (vfd->nonblock) running_task->read_nonblock = true;
-        uint32_t n = vfs_read(vfd->node, vfd->offset, len, buf);
+        uint32_t n = vfs_read(vfd->node, 0, len, buf);
         running_task->read_nonblock = false;
         return (int)n;
     }
 
-    if (vfd->node->flags & VFS_FILE) {
+    /* Regular files and file+chardev nodes (e.g. ext2): offset-tracked */
+    if (vfd->node->flags & (VFS_FILE | VFS_CHARDEV)) {
         if (!user_access_ok(buf, len) || len > 65536) return -1;
         if (vfd->nonblock) running_task->read_nonblock = true;
         uint32_t n = vfs_read(vfd->node, vfd->offset, len, buf);

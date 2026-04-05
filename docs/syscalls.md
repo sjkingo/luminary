@@ -11,8 +11,8 @@ Userspace macros (in `userland/syscall.h`):
 |---|------|------|---------|-------------|
 | 0 | SYS_NOP | — | 0 | No-op |
 | 1 | SYS_EXIT_TASK | EBX=exit_code | — | Kill calling task (normal process exit) |
-| 3 | SYS_READ | EBX=fd, ECX=buf, EDX=len | bytes read or -1 | Read from fd; blocks on chardev stdin |
-| 4 | SYS_WRITE | EBX=fd, ECX=buf, EDX=len | bytes written or -1 | Write to fd |
+| 3 | SYS_READ | EBX=fd, ECX=buf, EDX=len | bytes read or -1 | Read from fd. Pure chardevs (VFS_CHARDEV only): always reads at offset 0, no seeking. Files and file+chardev nodes (VFS_FILE set): offset-tracked, advances fd position. Blocks on stdin when keyboard is owned by GUI. |
+| 4 | SYS_WRITE | EBX=fd, ECX=buf, EDX=len | bytes written or -1 | Write to fd. Pure chardevs write at offset 0. Files and file+chardev nodes (e.g. ext2 files) write at fd position and advance it. |
 | 5 | SYS_OPEN | EBX=path, ECX=flags | fd or -1 | Open VFS path. flags: O_RDONLY=0, O_WRONLY=1, O_RDWR=2, O_CREAT=0x40, O_TRUNC=0x200, O_APPEND=0x400 |
 | 6 | SYS_CLOSE | EBX=fd | 0 or -1 | Close fd |
 | 17 | SYS_KILL | EBX=pid | 0 or -1 | Kill task by PID |

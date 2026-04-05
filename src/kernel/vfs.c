@@ -407,6 +407,11 @@ struct vfs_node *vfs_creat(const char *path)
     if (!parent || !(parent->flags & VFS_DIR)) return NULL;
     if (parent->readonly) return NULL;
 
+    /* Delegate to filesystem driver if present */
+    struct vfs_node *mp_parent = parent->mounted_root ? parent->mounted_root : parent;
+    if (mp_parent->fs && mp_parent->fs->create)
+        return mp_parent->fs->create(mp_parent, base);
+
     /* Find or allocate node */
     struct vfs_node *n = dir_child(parent, base, (uint32_t)strlen(base));
     if (n) {
@@ -464,6 +469,11 @@ struct vfs_node *vfs_mkdir(const char *path)
     if (!parent || !(parent->flags & VFS_DIR)) return NULL;
     if (parent->readonly) return NULL;
 
+    /* Delegate to filesystem driver if present */
+    struct vfs_node *mp_parent2 = parent->mounted_root ? parent->mounted_root : parent;
+    if (mp_parent2->fs && mp_parent2->fs->mkdir_op)
+        return mp_parent2->fs->mkdir_op(mp_parent2, base);
+
     uint32_t blen = (uint32_t)strlen(base);
     if (dir_child(parent, base, blen)) return NULL; /* already exists */
 
@@ -489,6 +499,11 @@ int vfs_unlink(const char *path)
     struct vfs_node *parent = n->parent;
     if (!parent) return -1;
     if (parent->readonly) return -1;
+
+    /* Delegate on-disk removal to filesystem driver if present */
+    if (parent->fs && parent->fs->unlink) {
+        if (parent->fs->unlink(parent, n) != 0) return -1;
+    }
 
     /* Unlink from parent's children list */
     if (parent->children == n) {

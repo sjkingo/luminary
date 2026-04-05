@@ -107,9 +107,11 @@ Unhandled CPU exceptions call `dump_trap_frame()` which prints registers and wal
 
 CPIO newc initrd, parsed by `initrd.c` and mounted read-only at `/` on boot. A VFS layer (`vfs.c`) provides mount table, path resolution, and open/read/readdir/stat/close/creat/mkdir/unlink. Per-task fd tables are stored inline in `struct task`. `vfs_alloc_node()` uses a static pool of 512 nodes with a free-list (`sibling` pointer reused as link) so closed pipe nodes and unlinked file nodes are reclaimed and reused.
 
+**Node flags and I/O dispatch**: `VFS_FILE` = regular file (offset-tracked reads/writes via heap buffer or `read_op`/`write_op`). `VFS_CHARDEV` = pure character device (stdin, pipes, `/dev/*` block nodes) — reads and writes always at offset 0, no seeking. `VFS_FILE | VFS_CHARDEV` = on-disk file with driver-provided I/O ops (ext2 files) — offset-tracked like a regular file, but I/O dispatched via `read_op`/`write_op` rather than the heap buffer. `sys_read`/`sys_write` distinguish the two chardev cases by checking for `VFS_FILE` in addition to `VFS_CHARDEV`.
+
 ### Filesystem drivers and mount points
 
-`struct fs_ops` defines a vtable with `mount` and `umount` callbacks. Drivers register with `vfs_fs_register(fstype, ops)` at init time. `vfs_do_mount(path, fstype)` resolves the path, looks up the driver, calls `fs_ops->mount(mountpoint)`, and records the entry in the mount table. `vfs_do_umount(path)` calls `fs_ops->umount(mountpoint)` which frees the subtree, then removes the table entry.
+`struct fs_ops` defines a vtable with `mount`, `umount`, and optional `create`, `mkdir_op`, `unlink` callbacks. Drivers register with `vfs_fs_register(fstype, ops)` at init time. `vfs_do_mount(path, fstype, device)` resolves the path, looks up the driver, calls `fs_ops->mount(mountpoint, device)`, and records the entry in the mount table. `vfs_do_umount(path)` calls `fs_ops->umount(mountpoint)` which frees the subtree, then removes the table entry. `vfs_creat`, `vfs_mkdir`, and `vfs_unlink` delegate to `fs->create`, `fs->mkdir_op`, and `fs->unlink` when the parent directory node has a driver registered, allowing filesystem drivers to manage on-disk allocation. Drivers that do not implement these callbacks fall back to the default in-memory behaviour.
 
 `vfs_lookup` follows `node->mounted_root` at each step: if a directory node has a filesystem mounted on it, traversal continues into `mounted_root` rather than the node's own children. This makes mounts transparent to all path-based syscalls.
 
@@ -119,10 +121,13 @@ Registered filesystem drivers:
 |--------|--------|-------------|
 | `initrd` (`initrd.c`) | `"initrd"` | Read-only cpio newc archive. `init_initrd(data, size)` saves the cpio pointer and registers the driver. `mount` re-parses the archive into a new VFS subtree (zero-copy: file data pointers into the multiboot module buffer). `umount` frees the node tree without touching the data buffer. |
 | `tmpfs` (`tmpfs.c`) | `"tmpfs"` | In-memory writable filesystem. `mount` allocates a fresh VFS_DIR root node; files use the standard heap-backed writable node mechanism. `umount` frees the entire subtree. |
+| `ext2` (`fs/ext2.c`) | `"ext2"` | Read-write ext2 driver backed by a `struct blkdev *`. `mount` reads the superblock and BGDs, then **eagerly** walks the entire directory tree from inode 2 and allocates a VFS node for every file and directory found. File I/O is on-demand via per-slot `read_op`/`write_op` (same slot-table macro pattern as `blkdev.c`). Write support includes block and inode allocation (bitmap scan + update), directory entry creation/removal, and `node->size` kept in sync with the on-disk inode via a back-pointer in `struct ext2_slot`. `umount` frees the VFS subtree and releases BGD memory. |
+
+**ext2 known limitation — eager VFS population**: at mount time all inodes are walked and a VFS node allocated for each. For large directory trees this consumes the 512-entry node pool quickly. The fix is a `lookup` callback on `struct fs_ops` that `vfs_lookup` would call when a child is not found in the in-memory tree, allowing nodes to be populated on demand. This has not been implemented; avoid mounting ext2 volumes with more than ~400 files until it is.
 
 Boot paths (selected by GRUB menu entry):
-- **initrd**: `init_initrd` registers the driver; a bare root node is allocated and set as VFS root; `vfs_do_mount("/", "initrd")` populates it; `/tmp` is mounted as tmpfs; `/dev` is devfs.
-- **root=**: bare root node allocated; devfs and ATA initialised; block device located via `blkdev_find`; ext2 mount pending (panics until implemented). `root=` and an initrd module being present simultaneously is a panic.
+- **initrd**: `init_initrd` registers the driver; a bare root node is allocated and set as VFS root; `vfs_do_mount("/", "initrd")` populates it; `/tmp` is mounted as tmpfs; `/dev` is devfs. `init_ext2` is also called so ext2 volumes can be mounted from userspace.
+- **root=**: bare root node allocated; ATA and ext2 initialised; block device located via `blkdev_find`; ext2 mounted at `/`; devfs, tmpfs at `/tmp`, and all block devnodes registered. `root=` and an initrd module being present simultaneously is a panic.
 
 Userspace mounts filesystems with `mount fstype path` (`SYS_MOUNT 46`) and unmounts with `umount path` (`SYS_UMOUNT 47`). The type string is passed directly to the kernel driver registry — no hardcoded list in userland. Example: `mount initrd /mnt` re-parses the initrd cpio at `/mnt`.
 

@@ -117,6 +117,7 @@ struct ext2_slot {
     bool            used;
     uint32_t        ino;
     struct ext2_inode inode;
+    struct vfs_node *node;  /* back-pointer to keep node->size in sync */
 };
 
 static struct blkdev   *g_dev;
@@ -129,6 +130,9 @@ static struct ext2_bgd *g_bgds;
 static struct ext2_slot g_slots[EXT2_FILE_SLOTS];
 
 static struct fs_ops ext2_ops;
+
+static uint32_t ext2_alloc_block(void);
+static void     ext2_free_block(uint32_t block_no);
 
 static void ext2_read_block(uint32_t block_no, void *buf)
 {
@@ -222,13 +226,15 @@ static uint32_t ext2_file_block(const struct ext2_inode *inode, uint32_t blk_idx
     return 0;
 }
 
-static int ext2_alloc_slot(uint32_t ino, const struct ext2_inode *inode)
+static int ext2_alloc_slot(uint32_t ino, const struct ext2_inode *inode,
+                           struct vfs_node *node)
 {
     for (int i = 0; i < EXT2_FILE_SLOTS; i++) {
         if (!g_slots[i].used) {
             g_slots[i].used  = true;
             g_slots[i].ino   = ino;
             g_slots[i].inode = *inode;
+            g_slots[i].node  = node;
             return i;
         }
     }
@@ -279,7 +285,18 @@ static uint32_t ext2_do_write(int slot, uint32_t off, uint32_t len, const void *
         if (to_copy > len - done) to_copy = len - done;
 
         uint32_t phys = ext2_file_block(&s->inode, blk_idx);
-        if (!phys) break; /* no block allocation */
+        if (!phys) {
+            if (blk_idx >= 12) break; /* indirect allocation not implemented */
+            phys = ext2_alloc_block();
+            if (!phys) break;
+            uint8_t *zbuf = kmalloc(g_block_size);
+            if (!zbuf) { ext2_free_block(phys); break; }
+            memset(zbuf, 0, g_block_size);
+            ext2_write_block(phys, zbuf);
+            kfree(zbuf);
+            s->inode.i_block[blk_idx] = phys;
+            s->inode.i_blocks += g_block_size / BLKDEV_SECTOR_SIZE;
+        }
 
         ext2_read_block(phys, bbuf);
         memcpy(bbuf + blk_off, (const uint8_t *)buf + done, to_copy);
@@ -292,6 +309,7 @@ static uint32_t ext2_do_write(int slot, uint32_t off, uint32_t len, const void *
     if (done > 0 && off + done > s->inode.i_size) {
         s->inode.i_size = off + done;
         ext2_write_inode(s->ino, &s->inode);
+        if (s->node) s->node->size = s->inode.i_size;
     }
 
     return done;
@@ -363,7 +381,7 @@ static void ext2_add_file(struct vfs_node *parent, uint32_t ino,
         vfs_add_child(parent, node);
         ext2_walk_dir(node, ino);
     } else if (mode == EXT2_IMODE_FILE) {
-        int slot = ext2_alloc_slot(ino, inode);
+        int slot = ext2_alloc_slot(ino, inode, node);
         if (slot < 0) {
             printk(MODULE "out of file slots for inode %ld\n", ino);
             vfs_free_node(node);
@@ -456,6 +474,469 @@ static void ext2_walk_dir(struct vfs_node *parent, uint32_t dir_ino)
     kfree(bbuf);
 }
 
+/* Allocate a free block, set its bit in the block bitmap, update BGD and
+ * superblock free counts. Returns block number or 0 on failure. */
+static uint32_t ext2_alloc_block(void)
+{
+    uint8_t *bitmap = kmalloc(g_block_size);
+    if (!bitmap) return 0;
+
+    /* Read superblock to update s_free_blocks_count */
+    uint8_t sb_raw[2 * BLKDEV_SECTOR_SIZE];
+    g_dev->read_sectors(g_dev, 2, 2, sb_raw);
+    struct ext2_superblock *sb = (struct ext2_superblock *)sb_raw;
+
+    for (uint32_t g = 0; g < g_bg_count; g++) {
+        if (g_bgds[g].bg_free_blocks_count == 0) continue;
+
+        ext2_read_block(g_bgds[g].bg_block_bitmap, bitmap);
+
+        uint32_t blocks_in_group = sb->s_blocks_per_group;
+        uint32_t remaining = sb->s_blocks_count - g * sb->s_blocks_per_group;
+        if (remaining < blocks_in_group) blocks_in_group = remaining;
+
+        for (uint32_t i = 0; i < blocks_in_group; i++) {
+            if (!(bitmap[i / 8] & (1 << (i % 8)))) {
+                bitmap[i / 8] |= (1 << (i % 8));
+                ext2_write_block(g_bgds[g].bg_block_bitmap, bitmap);
+
+                g_bgds[g].bg_free_blocks_count--;
+                uint32_t bgdt_block = (g_block_size == 1024) ? 2 : 1;
+                uint32_t bgdt_bytes = g_bg_count * sizeof(struct ext2_bgd);
+                uint32_t bgdt_blks  = (bgdt_bytes + g_block_size - 1) / g_block_size;
+                uint8_t *bgdt_buf = kmalloc(bgdt_blks * g_block_size);
+                if (bgdt_buf) {
+                    for (uint32_t b = 0; b < bgdt_blks; b++)
+                        ext2_read_block(bgdt_block + b, bgdt_buf + b * g_block_size);
+                    memcpy(bgdt_buf, g_bgds, bgdt_bytes);
+                    for (uint32_t b = 0; b < bgdt_blks; b++)
+                        ext2_write_block(bgdt_block + b, bgdt_buf + b * g_block_size);
+                    kfree(bgdt_buf);
+                }
+
+                if (sb->s_free_blocks_count > 0) sb->s_free_blocks_count--;
+                g_dev->write_sectors(g_dev, 2, 2, sb_raw);
+
+                kfree(bitmap);
+                return g * sb->s_blocks_per_group + i + sb->s_first_data_block;
+            }
+        }
+    }
+
+    kfree(bitmap);
+    return 0;
+}
+
+/* Allocate a free inode, set its bit in the inode bitmap, update BGD and
+ * superblock free counts. Returns inode number (1-based) or 0 on failure. */
+static uint32_t ext2_alloc_inode(void)
+{
+    uint8_t *bitmap = kmalloc(g_block_size);
+    if (!bitmap) return 0;
+
+    uint8_t sb_raw[2 * BLKDEV_SECTOR_SIZE];
+    g_dev->read_sectors(g_dev, 2, 2, sb_raw);
+    struct ext2_superblock *sb = (struct ext2_superblock *)sb_raw;
+
+    for (uint32_t g = 0; g < g_bg_count; g++) {
+        if (g_bgds[g].bg_free_inodes_count == 0) continue;
+
+        ext2_read_block(g_bgds[g].bg_inode_bitmap, bitmap);
+
+        for (uint32_t i = 0; i < g_inodes_per_group; i++) {
+            if (!(bitmap[i / 8] & (1 << (i % 8)))) {
+                bitmap[i / 8] |= (1 << (i % 8));
+                ext2_write_block(g_bgds[g].bg_inode_bitmap, bitmap);
+
+                g_bgds[g].bg_free_inodes_count--;
+                uint32_t bgdt_block = (g_block_size == 1024) ? 2 : 1;
+                uint32_t bgdt_bytes = g_bg_count * sizeof(struct ext2_bgd);
+                uint32_t bgdt_blks  = (bgdt_bytes + g_block_size - 1) / g_block_size;
+                uint8_t *bgdt_buf = kmalloc(bgdt_blks * g_block_size);
+                if (bgdt_buf) {
+                    for (uint32_t b = 0; b < bgdt_blks; b++)
+                        ext2_read_block(bgdt_block + b, bgdt_buf + b * g_block_size);
+                    memcpy(bgdt_buf, g_bgds, bgdt_bytes);
+                    for (uint32_t b = 0; b < bgdt_blks; b++)
+                        ext2_write_block(bgdt_block + b, bgdt_buf + b * g_block_size);
+                    kfree(bgdt_buf);
+                }
+
+                if (sb->s_free_inodes_count > 0) sb->s_free_inodes_count--;
+                g_dev->write_sectors(g_dev, 2, 2, sb_raw);
+
+                kfree(bitmap);
+                return g * g_inodes_per_group + i + 1;
+            }
+        }
+    }
+
+    kfree(bitmap);
+    return 0;
+}
+
+/* Free a block: clear its bit in the block bitmap, increment free counts. */
+static void ext2_free_block(uint32_t block_no)
+{
+    if (!block_no) return;
+
+    uint8_t sb_raw[2 * BLKDEV_SECTOR_SIZE];
+    g_dev->read_sectors(g_dev, 2, 2, sb_raw);
+    struct ext2_superblock *sb = (struct ext2_superblock *)sb_raw;
+
+    uint32_t group = (block_no - sb->s_first_data_block) / sb->s_blocks_per_group;
+    uint32_t idx   = (block_no - sb->s_first_data_block) % sb->s_blocks_per_group;
+    if (group >= g_bg_count) return;
+
+    uint8_t *bitmap = kmalloc(g_block_size);
+    if (!bitmap) return;
+    ext2_read_block(g_bgds[group].bg_block_bitmap, bitmap);
+    bitmap[idx / 8] &= ~(1 << (idx % 8));
+    ext2_write_block(g_bgds[group].bg_block_bitmap, bitmap);
+    kfree(bitmap);
+
+    g_bgds[group].bg_free_blocks_count++;
+    uint32_t bgdt_block = (g_block_size == 1024) ? 2 : 1;
+    uint32_t bgdt_bytes = g_bg_count * sizeof(struct ext2_bgd);
+    uint32_t bgdt_blks  = (bgdt_bytes + g_block_size - 1) / g_block_size;
+    uint8_t *bgdt_buf = kmalloc(bgdt_blks * g_block_size);
+    if (bgdt_buf) {
+        for (uint32_t b = 0; b < bgdt_blks; b++)
+            ext2_read_block(bgdt_block + b, bgdt_buf + b * g_block_size);
+        memcpy(bgdt_buf, g_bgds, bgdt_bytes);
+        for (uint32_t b = 0; b < bgdt_blks; b++)
+            ext2_write_block(bgdt_block + b, bgdt_buf + b * g_block_size);
+        kfree(bgdt_buf);
+    }
+
+    sb->s_free_blocks_count++;
+    g_dev->write_sectors(g_dev, 2, 2, sb_raw);
+}
+
+/* Free an inode: clear its bit in the inode bitmap, increment free counts. */
+static void ext2_free_inode(uint32_t ino)
+{
+    if (!ino) return;
+
+    uint8_t sb_raw[2 * BLKDEV_SECTOR_SIZE];
+    g_dev->read_sectors(g_dev, 2, 2, sb_raw);
+    struct ext2_superblock *sb = (struct ext2_superblock *)sb_raw;
+
+    uint32_t group = (ino - 1) / g_inodes_per_group;
+    uint32_t idx   = (ino - 1) % g_inodes_per_group;
+    if (group >= g_bg_count) return;
+
+    uint8_t *bitmap = kmalloc(g_block_size);
+    if (!bitmap) return;
+    ext2_read_block(g_bgds[group].bg_inode_bitmap, bitmap);
+    bitmap[idx / 8] &= ~(1 << (idx % 8));
+    ext2_write_block(g_bgds[group].bg_inode_bitmap, bitmap);
+    kfree(bitmap);
+
+    g_bgds[group].bg_free_inodes_count++;
+    uint32_t bgdt_block = (g_block_size == 1024) ? 2 : 1;
+    uint32_t bgdt_bytes = g_bg_count * sizeof(struct ext2_bgd);
+    uint32_t bgdt_blks  = (bgdt_bytes + g_block_size - 1) / g_block_size;
+    uint8_t *bgdt_buf = kmalloc(bgdt_blks * g_block_size);
+    if (bgdt_buf) {
+        for (uint32_t b = 0; b < bgdt_blks; b++)
+            ext2_read_block(bgdt_block + b, bgdt_buf + b * g_block_size);
+        memcpy(bgdt_buf, g_bgds, bgdt_bytes);
+        for (uint32_t b = 0; b < bgdt_blks; b++)
+            ext2_write_block(bgdt_block + b, bgdt_buf + b * g_block_size);
+        kfree(bgdt_buf);
+    }
+
+    sb->s_free_inodes_count++;
+    g_dev->write_sectors(g_dev, 2, 2, sb_raw);
+}
+
+/* Add a directory entry to dir_ino for (child_ino, name, file_type).
+ * Tries to fit in padding of the last entry in each existing block first.
+ * Allocates a new block if no space found. Returns 0 on success. */
+static int ext2_dir_add_entry(uint32_t dir_ino, uint32_t child_ino,
+                              const char *name, uint8_t file_type)
+{
+    uint8_t namelen = (uint8_t)strlen(name);
+    uint32_t needed = (8 + namelen + 3) & ~3u; /* rec_len must be 4-byte aligned */
+
+    struct ext2_inode dir_inode;
+    ext2_read_inode(dir_ino, &dir_inode);
+
+    uint8_t *bbuf = kmalloc(g_block_size);
+    if (!bbuf) return -1;
+
+    /* Walk direct blocks looking for a block with enough padding in last entry */
+    for (int bi = 0; bi < 12; bi++) {
+        uint32_t phys = dir_inode.i_block[bi];
+        if (!phys) break;
+
+        ext2_read_block(phys, bbuf);
+
+        uint32_t pos = 0;
+        struct ext2_dirent *last = NULL;
+        while (pos < g_block_size) {
+            struct ext2_dirent *de = (struct ext2_dirent *)(bbuf + pos);
+            if (!de->rec_len) break;
+            last = de;
+            pos += de->rec_len;
+        }
+
+        if (last) {
+            uint32_t actual = (8 + last->name_len + 3) & ~3u;
+            uint32_t slack  = last->rec_len - actual;
+            if (slack >= needed) {
+                /* Shrink last entry and append new one in its slack */
+                last->rec_len = (uint16_t)actual;
+                struct ext2_dirent *ne = (struct ext2_dirent *)((uint8_t *)last + actual);
+                ne->inode    = child_ino;
+                ne->rec_len  = (uint16_t)slack;
+                ne->name_len = namelen;
+                ne->file_type = file_type;
+                memcpy(ne->name, name, namelen);
+                ext2_write_block(phys, bbuf);
+                kfree(bbuf);
+                return 0;
+            }
+        }
+    }
+
+    /* No space in existing blocks — allocate a new direct block */
+    uint32_t new_block = ext2_alloc_block();
+    if (!new_block) { kfree(bbuf); return -1; }
+
+    /* Find the first empty direct block slot */
+    int slot = -1;
+    for (int bi = 0; bi < 12; bi++) {
+        if (!dir_inode.i_block[bi]) { slot = bi; break; }
+    }
+    if (slot < 0) { ext2_free_block(new_block); kfree(bbuf); return -1; }
+
+    memset(bbuf, 0, g_block_size);
+    struct ext2_dirent *ne = (struct ext2_dirent *)bbuf;
+    ne->inode     = child_ino;
+    ne->rec_len   = (uint16_t)g_block_size;
+    ne->name_len  = namelen;
+    ne->file_type = file_type;
+    memcpy(ne->name, name, namelen);
+    ext2_write_block(new_block, bbuf);
+    kfree(bbuf);
+
+    dir_inode.i_block[slot] = new_block;
+    dir_inode.i_size += g_block_size;
+    dir_inode.i_blocks += g_block_size / BLKDEV_SECTOR_SIZE;
+    ext2_write_inode(dir_ino, &dir_inode);
+    return 0;
+}
+
+/* Remove a directory entry matching child_ino from dir_ino.
+ * Merges the freed entry into the previous entry's rec_len. */
+static int ext2_dir_remove_entry(uint32_t dir_ino, uint32_t child_ino)
+{
+    struct ext2_inode dir_inode;
+    ext2_read_inode(dir_ino, &dir_inode);
+
+    uint8_t *bbuf = kmalloc(g_block_size);
+    if (!bbuf) return -1;
+
+    for (int bi = 0; bi < 12; bi++) {
+        uint32_t phys = dir_inode.i_block[bi];
+        if (!phys) break;
+
+        ext2_read_block(phys, bbuf);
+
+        uint32_t pos = 0;
+        struct ext2_dirent *prev = NULL;
+        while (pos < g_block_size) {
+            struct ext2_dirent *de = (struct ext2_dirent *)(bbuf + pos);
+            if (!de->rec_len) break;
+            if (de->inode == child_ino) {
+                if (prev) {
+                    prev->rec_len += de->rec_len;
+                } else {
+                    de->inode = 0; /* mark deleted, keep rec_len */
+                }
+                ext2_write_block(phys, bbuf);
+                kfree(bbuf);
+                return 0;
+            }
+            prev = de;
+            pos += de->rec_len;
+        }
+    }
+
+    kfree(bbuf);
+    return -1;
+}
+
+static struct vfs_node *ext2_make_vfs_node(struct vfs_node *parent,
+                                           uint32_t ino,
+                                           const char *name,
+                                           const struct ext2_inode *inode,
+                                           bool is_dir)
+{
+    struct vfs_node *node = vfs_alloc_node();
+    if (!node) return NULL;
+
+    uint32_t nlen = (uint32_t)strlen(name);
+    if (nlen >= VFS_NAME_MAX) nlen = VFS_NAME_MAX - 1;
+    memcpy(node->name, name, nlen);
+    node->name[nlen] = '\0';
+    node->inode  = ino;
+    node->parent = parent;
+    node->fs     = &ext2_ops;
+
+    if (is_dir) {
+        node->flags = VFS_DIR;
+    } else {
+        int slot = ext2_alloc_slot(ino, inode, node);
+        if (slot < 0) { vfs_free_node(node); return NULL; }
+        node->flags    = VFS_FILE | VFS_CHARDEV;
+        node->size     = inode->i_size;
+        node->read_op  = g_read_ops[slot];
+        node->write_op = g_write_ops[slot];
+    }
+
+    vfs_add_child(parent, node);
+    return node;
+}
+
+static struct vfs_node *ext2_create(struct vfs_node *parent, const char *name)
+{
+    uint32_t ino = ext2_alloc_inode();
+    if (!ino) return NULL;
+
+    uint32_t block = ext2_alloc_block();
+    if (!block) { ext2_free_inode(ino); return NULL; }
+
+    /* Zero the data block */
+    uint8_t *zbuf = kmalloc(g_block_size);
+    if (!zbuf) { ext2_free_block(block); ext2_free_inode(ino); return NULL; }
+    memset(zbuf, 0, g_block_size);
+    ext2_write_block(block, zbuf);
+    kfree(zbuf);
+
+    /* Write inode */
+    struct ext2_inode inode;
+    memset(&inode, 0, sizeof(inode));
+    inode.i_mode   = EXT2_IMODE_FILE | 0644;
+    inode.i_links_count = 1;
+    inode.i_block[0]    = block;
+    inode.i_blocks      = g_block_size / BLKDEV_SECTOR_SIZE;
+    ext2_write_inode(ino, &inode);
+
+    /* Add directory entry (file_type=1 = regular file) */
+    if (ext2_dir_add_entry(parent->inode, ino, name, 1) != 0) {
+        ext2_free_block(block);
+        ext2_free_inode(ino);
+        return NULL;
+    }
+
+    return ext2_make_vfs_node(parent, ino, name, &inode, false);
+}
+
+static struct vfs_node *ext2_mkdir_op(struct vfs_node *parent, const char *name)
+{
+    uint32_t ino = ext2_alloc_inode();
+    if (!ino) return NULL;
+
+    uint32_t block = ext2_alloc_block();
+    if (!block) { ext2_free_inode(ino); return NULL; }
+
+    /* Write . and .. entries */
+    uint8_t *bbuf = kmalloc(g_block_size);
+    if (!bbuf) { ext2_free_block(block); ext2_free_inode(ino); return NULL; }
+    memset(bbuf, 0, g_block_size);
+
+    struct ext2_dirent *dot = (struct ext2_dirent *)bbuf;
+    dot->inode     = ino;
+    dot->rec_len   = 12;
+    dot->name_len  = 1;
+    dot->file_type = 2;
+    dot->name[0]   = '.';
+
+    struct ext2_dirent *dotdot = (struct ext2_dirent *)(bbuf + 12);
+    dotdot->inode     = parent->inode;
+    dotdot->rec_len   = (uint16_t)(g_block_size - 12);
+    dotdot->name_len  = 2;
+    dotdot->file_type = 2;
+    dotdot->name[0]   = '.';
+    dotdot->name[1]   = '.';
+
+    ext2_write_block(block, bbuf);
+    kfree(bbuf);
+
+    /* Write inode */
+    struct ext2_inode inode;
+    memset(&inode, 0, sizeof(inode));
+    inode.i_mode        = EXT2_IMODE_DIR | 0755;
+    inode.i_links_count = 2; /* . and parent ref */
+    inode.i_size        = g_block_size;
+    inode.i_block[0]    = block;
+    inode.i_blocks      = g_block_size / BLKDEV_SECTOR_SIZE;
+    ext2_write_inode(ino, &inode);
+
+    /* Add directory entry in parent (file_type=2 = directory) */
+    if (ext2_dir_add_entry(parent->inode, ino, name, 2) != 0) {
+        ext2_free_block(block);
+        ext2_free_inode(ino);
+        return NULL;
+    }
+
+    /* Increment parent's link count for the .. back-reference */
+    struct ext2_inode parent_inode;
+    ext2_read_inode(parent->inode, &parent_inode);
+    parent_inode.i_links_count++;
+    ext2_write_inode(parent->inode, &parent_inode);
+
+    return ext2_make_vfs_node(parent, ino, name, &inode, true);
+}
+
+static int ext2_unlink(struct vfs_node *parent, struct vfs_node *node)
+{
+    /* Remove dirent from parent directory */
+    if (ext2_dir_remove_entry(parent->inode, node->inode) != 0) return -1;
+
+    /* Read inode, decrement link count, free resources if zero */
+    struct ext2_inode inode;
+    ext2_read_inode(node->inode, &inode);
+    if (inode.i_links_count > 0) inode.i_links_count--;
+
+    if (inode.i_links_count == 0) {
+        /* Free all direct blocks */
+        for (int bi = 0; bi < 12; bi++) {
+            if (inode.i_block[bi]) ext2_free_block(inode.i_block[bi]);
+        }
+        /* Free single indirect */
+        if (inode.i_block[12]) {
+            uint32_t *ibuf = kmalloc(g_block_size);
+            if (ibuf) {
+                ext2_read_block(inode.i_block[12], ibuf);
+                uint32_t ptrs = g_block_size / 4;
+                for (uint32_t i = 0; i < ptrs; i++)
+                    if (ibuf[i]) ext2_free_block(ibuf[i]);
+                kfree(ibuf);
+            }
+            ext2_free_block(inode.i_block[12]);
+        }
+        inode.i_dtime = 1; /* mark deleted */
+        ext2_write_inode(node->inode, &inode);
+        ext2_free_inode(node->inode);
+    } else {
+        ext2_write_inode(node->inode, &inode);
+    }
+
+    /* Free the ext2 slot if this node held one */
+    for (int i = 0; i < EXT2_FILE_SLOTS; i++) {
+        if (g_slots[i].used && g_slots[i].ino == node->inode) {
+            g_slots[i].used = false;
+            break;
+        }
+    }
+
+    return 0;
+}
+
 static void ext2_free_tree(struct vfs_node *n)
 {
     if (!n) return;
@@ -545,8 +1026,11 @@ static int ext2_umount(struct vfs_node *mountpoint)
 }
 
 static struct fs_ops ext2_ops = {
-    .mount  = ext2_mount,
-    .umount = ext2_umount,
+    .mount     = ext2_mount,
+    .umount    = ext2_umount,
+    .create    = ext2_create,
+    .mkdir_op  = ext2_mkdir_op,
+    .unlink    = ext2_unlink,
 };
 
 void init_ext2(void)

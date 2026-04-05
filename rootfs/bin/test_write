@@ -1,0 +1,5 @@
+#!/bin/sh
+mkdir /tmp/mount
+mount ext2 /dev/hda1 /tmp/mount
+echo "hello world" > /tmp/mount/hello
+umount /tmp/mount

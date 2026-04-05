@@ -44,6 +44,19 @@ struct fs_ops {
      * below mountpoint->mounted_root, then clear mounted_root. Returns 0 on
      * success, -1 if the mount point is busy (open fds exist underneath). */
     int (*umount)(struct vfs_node *mountpoint);
+
+    /* Optional: create a new regular file named `name` under `parent`.
+     * Allocates on-disk structures and returns a wired VFS node, or NULL. */
+    struct vfs_node *(*create)(struct vfs_node *parent, const char *name);
+
+    /* Optional: create a new directory named `name` under `parent`.
+     * Allocates on-disk structures and returns a wired VFS node, or NULL. */
+    struct vfs_node *(*mkdir_op)(struct vfs_node *parent, const char *name);
+
+    /* Optional: remove file node from parent directory on disk.
+     * The VFS layer handles unlinking the node from the tree.
+     * Returns 0 on success, -1 on error. */
+    int (*unlink)(struct vfs_node *parent, struct vfs_node *node);
 };
 
 struct vfs_dirent {
