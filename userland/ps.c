@@ -11,13 +11,15 @@ struct task_info {
     unsigned int pid;
     unsigned int ppid;
     int          prio;
-    unsigned int created_s;
+    unsigned int time_s;
+    unsigned int cpu_pct;
+    char         state[8];
     char         name[32];
     int          printed;
 };
 
 /*
- * Parse a tab-delimited line: PID\tPPID\tPRIO\tTIME\tCMD\n
+ * Parse a tab-delimited line: PID\tPPID\tPRIO\tTIME\tCPU\tCMD\n
  * Returns 0 on success, -1 on failure.
  */
 static int parse_line(const char *line, struct task_info *ti)
@@ -46,7 +48,14 @@ static int parse_line(const char *line, struct task_info *ti)
     if (*p == '\t') p++;
     ti->prio = neg ? -(int)pv : (int)pv;
 
-    PARSE_UINT(ti->created_s);
+    PARSE_UINT(ti->time_s);
+    PARSE_UINT(ti->cpu_pct);
+
+    /* STATE: tab-delimited word */
+    unsigned int si = 0;
+    while (*p && *p != '\t' && *p != '\n' && si < 7) ti->state[si++] = *p++;
+    ti->state[si] = '\0';
+    if (*p == '\t') p++;
 
     /* CMD: rest of line up to newline */
     unsigned int ni = 0;
@@ -64,9 +73,11 @@ static int              ntasks = 0;
 
 static void print_row(struct task_info *ti, const char *prefix)
 {
-    printf("%4u %4u %3d %4us %s%s\n",
+    char timebuf[16];
+    snprintf(timebuf, sizeof(timebuf), "%us", ti->time_s);
+    printf("%4u %4u %3d %6s %3u%% %s %s%s\n",
            ti->pid, ti->ppid, ti->prio,
-           ti->created_s, prefix, ti->name);
+           timebuf, ti->cpu_pct, ti->state, prefix, ti->name);
 }
 
 static void print_children(unsigned int ppid, const char *prefix, int depth)
@@ -97,6 +108,8 @@ int main(int argc, char **argv)
 
     int sfd = open("/dev/sys", O_RDWR);
     if (sfd < 0) { printf("ps: cannot open /dev/sys\n"); exit(1); }
+
+    unsigned int uptime_ms = sys_uptime(sfd);
 
     char buf[2048];
     int n = sys_ps(sfd, buf, sizeof(buf) - 1);
@@ -130,7 +143,24 @@ int main(int argc, char **argv)
 
     if (ntasks == 0) return 0;
 
-    printf(" PID PPID PRI  TIME CMD\n");
+    unsigned int idle_pct = 0;
+    unsigned int total_pct = 0;
+    for (int i = 0; i < ntasks; i++) {
+        if (tasks[i].pid == 0) idle_pct = tasks[i].cpu_pct;
+        else total_pct += tasks[i].cpu_pct;
+    }
+    unsigned int up_s = uptime_ms / 1000;
+    unsigned int up_m = up_s / 60;
+    unsigned int up_h = up_m / 60;
+    up_s %= 60; up_m %= 60;
+
+    if (idle_pct == 0 && total_pct == 0)
+        printf("CPU: --  idle: --  up %u:%02u:%02u\n", up_h, up_m, up_s);
+    else
+        printf("CPU: %u%%  idle: %u%%  up %u:%02u:%02u\n",
+               total_pct, idle_pct, up_h, up_m, up_s);
+
+    printf(" PID PPID PRI   TIME  CPU S CMD\n");
 
     for (int i = 0; i < ntasks; i++) {
         if (tasks[i].ppid == 0 && !tasks[i].printed) {

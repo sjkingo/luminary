@@ -1,5 +1,7 @@
 #pragma once
 
+#include <stdint.h>
+
 #define SCHED_QUEUE_LOWEST 0
 #define SCHED_QUEUE_HIGHEST 10
 #define SCHED_QUEUE_MAX_TASKS_PER     16
@@ -18,6 +20,9 @@ extern struct task *sched_queue;
 #define SCHED_LEVEL_IDLE        (-1)
 #define SCHED_LEVEL_MIN         1
 #define SCHED_LEVEL_MAX         10
+
+/* Total scheduler ticks since boot (incremented once per timer interrupt) */
+extern uint32_t total_ticks;
 
 /* The scheduler */
 void sched(void);

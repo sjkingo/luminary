@@ -100,7 +100,9 @@ static int sys_ioctl(struct trap_frame *frame)
 static int sys_yield(void)
 {
     enable_interrupts();
+    if (running_task) running_task->blocking = true;
     asm volatile("hlt");
+    if (running_task) running_task->blocking = false;
     disable_interrupts();
     return 0;
 }
@@ -393,7 +395,9 @@ static int sys_waitpid(struct trap_frame *frame)
 
     while (!running_task->wait_done) {
         enable_interrupts();
+        running_task->blocking = true;
         asm volatile("hlt");
+        running_task->blocking = false;
         disable_interrupts();
     }
 

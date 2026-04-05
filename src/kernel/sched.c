@@ -97,6 +97,9 @@ struct task *prev_task;
 /* The scheduling queue */
 struct task *sched_queue;
 
+/* Total ticks since boot */
+uint32_t total_ticks;
+
 /* Helper macro to return queue from queue level */
 #define Q(x) (queues[(SCHED_QUEUE_HIGHEST-x)])
 
@@ -126,6 +129,21 @@ static unsigned int reset_all_priorities(void)
 void sched(void)
 {
     struct task *picked, *t;
+
+    total_ticks++;
+    if (running_task && !running_task->blocking) {
+        running_task->ticks++;
+        running_task->ticks_window++;
+    }
+
+    if (total_ticks % 1000 == 0) {
+        struct task *w = sched_queue;
+        while (w) {
+            w->cpu_pct = w->ticks_window / 10;
+            w->ticks_window = 0;
+            w = w->next;
+        }
+    }
 
     prev_task = NULL;
 

@@ -80,6 +80,10 @@ Page tables for all managed physical memory (driven by `pmm_total_frames()`) and
 
 Priority-based preemptive scheduler with dynamic aging. Tasks have a static priority (`prio_s`, 1–10) and a dynamic priority (`prio_d`) that decrements each time the task runs. When all non-idle tasks reach `prio_d=0`, priorities reset. Tie-break: the most recently run task. The scheduler runs on every timer tick (1000Hz). The idle task (PID 0) runs at priority -1.
 
+### CPU accounting
+
+Each task has a `ticks` counter (lifetime) and `ticks_window` (current 1-second window). On every timer tick, `sched()` increments `total_ticks` and, if `running_task->blocking` is false, increments `running_task->ticks` and `running_task->ticks_window`. Every 1000 ticks (1 second), `cpu_pct = ticks_window / 10` is computed for each task and `ticks_window` is reset. Tasks in a blocking `hlt` loop set `blocking = true` around the `hlt` instruction so their wait time is not charged as CPU usage.
+
 ## Process Model
 
 Tasks are created with per-task 16KB kernel stacks. Each stack is allocated by `kstack_alloc()` which maps `(TASK_STACK_SIZE/PAGE_SIZE) + 1` virtual pages and unmaps the first page as a guard page — stack overflow causes a page fault rather than silently corrupting adjacent data. Synthetic trap frames are built on the stack for initial context switching via `trapret`. Context switches swap CR3 (page directory) and update TSS esp0.
@@ -124,7 +128,11 @@ Compositor and window manager running as a kernel task at priority 9. Three-buff
 
 ## Userland
 
-Init spawns `/bin/sh` via fork+exec and respawns it if it exits. The shell supports VFS commands, path-based exec, and standard builtins. It handles Ctrl+C (`\x03`) by killing all children in the current pipeline and returning to the prompt.
+Init spawns `/bin/sh` via fork+exec and respawns it if it exits. The shell supports VFS commands, path-based exec, pipelines, I/O redirection, and background jobs.
+
+Shell builtins: `help`, `echo`, `getpid`, `pwd`, `cd`, `exit`, `jobs`, `fg [n]`, `crash`.
+
+Background jobs (`&`): a trailing `&` on any command line (including pipelines) forks all children as normal but skips the foreground wait loop. The job is stored in a static table (8 slots). Finished jobs are reaped and reported before each prompt. `fg [n]` brings job n (or the most recent) to the foreground and enters the normal Ctrl+C-interruptible wait loop. Ctrl+C at the prompt does not affect background jobs — only the current foreground pipeline is killed.
 
 Userspace programs:
 - `/bin/gui` — GUI demo app, opens 4 windows including a console

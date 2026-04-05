@@ -68,7 +68,9 @@ static uint32_t pipe_read_##i(uint32_t off, uint32_t len, void *buf)           \
             if (out > 0) break; /* return what we already have */               \
             if (running_task && running_task->read_nonblock) break; /* non-blocking */ \
             enable_interrupts();                                                \
+            if (running_task) running_task->blocking = true;                   \
             asm volatile("hlt");                                                \
+            if (running_task) running_task->blocking = false;                  \
             disable_interrupts();                                               \
             continue;                                                           \
         }                                                                       \
@@ -88,7 +90,9 @@ static uint32_t pipe_write_##i(uint32_t off, uint32_t len, const void *buf)    \
         if (pipe_free(p) == 0) {                                                \
             if (p->read_refs == 0) return (uint32_t)-1;                        \
             enable_interrupts();                                                \
+            if (running_task) running_task->blocking = true;                   \
             asm volatile("hlt");                                                \
+            if (running_task) running_task->blocking = false;                  \
             disable_interrupts();                                               \
             continue;                                                           \
         }                                                                       \

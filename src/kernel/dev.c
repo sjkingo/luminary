@@ -39,7 +39,9 @@ static uint32_t stdin_read_op(uint32_t offset, uint32_t len, void *buf)
          * any input so keystrokes route to the compositor. */
         if (kbd_is_owned()) {
             enable_interrupts();
+            if (running_task) running_task->blocking = true;
             asm volatile("hlt");
+            if (running_task) running_task->blocking = false;
             disable_interrupts();
             continue;
         }
@@ -65,7 +67,9 @@ static uint32_t stdin_read_op(uint32_t offset, uint32_t len, void *buf)
             return 0;
 
         enable_interrupts();
+        if (running_task) running_task->blocking = true;
         asm volatile("hlt");
+        if (running_task) running_task->blocking = false;
         disable_interrupts();
     }
 }

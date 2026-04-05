@@ -1,17 +1,23 @@
 /* Luminary shell.
  *
- * Interactive REPL with pipeline support and I/O redirection.
+ * Interactive REPL with pipeline support, I/O redirection, and background jobs.
  *
- * cd is the only command that truly must run in-process (it modifies cwd).
- * The others are built-in as a convenience to avoid process overhead for
- * common operations.  When any built-in appears with I/O redirections it is
- * still forked (except cd, which saves/restores fds around the redirect).
+ * cd and exit are the only commands that truly must run in-process (they modify
+ * shell state). The others are built-in as a convenience to avoid process
+ * overhead for common operations. When any built-in appears with I/O
+ * redirections it is still forked (except cd/exit, which save/restore fds).
+ *
+ * Background jobs (&):
+ *   Trailing & on a command line runs the pipeline without waiting. The job is
+ *   added to the job table (JOB_MAX slots). Finished jobs are reaped at each
+ *   prompt. fg [n] brings job n (or the most recent) to the foreground.
  */
 
 #include "syscall.h"
 #include "libc/stdio.h"
 #include "libc/string.h"
 #include "libc/stdlib.h"
+
 static char cwd[256] = "/";
 
 static void resolve_path(const char *path, char *out, unsigned int outsz)
@@ -56,6 +62,57 @@ static void resolve_path(const char *path, char *out, unsigned int outsz)
     while (norm[i] && i < outsz-1) { out[i] = norm[i]; i++; }
     out[i] = '\0';
 }
+
+#define PIPE_MAX 8
+#define JOB_MAX  8
+
+struct job {
+    int  used;
+    int  pids[PIPE_MAX];
+    int  npids;
+    char cmd[128];
+};
+
+static struct job jobs[JOB_MAX];
+static int        job_next = 1; /* 1-based job numbers */
+
+/* Allocate a job slot. Returns slot index or -1 if full. */
+static int job_alloc(void)
+{
+    for (int i = 0; i < JOB_MAX; i++)
+        if (!jobs[i].used) return i;
+    return -1;
+}
+
+/* Add a completed pipeline as a background job. */
+static void job_add(int pids[], int npids, const char *cmd)
+{
+    int i = job_alloc();
+    if (i < 0) { printf("sh: job table full\n"); return; }
+    jobs[i].used  = 1;
+    jobs[i].npids = npids;
+    for (int j = 0; j < npids; j++) jobs[i].pids[j] = pids[j];
+    strncpy(jobs[i].cmd, cmd, sizeof(jobs[i].cmd) - 1);
+    jobs[i].cmd[sizeof(jobs[i].cmd) - 1] = '\0';
+    printf("[%d] %d\n", i + 1, pids[npids - 1]);
+}
+
+/* Reap any background jobs that have finished. Called before each prompt. */
+static void job_reap(void)
+{
+    for (int i = 0; i < JOB_MAX; i++) {
+        if (!jobs[i].used) continue;
+        int done = 1;
+        for (int j = 0; j < jobs[i].npids; j++) {
+            if (!task_done(jobs[i].pids[j])) { done = 0; break; }
+        }
+        if (done) {
+            printf("[%d] done    %s\n", i + 1, jobs[i].cmd);
+            jobs[i].used = 0;
+        }
+    }
+}
+
 static void cmd_help(void)
 {
     printf("built-in commands:\n"
@@ -64,6 +121,8 @@ static void cmd_help(void)
            "  getpid         - show current PID\n"
            "  cd <path>      - change directory\n"
            "  pwd            - print working directory\n"
+           "  jobs           - list background jobs\n"
+           "  fg [n]         - bring job n (or most recent) to foreground\n"
            "  crash          - dereference a null pointer\n");
 }
 
@@ -76,6 +135,60 @@ static void cmd_cd(const char *arg)
     }
     getcwd(cwd, sizeof(cwd));
 }
+
+static void cmd_jobs(void)
+{
+    int any = 0;
+    for (int i = 0; i < JOB_MAX; i++) {
+        if (!jobs[i].used) continue;
+        printf("[%d] running  %s\n", i + 1, jobs[i].cmd);
+        any = 1;
+    }
+    if (!any) printf("no background jobs\n");
+}
+
+/* Wait for a job in the foreground; Ctrl+C kills it. */
+static void job_fg(int slot)
+{
+    struct job *j = &jobs[slot];
+    printf("[%d] %s\n", slot + 1, j->cmd);
+
+    for (int i = 0; i < j->npids; i++) {
+        while (!task_done(j->pids[i])) {
+            char c;
+            if (read_nb(0, &c, 1) > 0 && c == '\x03') {
+                for (int k = i; k < j->npids; k++)
+                    kill((unsigned int)j->pids[k]);
+                printf("^C\n");
+                j->used = 0;
+                return;
+            }
+            yield();
+        }
+    }
+    j->used = 0;
+}
+
+static void cmd_fg(const char *arg)
+{
+    int slot = -1;
+
+    if (arg && *arg) {
+        int n = atoi(arg);
+        if (n >= 1 && n <= JOB_MAX && jobs[n - 1].used)
+            slot = n - 1;
+        else { printf("fg: no such job: %s\n", arg); return; }
+    } else {
+        /* find most recently added job (highest used slot) */
+        for (int i = JOB_MAX - 1; i >= 0; i--) {
+            if (jobs[i].used) { slot = i; break; }
+        }
+        if (slot < 0) { printf("fg: no current job\n"); return; }
+    }
+
+    job_fg(slot);
+}
+
 #define ARGV_MAX 32
 
 /* Split line into whitespace-delimited tokens in-place.
@@ -87,11 +200,9 @@ static int tokenise(char *line, char *argv[], int argv_max)
     char *p = line;
 
     while (*p && argc < argv_max) {
-        /* skip whitespace */
         while (*p == ' ' || *p == '\t') p++;
         if (*p == '\0') break;
 
-        /* Collect token in-place: dst writes stripped chars, src reads raw */
         char *tok = p;
         char *dst = p;
         char quote = 0;
@@ -112,16 +223,16 @@ static int tokenise(char *line, char *argv[], int argv_max)
     argv[argc] = (char *)0;
     return argc;
 }
+
 #define REDIR_MAX 8
 
 struct redir {
     int  fd;
-    int  flags;     /* O_* flags */
-    char path[256]; /* target file, or '\0' for heredoc */
-    int  heredoc;   /* 1 if << was used */
+    int  flags;
+    char path[256];
+    int  heredoc;
 };
 
-/* Heredoc content lives here; only one heredoc per command line supported. */
 static char heredoc_buf[2048];
 
 static int parse_redirs(char *argv[], int *argc_p, struct redir redirs[], int redir_max)
@@ -230,7 +341,6 @@ static int apply_redirs(struct redir redirs[], int nredir)
     }
     return 0;
 }
-#define PIPE_MAX 8
 
 static int split_pipe(char *line, char *segs[], int max_segs)
 {
@@ -254,14 +364,26 @@ static int split_pipe(char *line, char *segs[], int max_segs)
     return n;
 }
 
-/* cd is the only command that truly must stay in-process */
+/* Detect and strip trailing & from the last pipeline segment.
+ * Returns 1 if & was present, 0 otherwise. Modifies seg in-place. */
+static int strip_background(char *seg)
+{
+    unsigned int len = (unsigned int)strlen(seg);
+    while (len > 0 && (seg[len-1] == ' ' || seg[len-1] == '\t')) len--;
+    if (len > 0 && seg[len-1] == '&') {
+        seg[len-1] = '\0';
+        return 1;
+    }
+    return 0;
+}
+
+/* cd and exit must stay in-process */
 static int must_inprocess(const char *cmd)
 {
     return strcmp(cmd, "cd")   == 0 ||
            strcmp(cmd, "exit") == 0;
 }
 
-/* Run a built-in command with the current fd table already set up. */
 static void run_builtin(char *argv[], int argc)
 {
     const char *cmd = argv[0];
@@ -281,6 +403,10 @@ static void run_builtin(char *argv[], int argc)
         printf("%s\n", cwd);
     } else if (strcmp(cmd, "cd") == 0) {
         cmd_cd(argv[1] ? argv[1] : "");
+    } else if (strcmp(cmd, "jobs") == 0) {
+        cmd_jobs();
+    } else if (strcmp(cmd, "fg") == 0) {
+        cmd_fg(argv[1]);
     } else if (strcmp(cmd, "crash") == 0) {
         printf("dereferencing NULL...\n");
         volatile int *p = (volatile int *)0x0;
@@ -290,7 +416,6 @@ static void run_builtin(char *argv[], int argc)
     }
 }
 
-/* Is this command a shell built-in? */
 static int is_builtin(const char *cmd)
 {
     return (strcmp(cmd, "help")   == 0 ||
@@ -298,23 +423,21 @@ static int is_builtin(const char *cmd)
             strcmp(cmd, "getpid") == 0 ||
             strcmp(cmd, "pwd")    == 0 ||
             strcmp(cmd, "cd")     == 0 ||
+            strcmp(cmd, "jobs")   == 0 ||
+            strcmp(cmd, "fg")     == 0 ||
             strcmp(cmd, "crash")  == 0 ||
             strcmp(cmd, "exit")   == 0);
 }
 
-/* Resolve an external command to its full path.
- * Tries the literal path first, then /bin/<cmd>. */
 static int resolve_external(const char *cmd, char *out, unsigned int outsz)
 {
     struct vfs_stat st;
 
-    /* Absolute or relative path given explicitly */
     if (cmd[0] == '/' || cmd[0] == '.') {
         resolve_path(cmd, out, outsz);
         return vfs_stat(out, &st) == 0 ? 0 : -1;
     }
 
-    /* Search /bin */
     char trypath[256];
     snprintf(trypath, sizeof(trypath), "/bin/%s", cmd);
     if (vfs_stat(trypath, &st) == 0) {
@@ -324,6 +447,7 @@ static int resolve_external(const char *cmd, char *out, unsigned int outsz)
     }
     return -1;
 }
+
 static void run_pipeline(char *line)
 {
     static char linecopy[256];
@@ -332,6 +456,9 @@ static void run_pipeline(char *line)
 
     char *segs[PIPE_MAX];
     int nsegs = split_pipe(linecopy, segs, PIPE_MAX);
+
+    /* Detect & strip & from the last segment before parsing anything else */
+    int background = strip_background(segs[nsegs - 1]);
 
     int prev_read = -1;
     int pids[PIPE_MAX];
@@ -372,8 +499,8 @@ static void run_pipeline(char *line)
             pipe_w = pfd[1];
         }
 
-        /* cd stays in-process; no fork unless it's in a pipeline */
-        int inproc = (nsegs == 1) && must_inprocess(argv[0]);
+        /* cd/exit stay in-process only for single-command, foreground lines */
+        int inproc = (nsegs == 1) && !background && must_inprocess(argv[0]);
 
         if (inproc) {
             if (nredir > 0) {
@@ -397,8 +524,8 @@ static void run_pipeline(char *line)
             int pid = fork();
             if (pid == 0) {
                 if (prev_read >= 0) { dup2(prev_read, 0); vfs_close(prev_read); }
-                if (pipe_w >= 0) { dup2(pipe_w, 1); vfs_close(pipe_w); }
-                if (pipe_r >= 0) vfs_close(pipe_r);
+                if (pipe_w >= 0)    { dup2(pipe_w, 1);    vfs_close(pipe_w); }
+                if (pipe_r >= 0)    vfs_close(pipe_r);
 
                 if (apply_redirs(redirs, nredir) < 0) exit(1);
 
@@ -429,12 +556,17 @@ static void run_pipeline(char *line)
 
     if (prev_read >= 0) vfs_close(prev_read);
 
-    /* Wait for all pipeline children, but allow Ctrl+C to kill them. */
+    if (background) {
+        /* Store the original command line (before split_pipe modified it) */
+        job_add(pids, npids, line);
+        return;
+    }
+
+    /* Foreground: wait for all pipeline children; Ctrl+C kills only them */
     for (int i = 0; i < npids; i++) {
         while (!task_done(pids[i])) {
             char c;
             if (read_nb(0, &c, 1) > 0 && c == '\x03') {
-                /* Ctrl+C: kill remaining pipeline children and abort wait */
                 for (int j = i; j < npids; j++)
                     kill((unsigned int)pids[j]);
                 printf("^C\n");
@@ -444,12 +576,26 @@ static void run_pipeline(char *line)
         }
     }
 }
+
 static void dispatch(char *line)
 {
     while (*line == ' ' || *line == '\t') line++;
     if (*line == '\0' || *line == '#') return;
+
+    /* fg and jobs are in-process builtins that need to run directly */
+    char tmp[256];
+    strncpy(tmp, line, sizeof(tmp) - 1);
+    tmp[sizeof(tmp)-1] = '\0';
+    char *argv[ARGV_MAX + 1];
+    int argc = tokenise(tmp, argv, ARGV_MAX);
+    if (argc > 0 && (strcmp(argv[0], "fg") == 0 || strcmp(argv[0], "jobs") == 0)) {
+        run_builtin(argv, argc);
+        return;
+    }
+
     run_pipeline(line);
 }
+
 static void run_script(const char *path)
 {
     static char sbuf[4096];
@@ -466,7 +612,6 @@ static void run_script(const char *path)
         while (*p && *p != '\n') p++;
         int has_more = (*p == '\n');
         *p = '\0';
-        /* skip shebang on first line */
         if (line[0] != '#')
             dispatch(line);
         if (!has_more) break;
@@ -489,21 +634,25 @@ int main(int argc, char **argv)
     int idx = 0;
     char c;
 
-    printf("Luminary shell\nType 'help' for commands.\n\n%s $ ", cwd);
+    printf("Luminary shell\nType 'help' for commands.\n\n");
+    job_reap();
+    printf("%s $ ", cwd);
 
     for (;;) {
         if (read(0, &c, 1) == 0)
             continue;
 
         if (c == '\x03') {
-            /* Ctrl+C: discard current line, print ^C and new prompt */
-            printf("^C\n%s $ ", cwd);
+            printf("^C\n");
+            job_reap();
+            printf("%s $ ", cwd);
             idx = 0;
         } else if (c == '\n') {
             putchar('\n');
             cmd[idx] = '\0';
             dispatch(cmd);
             idx = 0;
+            job_reap();
             printf("%s $ ", cwd);
         } else if (c == '\b') {
             if (idx > 0) {

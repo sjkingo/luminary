@@ -40,8 +40,13 @@ struct task {
     bool         wait_done;     /* set true when the waited-on child has exited */
     int          exit_status;   /* exit code passed to SYS_EXIT_TASK; read by parent via SYS_WAITPID */
 
+    uint32_t     ticks;         /* total scheduler ticks consumed by this task */
+    uint32_t     ticks_window;  /* ticks accumulated in the current 1s window */
+    uint32_t     cpu_pct;       /* CPU% from the last completed 1s window */
+
     unsigned int fault_count;   /* consecutive CPU exceptions; panic at MAX_TASK_FAULTS */
     bool         read_nonblock; /* set during SYS_READ_NB: chardev/pipe reads return 0 if empty */
+    bool         blocking;      /* true while task is in a blocking hlt loop; ticks not charged */
 
     char cwd[256];              /* current working directory (absolute path) */
     char cmdline[128];          /* full argv[0..n] joined by spaces, for ps */

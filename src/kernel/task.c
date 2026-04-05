@@ -634,8 +634,9 @@ struct task *task_fork(struct trap_frame *frame)
     /* Copy most fields from parent */
     *child = *running_task;
 
-    child->pid    = ++last_pid;
-    child->ppid   = running_task->pid;
+    child->pid     = ++last_pid;
+    child->ppid    = running_task->pid;
+    child->created = timekeeper.uptime_ms;
     child->wait_pid  = -1;
     child->wait_done = false;
     child->prev   = NULL;

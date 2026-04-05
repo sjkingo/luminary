@@ -61,7 +61,7 @@ static int32_t sys_control_op(struct vfs_node *node, uint32_t request, void *arg
         uint32_t pos = 0;
         char tmp[128];
 
-        const char *hdr = "PID\tPPID\tPRIO\tTIME\tCMD\n";
+        const char *hdr = "PID\tPPID\tPRIO\tTIME\tCPU\tSTATE\tCMD\n";
         uint32_t i = 0;
         while (hdr[i] && pos < buflen - 1) buf[pos++] = hdr[i++];
 
@@ -85,11 +85,20 @@ static int32_t sys_control_op(struct vfs_node *node, uint32_t request, void *arg
 
         for (int j = 0; j < ntasks && pos < buflen - 1; j++) {
             t = tasks[j];
-            uint32_t age_s = t->created / 1000;
+            uint32_t age_s = (timekeeper.uptime_ms - t->created) / 1000;
+            uint32_t cpu_pct = t->cpu_pct;
+            const char *state;
+            if (t->pid == PID_IDLE)                  state = "I";
+            else if (t == running_task)              state = "R";
+            else if (t->blocking)                    state = "B";
+            else if (t->wait_pid != -1)              state = "W";
+            else if (t->prio_d == SCHED_LEVEL_SUSP)  state = "S";
+            else                                     state = "D";
             const char *cmd = t->cmdline[0] ? t->cmdline : t->name;
-            int n = sprintf(tmp, "%d\t%d\t%d\t%lu\t%s\n",
+            int n = sprintf(tmp, "%d\t%d\t%d\t%lu\t%lu\t%s\t%s\n",
                             t->pid, t->ppid, t->prio_s,
-                            (unsigned long)age_s, cmd);
+                            (unsigned long)age_s, (unsigned long)cpu_pct,
+                            state, cmd);
             for (int k = 0; k < n && pos < buflen - 1; k++)
                 buf[pos++] = tmp[k];
         }

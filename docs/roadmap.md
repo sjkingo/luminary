@@ -22,7 +22,7 @@
 - PS/2 keyboard driver with ring buffer
 - PS/2 mouse driver (IRQ12, absolute position tracking)
 - GUI compositor: three-buffer rendering, window management, drag, resize, close, statusbar/taskbar, focus-follows-mouse, resize cursor sprites, console window
-- Interactive shell (`sh`) with VFS commands and path-based exec
+- Interactive shell (`sh`) with VFS commands, path-based exec, pipelines, I/O redirection, background jobs (`&`), `fg`/`jobs` builtins, and Ctrl+C handling that only kills foreground children
 - `vmm_alloc_pages`: maps non-contiguous physical frames to contiguous kernel virtual range at `0xC0000000+`, with free-list reclaim
 - PMM zones: ZONE_LOW for contiguous/DMA allocations, ZONE_ANY for general use
 - `pmm_alloc_contiguous(n)`: allocates n physically contiguous frames from ZONE_LOW
@@ -36,6 +36,9 @@
 - Ctrl+C signal interrupts: keyboard driver emits `\x03`; shell uses interruptible wait (`task_done()` + `read_nb()` + `yield()`) to detect and kill children
 - `task_death_hook`: registered callback fired by `task_kill()` for per-task resource cleanup; GUI uses it to destroy orphaned windows
 - Kernel stack guard pages: each task's 16KB kernel stack has an unmapped guard page immediately below it; overflow triggers a page fault rather than silent corruption
+- Per-task CPU accounting: `ticks` and `ticks_window` fields in `struct task`; scheduler increments them on every timer tick for the running task (only when `blocking=false`); `total_ticks` global tracks all ticks since boot; 1-second rolling window (`ticks_window` reset every 1000 ticks) gives `cpu_pct` per task
+- `ps`: tree-view process listing with PID, PPID, PRI, TIME (elapsed since task creation), CPU% (1s rolling window), state (`I`dle/`R`un/`B`lock/`W`ait/`S`usp/`D`ispatchable), and CMD; summary line shows total CPU%, idle%, and uptime in `h:mm:ss` format
+- `uptime`: prints system uptime in `h:mm:ss` format
 
 ## What Luminary Needs
 
