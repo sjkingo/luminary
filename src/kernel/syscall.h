@@ -33,7 +33,6 @@
 #define SYS_UNLINK      39  /* unlink(path) -> 0 or -1 */
 #define SYS_IOCTL       43  /* ioctl(fd, request, arg) -> int32 result */
 #define SYS_FCNTL       44  /* fcntl(fd, cmd, arg) -> int or -1 */
-#define SYS_SPAWN       45  /* spawn(path, argv) -> new pid or -1; no parent relationship */
 #define SYS_MOUNT       46  /* mount(fstype, path) -> 0 or -1 */
 #define SYS_UMOUNT      47  /* umount(path) -> 0 or -1 */
 

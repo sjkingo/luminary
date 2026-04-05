@@ -350,48 +350,6 @@ static int sys_fork(struct trap_frame *frame)
     return (int)child->pid;
 }
 
-static int sys_spawn(struct trap_frame *frame)
-{
-    /* EBX=path, ECX=argv (userland char *[], NULL-terminated, may be NULL) */
-    char resolved[VFS_PATH_MAX];
-    const char *path = resolve_path((const char *)frame->ebx, resolved);
-    if (!path) return -1;
-
-    uint32_t elf_size = 0;
-    const void *elf_data = initrd_get_file(path, &elf_size);
-    if (!elf_data) return -1;
-
-    /* Collect argv from user space */
-    static const char *kargv[32];
-    int argc = 0;
-    uint32_t argv_ptr = frame->ecx;
-    if (argv_ptr && user_access_ok((void *)argv_ptr, 4)) {
-        uint32_t *uargv = (uint32_t *)argv_ptr;
-        while (argc < 31 && uargv[argc] && user_access_ok((void *)uargv[argc], 1)) {
-            kargv[argc] = (const char *)uargv[argc];
-            argc++;
-        }
-    }
-    kargv[argc] = NULL;
-
-    struct task *t = (struct task *)kmalloc(sizeof(struct task));
-    if (!t) return -1;
-
-    create_elf_task(t, (char *)path, 5, elf_data, elf_size);
-    task_open_std_fds(t);
-
-    /* Set cmdline for ps */
-    int pos = 0;
-    for (int i = 0; i < argc && pos < (int)sizeof(t->cmdline) - 1; i++) {
-        if (i > 0 && pos < (int)sizeof(t->cmdline) - 1) t->cmdline[pos++] = ' ';
-        int j = 0;
-        while (kargv[i][j] && pos < (int)sizeof(t->cmdline) - 1)
-            t->cmdline[pos++] = kargv[i][j++];
-    }
-    t->cmdline[pos] = '\0';
-
-    return (int)t->pid;
-}
 
 static int sys_waitpid(struct trap_frame *frame)
 {
@@ -425,8 +383,8 @@ static int sys_waitpid(struct trap_frame *frame)
         return -1;
     }
 
-    /* WNOHANG: return immediately if child hasn't exited yet */
-    if (flags & WNOHANG) return -1;
+    /* WNOHANG: return 0 (child still running) if it hasn't exited yet */
+    if (flags & WNOHANG) return 0;
 
     /* Block until the child exits */
     running_task->wait_pid  = target_pid;
@@ -813,9 +771,7 @@ void syscall_handler(struct trap_frame *frame)
     case SYS_FCNTL:
         ret = sys_fcntl(frame);
         break;
-    case SYS_SPAWN:
-        ret = sys_spawn(frame);
-        break;
+
     case SYS_MOUNT:
         ret = sys_mount(frame);
         break;

@@ -13,9 +13,8 @@
 - ELF32 loader
 - CPIO initrd, VFS layer, path-based file access
 - fork/exec/waitpid process model
-- Syscall interface (`int 0x80`, 29 syscalls including `mkdir`/`unlink`, `getppid`, `waitpid` with WNOHANG and exit-status propagation; device-specific operations via `SYS_IOCTL` on `/dev/x` and `/dev/sys`)
+- Syscall interface (`int 0x80`, 27 syscalls including `mkdir`/`unlink`, `getppid`, `waitpid` with WNOHANG and exit-status propagation; device-specific operations via `SYS_IOCTL` on `/dev/x` and `/dev/sys`)
 - `SYS_FCNTL` (44): `F_GETFL`/`F_SETFL` with `O_NONBLOCK` per-fd flag; `SYS_READ` respects the fd flag without needing `SYS_READ_NB`
-- `SYS_SPAWN` (45): create an independent process from a path with no parent relationship; enables taskbar/launcher use cases
 - `SYS_MOUNT` (46) / `SYS_UMOUNT` (47): mount/unmount registered filesystem drivers at arbitrary VFS paths; `umount` refuses if nested mounts exist under the target path
 - VFS read-only enforcement: initrd root marked readonly after mount; `vfs_creat`/`vfs_mkdir`/`vfs_unlink`/`vfs_write` return -1 for readonly directories
 - VFS filesystem driver framework: `struct fs_ops` vtable (`mount`/`umount`), `vfs_fs_register()`, `vfs_do_mount()`/`vfs_do_umount()`; `vfs_lookup` transparently follows `mounted_root` pointers at each traversal step

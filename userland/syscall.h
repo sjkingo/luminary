@@ -34,7 +34,6 @@
 #define SYS_UNLINK      39
 #define SYS_IOCTL       43
 #define SYS_FCNTL       44
-#define SYS_SPAWN       45
 #define SYS_MOUNT       46
 #define SYS_UMOUNT      47
 
@@ -145,10 +144,6 @@ static inline int fcntl(int fd, int cmd, int arg)
     return syscall3(SYS_FCNTL, (unsigned int)fd, (unsigned int)cmd, (unsigned int)arg);
 }
 
-static inline int spawn(const char *path, char *const argv[])
-{
-    return syscall2(SYS_SPAWN, (unsigned int)path, (unsigned int)argv);
-}
 
 static inline int kill(unsigned int pid)
 {
