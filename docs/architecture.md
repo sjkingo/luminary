@@ -137,6 +137,9 @@ Background jobs (`&`): a trailing `&` on any command line (including pipelines) 
 Userspace programs:
 - `/bin/gui` — GUI demo app, opens 4 windows including a console
 - `/bin/term` — GUI terminal emulator; forks `/bin/sh` and connects it via pipes, rendering output into a window and routing keypresses back to the shell's stdin
+- `/bin/ps` — process list with tree view, per-task CPU% (1s rolling window), state, and elapsed time; summary line shows total CPU%, idle%, and uptime
+- `/bin/uptime` — prints system uptime as `h:mm:ss`
+- `/bin/busy` — infinite loop for CPU load testing
 
 All userspace programs are ELF32 binaries built with the same `i686-elf-gcc` toolchain and a freestanding libc.
 
