@@ -353,6 +353,119 @@ static int sys_exec(struct trap_frame *frame)
     return r;
 }
 
+static int sys_execve(struct trap_frame *frame)
+{
+    /* EBX=path, ECX=argv[], EDX=envp[] — same as sys_exec but replaces environ */
+    char resolved[VFS_PATH_MAX];
+    const char *path = resolve_path((const char *)frame->ebx, resolved);
+    uint32_t argv_ptr = frame->ecx;
+    uint32_t envp_ptr = frame->edx;
+
+    if (!path) return -1;
+
+    static const char *kargv[32];
+    int argc = 0;
+    if (argv_ptr && user_access_ok((void *)argv_ptr, 4)) {
+        uint32_t *uargv = (uint32_t *)argv_ptr;
+        while (argc < 31 && uargv[argc] && user_access_ok((void *)uargv[argc], 1)) {
+            kargv[argc] = (const char *)uargv[argc];
+            argc++;
+        }
+    }
+    kargv[argc] = NULL;
+
+    /* Copy envp strings to kernel scratch before the address space is replaced */
+    static char env_scratch[TASK_ENVIRON_MAX][TASK_ENVIRON_LEN];
+    int envc = 0;
+    if (envp_ptr && user_access_ok((void *)envp_ptr, 4)) {
+        uint32_t *uenvp = (uint32_t *)envp_ptr;
+        while (envc < TASK_ENVIRON_MAX && uenvp[envc] &&
+               user_access_ok((void *)uenvp[envc], 1)) {
+            strncpy(env_scratch[envc], (const char *)uenvp[envc], TASK_ENVIRON_LEN - 1);
+            env_scratch[envc][TASK_ENVIRON_LEN - 1] = '\0';
+            envc++;
+        }
+    }
+
+    struct vfs_node *exec_node = vfs_lookup(path);
+    if (!exec_node || !(exec_node->flags & VFS_FILE)) {
+        printk("execve: '%s' not found\n", path);
+        return -1;
+    }
+    uint32_t elf_size = exec_node->size;
+    void *elf_data = kmalloc(elf_size);
+    if (!elf_data) return -1;
+    if (vfs_read(exec_node, 0, elf_size, elf_data) != elf_size) {
+        kfree(elf_data);
+        printk("execve: '%s' short read\n", path);
+        return -1;
+    }
+
+    static char shebang_interp[VFS_PATH_MAX];
+    static char shebang_arg[128];
+    static char shebang_script[VFS_PATH_MAX];
+    if (parse_shebang((const char *)elf_data, elf_size,
+                      shebang_interp, sizeof(shebang_interp),
+                      shebang_arg,    sizeof(shebang_arg))) {
+        kfree(elf_data);
+
+        char interp_resolved[VFS_PATH_MAX];
+        if (!vfs_resolve("/", shebang_interp, interp_resolved)) {
+            printk("execve: shebang interpreter '%s' not found\n", shebang_interp);
+            return -1;
+        }
+        struct vfs_node *interp_node = vfs_lookup(interp_resolved);
+        if (!interp_node || !(interp_node->flags & VFS_FILE)) {
+            printk("execve: shebang interpreter '%s' not found\n", interp_resolved);
+            return -1;
+        }
+        uint32_t interp_size = interp_node->size;
+        void *interp_data = kmalloc(interp_size);
+        if (!interp_data) return -1;
+        if (vfs_read(interp_node, 0, interp_size, interp_data) != interp_size) {
+            kfree(interp_data);
+            return -1;
+        }
+
+        static const char *sargv[32];
+        int sargc = 0;
+        sargv[sargc++] = shebang_interp;
+        if (shebang_arg[0])
+            sargv[sargc++] = shebang_arg;
+        memcpy(shebang_script, resolved, strlen(resolved) + 1);
+        sargv[sargc++] = shebang_script;
+        for (int i = 1; i < argc && sargc < 31; i++)
+            sargv[sargc++] = kargv[i];
+        sargv[sargc] = NULL;
+
+        int r = task_exec(interp_data, interp_size, frame, sargc, sargv);
+        kfree(interp_data);
+        if (r == 0) {
+            running_task->environ_count = 0;
+            for (int i = 0; i < envc; i++) {
+                strncpy(running_task->environ[i], env_scratch[i], TASK_ENVIRON_LEN - 1);
+                running_task->environ[i][TASK_ENVIRON_LEN - 1] = '\0';
+            }
+            running_task->environ_count = envc;
+            cpu_reset_fault_counter();
+        }
+        return r;
+    }
+
+    int r = task_exec(elf_data, elf_size, frame, argc, kargv);
+    kfree(elf_data);
+    if (r == 0) {
+        running_task->environ_count = 0;
+        for (int i = 0; i < envc; i++) {
+            strncpy(running_task->environ[i], env_scratch[i], TASK_ENVIRON_LEN - 1);
+            running_task->environ[i][TASK_ENVIRON_LEN - 1] = '\0';
+        }
+        running_task->environ_count = envc;
+        cpu_reset_fault_counter();
+    }
+    return r;
+}
+
 static int sys_fork(struct trap_frame *frame)
 {
     /* Bump pipe refcounts for the child's inherited fds BEFORE forking.
@@ -808,6 +921,9 @@ void syscall_handler(struct trap_frame *frame)
         break;
     case SYS_EXEC:
         ret = sys_exec(frame);
+        break;
+    case SYS_EXECVE:
+        ret = sys_execve(frame);
         break;
     case SYS_FORK:
         ret = sys_fork(frame);

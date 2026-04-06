@@ -39,6 +39,7 @@
 #define SYS_FSTAT       48
 #define SYS_RENAME      49
 #define SYS_BRK         50
+#define SYS_EXECVE      51
 
 #define WNOHANG         1   /* waitpid flag: return -1 immediately if child hasn't exited */
 
@@ -169,6 +170,13 @@ static inline int fork(void)
 static inline int execv(const char *path, char *const argv[])
 {
     return syscall2(SYS_EXEC, (unsigned int)path, (unsigned int)argv);
+}
+
+/* execve: replace current process image; envp replaces the task environment */
+static inline int execve(const char *path, char *const argv[], char *const envp[])
+{
+    return syscall3(SYS_EXECVE, (unsigned int)path,
+                    (unsigned int)argv, (unsigned int)envp);
 }
 
 /* waitpid: wait for child pid to exit; writes exit code to *status if non-NULL.

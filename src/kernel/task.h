@@ -53,10 +53,13 @@ struct task {
 
     uint32_t brk;               /* current program break (top of heap); 0 for kernel tasks */
 
+#define TASK_ENVIRON_MAX  32
+#define TASK_ENVIRON_LEN 128
+    char environ[TASK_ENVIRON_MAX][TASK_ENVIRON_LEN]; /* NAME=VAL strings */
+    int  environ_count;
+
     struct task *prev, *next;
 };
-
-#define SYS_BRK                 50
 
 #define PID_IDLE                0
 #define PID_INIT                1

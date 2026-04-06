@@ -3,12 +3,14 @@
 
 #include "syscall.h"
 #include "libc/stdio.h"
+#include "env_dev.h"
 
 #define INIT_CHILD "/bin/fbcon"
 
 int main(int argc, char **argv)
 {
     (void)argc; (void)argv;
+    setenv("PATH", "/bin", 1);
     for (;;) {
         int pid = fork();
         if (pid == 0) {

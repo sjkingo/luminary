@@ -1,5 +1,6 @@
 #include "stdlib.h"
 #include "../syscall.h"
+#include "../env_dev.h"
 
 int atoi(const char *s)
 {
@@ -110,6 +111,14 @@ void free(void *ptr)
         b->size += HDR_SIZE + b->next->size;
         b->next = b->next->next;
     }
+}
+
+char *getenv(const char *name)
+{
+    static char getenv_buf[128];
+    if (getenv_r(name, getenv_buf, sizeof(getenv_buf)) < 0)
+        return (char *)0;
+    return getenv_buf;
 }
 
 void *realloc(void *ptr, size_t size)

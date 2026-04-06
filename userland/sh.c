@@ -14,12 +14,14 @@
  */
 
 #include "syscall.h"
+#include "env_dev.h"
 #include "libc/stdio.h"
 #include "libc/string.h"
 #include "libc/stdlib.h"
 #include "libc/readline.h"
 
 static char cwd[256] = "/";
+static int  last_exit = 0;
 
 static void resolve_path(const char *path, char *out, unsigned int outsz)
 {
@@ -119,14 +121,17 @@ static void job_reap(void)
 static void cmd_help(void)
 {
     printf("built-in commands:\n"
-           "  help           - show this message\n"
-           "  echo <text>    - print text\n"
-           "  getpid         - show current PID\n"
-           "  cd <path>      - change directory\n"
-           "  pwd            - print working directory\n"
-           "  jobs           - list background jobs\n"
-           "  fg [n]         - bring job n (or most recent) to foreground\n"
-           "  crash          - dereference a null pointer\n");
+           "  help              - show this message\n"
+           "  echo <text>       - print text\n"
+           "  getpid            - show current PID\n"
+           "  cd <path>         - change directory\n"
+           "  pwd               - print working directory\n"
+           "  export NAME=VAL   - set environment variable\n"
+           "  export            - list all environment variables\n"
+           "  unset NAME        - unset environment variable\n"
+           "  jobs              - list background jobs\n"
+           "  fg [n]            - bring job n (or most recent) to foreground\n"
+           "  crash             - dereference a null pointer\n");
 }
 
 static void cmd_cd(const char *arg)
@@ -316,16 +321,112 @@ static int glob_expand_token(const char *tok, char *out_argv[], int out_max,
     return count;
 }
 
-/* Expand all glob tokens in argv[0..argc-1] in-place.
- * May increase argc up to ARGV_MAX. */
-static int glob_argv(char *argv[], int argc, const char *cwd_path)
+/* Expand $NAME and ${NAME} references in a single token.
+ * Writes result into strbuf at *pos, returns pointer to the expanded string
+ * (which may be the original tok if no $ was found), or NULL on overflow. */
+static char *expand_token(const char *tok, char *strbuf, unsigned int *pos,
+                           unsigned int strbuf_sz)
 {
-    /* Scratch storage for expanded strings.  Heap-allocated to avoid a large
-     * stack frame — 4KB covers many expansions. */
-    unsigned int strbuf_sz = 4096;
-    char *strbuf = (char *)malloc(strbuf_sz);
+    /* Fast path: no $ in token */
+    const char *dollar = tok;
+    while (*dollar && *dollar != '$') dollar++;
+    if (!*dollar) return (char *)tok;
+
+    char *out = strbuf + *pos;
+    unsigned int start = *pos;
+    const char *p = tok;
+
+    while (*p) {
+        if (*p != '$') {
+            if (*pos >= strbuf_sz - 1) return NULL;
+            strbuf[(*pos)++] = *p++;
+            continue;
+        }
+        p++; /* skip $ */
+
+        /* $? — last exit status */
+        if (*p == '?') {
+            char num[12];
+            unsigned int n = 0;
+            int v = last_exit;
+            if (v == 0) {
+                num[n++] = '0';
+            } else {
+                if (v < 0) { if (*pos < strbuf_sz - 1) strbuf[(*pos)++] = '-'; v = -v; }
+                char tmp[12]; unsigned int tl = 0;
+                while (v > 0) { tmp[tl++] = (char)('0' + v % 10); v /= 10; }
+                while (tl > 0) { num[n++] = tmp[--tl]; }
+            }
+            for (unsigned int i = 0; i < n; i++) {
+                if (*pos >= strbuf_sz - 1) return NULL;
+                strbuf[(*pos)++] = num[i];
+            }
+            p++;
+            continue;
+        }
+
+        /* ${NAME} or $NAME */
+        int braced = (*p == '{');
+        if (braced) p++;
+
+        char name[64];
+        unsigned int nl = 0;
+        while (*p && nl < sizeof(name) - 1) {
+            char c = *p;
+            if (braced) {
+                if (c == '}') { p++; break; }
+            } else {
+                if (!((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+                      (c >= '0' && c <= '9') || c == '_')) break;
+            }
+            name[nl++] = *p++;
+        }
+        name[nl] = '\0';
+
+        if (nl == 0) {
+            /* bare $ with no valid name — pass through literally */
+            if (*pos >= strbuf_sz - 1) return NULL;
+            strbuf[(*pos)++] = '$';
+            continue;
+        }
+
+        char val[128];
+        int found = (getenv_r(name, val, sizeof(val)) == 0);
+        if (found) {
+            for (unsigned int i = 0; val[i]; i++) {
+                if (*pos >= strbuf_sz - 1) return NULL;
+                strbuf[(*pos)++] = val[i];
+            }
+        }
+        /* if not found, substitute empty string (bash behaviour) */
+    }
+
+    if (*pos >= strbuf_sz) return NULL;
+    strbuf[(*pos)++] = '\0';
+    (void)start;
+    return out;
+}
+
+/* Expand $VAR references in all argv tokens in-place.
+ * Uses the glob strbuf passed by the caller. */
+static int expand_variables(char *argv[], int argc,
+                             char *strbuf, unsigned int *strbuf_pos,
+                             unsigned int strbuf_sz)
+{
+    for (int i = 0; i < argc; i++) {
+        char *expanded = expand_token(argv[i], strbuf, strbuf_pos, strbuf_sz);
+        if (expanded)
+            argv[i] = expanded;
+    }
+    return argc;
+}
+
+/* Expand all glob tokens in argv[0..argc-1] in-place.
+ * strbuf/strbuf_pos/strbuf_sz are shared with expand_variables. */
+static int glob_argv(char *argv[], int argc, const char *cwd_path,
+                     char *strbuf, unsigned int *strbuf_pos, unsigned int strbuf_sz)
+{
     if (!strbuf) return argc;
-    unsigned int strbuf_pos = 0;
 
     /* Temporary expanded argv — up to ARGV_MAX slots */
     char *newargv[ARGV_MAX + 1];
@@ -334,7 +435,7 @@ static int glob_argv(char *argv[], int argc, const char *cwd_path)
     for (int i = 0; i < argc && newargc < ARGV_MAX; i++) {
         char *expanded[ARGV_MAX];
         int n = glob_expand_token(argv[i], expanded, ARGV_MAX - newargc,
-                                  strbuf, &strbuf_pos, strbuf_sz, cwd_path);
+                                  strbuf, strbuf_pos, strbuf_sz, cwd_path);
         if (n > 0) {
             /* Sort the matches (insertion sort — typically small n) */
             for (int a = 1; a < n; a++) {
@@ -356,11 +457,6 @@ static int glob_argv(char *argv[], int argc, const char *cwd_path)
 
     for (int i = 0; i <= newargc; i++) argv[i] = newargv[i];
 
-    /* strbuf is intentionally not freed — argv pointers point into it and
-     * it lives until the calling frame exits.  The shell's per-segment
-     * stack frame is short-lived, so this is acceptable.
-     * For a long-running process this would leak, but the shell loop
-     * creates a new frame per command so the leaks are bounded. */
     return newargc;
 }
 
@@ -550,11 +646,13 @@ static int strip_background(char *seg)
     return 0;
 }
 
-/* cd and exit must stay in-process */
+/* cd, exit, export, unset must stay in-process (modify shell/task state) */
 static int must_inprocess(const char *cmd)
 {
-    return strcmp(cmd, "cd")   == 0 ||
-           strcmp(cmd, "exit") == 0;
+    return strcmp(cmd, "cd")     == 0 ||
+           strcmp(cmd, "exit")   == 0 ||
+           strcmp(cmd, "export") == 0 ||
+           strcmp(cmd, "unset")  == 0;
 }
 
 static void run_builtin(char *argv[], int argc)
@@ -586,6 +684,27 @@ static void run_builtin(char *argv[], int argc)
         (void)*p;
     } else if (strcmp(cmd, "exit") == 0) {
         exit(argv[1] ? atoi(argv[1]) : 0);
+    } else if (strcmp(cmd, "export") == 0) {
+        if (!argv[1]) {
+            /* print all env vars */
+            char buf[128];
+            for (int i = 0; getenv_by_index(i, buf, sizeof(buf)) == 0; i++)
+                printf("%s\n", buf);
+        } else {
+            for (int i = 1; argv[i]; i++) {
+                char *eq = argv[i];
+                while (*eq && *eq != '=') eq++;
+                if (*eq == '=') {
+                    *eq = '\0';
+                    setenv(argv[i], eq + 1, 1);
+                    *eq = '=';
+                }
+                /* export NAME with no value: no-op (var already in environ or absent) */
+            }
+        }
+    } else if (strcmp(cmd, "unset") == 0) {
+        for (int i = 1; argv[i]; i++)
+            unsetenv(argv[i]);
     }
 }
 
@@ -599,7 +718,9 @@ static int is_builtin(const char *cmd)
             strcmp(cmd, "jobs")   == 0 ||
             strcmp(cmd, "fg")     == 0 ||
             strcmp(cmd, "crash")  == 0 ||
-            strcmp(cmd, "exit")   == 0);
+            strcmp(cmd, "exit")   == 0 ||
+            strcmp(cmd, "export") == 0 ||
+            strcmp(cmd, "unset")  == 0);
 }
 
 static int resolve_external(const char *cmd, char *out, unsigned int outsz)
@@ -611,12 +732,31 @@ static int resolve_external(const char *cmd, char *out, unsigned int outsz)
         return vfs_stat(out, &st) == 0 ? 0 : -1;
     }
 
+    char path_env[512];
+    if (getenv_r("PATH", path_env, sizeof(path_env)) != 0)
+        return -1;
+
     char trypath[256];
-    snprintf(trypath, sizeof(trypath), "/bin/%s", cmd);
-    if (vfs_stat(trypath, &st) == 0) {
-        strncpy(out, trypath, outsz - 1);
-        out[outsz - 1] = '\0';
-        return 0;
+    char *p = path_env;
+    while (*p) {
+        char *colon = p;
+        while (*colon && *colon != ':')
+            colon++;
+        int dirlen = (int)(colon - p);
+        if (dirlen > 0 && dirlen < (int)sizeof(trypath) - 2) {
+            int i;
+            for (i = 0; i < dirlen; i++)
+                trypath[i] = p[i];
+            trypath[i++] = '/';
+            strncpy(trypath + i, cmd, sizeof(trypath) - i - 1);
+            trypath[sizeof(trypath) - 1] = '\0';
+            if (vfs_stat(trypath, &st) == 0) {
+                strncpy(out, trypath, outsz - 1);
+                out[outsz - 1] = '\0';
+                return 0;
+            }
+        }
+        p = *colon ? colon + 1 : colon;
     }
     return -1;
 }
@@ -632,6 +772,10 @@ static void run_pipeline(char *line)
 
     /* Detect & strip & from the last segment before parsing anything else */
     int background = strip_background(segs[nsegs - 1]);
+
+    /* Shared scratch buffer for variable expansion and glob expansion */
+    unsigned int strbuf_sz = 4096;
+    char *strbuf = (char *)malloc(strbuf_sz);
 
     int prev_read = -1;
     int pids[PIPE_MAX];
@@ -649,7 +793,10 @@ static void run_pipeline(char *line)
             continue;
         }
 
-        argc = glob_argv(argv, argc, cwd);
+        unsigned int strbuf_pos = 0;
+        if (strbuf)
+            argc = expand_variables(argv, argc, strbuf, &strbuf_pos, strbuf_sz);
+        argc = glob_argv(argv, argc, cwd, strbuf, &strbuf_pos, strbuf_sz);
 
         struct redir redirs[REDIR_MAX];
         int nredir = parse_redirs(argv, &argc, redirs, REDIR_MAX);
@@ -732,8 +879,8 @@ static void run_pipeline(char *line)
     if (prev_read >= 0) vfs_close(prev_read);
 
     if (background) {
-        /* Store the original command line (before split_pipe modified it) */
         job_add(pids, npids, line);
+        free(strbuf);
         return;
     }
 
@@ -745,11 +892,14 @@ static void run_pipeline(char *line)
                 for (int j = i; j < npids; j++)
                     kill((unsigned int)pids[j]);
                 printf("^C\n");
+                free(strbuf);
                 return;
             }
             yield();
         }
+        last_exit = 0;
     }
+    free(strbuf);
 }
 
 static void dispatch(char *line)

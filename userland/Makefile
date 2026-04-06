@@ -12,7 +12,7 @@ LIBC_OBJS=  $(LIBC_SRCS:.c=.o)
 # BIN_DIR is set by the root Makefile to _build/rootfs/bin
 BIN_DIR    ?= .
 
-PROGS=      init sh gui term fbcon uptime ps kill ls cat stat mkdir mount umount halt reboot wallpaper busy mv
+PROGS=      init sh gui term fbcon uptime ps kill ls cat stat mkdir mount umount halt reboot wallpaper busy mv env
 TARGETS=    $(addprefix $(BIN_DIR)/,$(PROGS))
 
 .PHONY: all clean

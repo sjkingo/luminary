@@ -40,6 +40,7 @@ Userspace macros (in `userland/syscall.h`):
 | 48 | SYS_FSTAT | EBX=fd, ECX=stat_ptr | 0 or -1 | Stat an open file descriptor |
 | 49 | SYS_RENAME | EBX=old_path, ECX=new_path | 0 or -1 | Rename or move a file or directory |
 | 50 | SYS_BRK | EBX=new_brk | new_brk or cur_brk | Set program break; returns current break if EBX=0 or EBX≤current |
+| 51 | SYS_EXECVE | EBX=path, ECX=argv[], EDX=envp[] | 0 or -1 | exec in-place with explicit environment; replaces task environ with envp[] after successful load |
 
 ## Device Nodes
 
@@ -79,6 +80,21 @@ Request codes and argument structs are defined in `userland/sys_dev.h`.
 | SYS_CTL_MOUNTS (5) | `struct sys_ctl_mounts *` | Format mount table into caller buffer |
 | SYS_CTL_GUI_ACTIVE (6) | `uint32_t *` | Set to 1 if the GUI compositor currently owns the keyboard, 0 otherwise |
 
+### /dev/env — per-task environment variables
+
+Open with `O_RDONLY`. No read/write op. All operations act on the calling task's environ table (`running_task->environ[32][128]`).
+
+The environ table is stored inline in `struct task`. Fork copies it automatically. `SYS_EXEC` preserves it; `SYS_EXECVE` replaces it with the supplied `envp[]`.
+
+Request codes and argument struct are defined in `userland/env_dev.h`.
+
+| Request | Arg | Description |
+|---------|-----|-------------|
+| ENV_GET (1) | `struct env_op *` | Look up variable by `op->name`; fills `op->val` with value. Returns -1 if not found |
+| ENV_SET (2) | `struct env_op *` | Set `op->name=op->val`; `op->overwrite=0` skips if already set. Returns -1 if table full |
+| ENV_UNSET (3) | `struct env_op *` | Remove variable by `op->name`; no-op if not found |
+| ENV_GET_IDX (4) | `struct env_op *` | Get `NAME=VAL` string at `op->index`; fills `op->val`. Returns -1 if index out of range |
+
 ### /dev/fb0 — VBE framebuffer
 
 Open with `O_RDWR`. No read op. The VBE framebuffer is identity-mapped with `PTE_USER`; userland can write pixel data directly to `fb_addr` without any mmap syscall.
@@ -102,3 +118,4 @@ Request codes and the `fb_info` struct are defined in `userland/fb_dev.h`.
 - **SYS_FSTAT (48)** is the fd-based variant of SYS_STAT. Fills the same `struct vfs_stat` (size, type, inode).
 - **SYS_RENAME (49)** follows Linux `rename(2)` semantics: atomically replaces an existing file target; replaces an empty directory target when both old and new are directories; refuses to move a directory into itself.
 - **SYS_BRK (50)** follows Linux `brk(2)` semantics. EBX=0 or EBX≤current break returns the current break without mapping anything. EBX>current maps new pages (PTE_PRESENT|PTE_WRITE|PTE_USER) between old and new break in the current task's address space. Returns the new break on success, or the old break on failure (OOM or stack collision). The initial break is set by `elf_load` to the page-aligned end of the highest PT_LOAD segment. Userland wrappers: `brk(addr)` (raw) and `sbrk(increment)` (POSIX-style) in `userland/syscall.h`.
+- **SYS_EXECVE (51)** is like `SYS_EXEC` but accepts an `envp[]` (NULL-terminated array of `"NAME=VAL"` strings) as EDX. The envp strings are copied to kernel scratch before the old address space is destroyed. On success, the task's `environ` table is replaced with the supplied entries. Pass EDX=NULL to inherit the existing environment (behaves identically to `SYS_EXEC`). Userland wrapper: `execve(path, argv, envp)` in `userland/syscall.h`.

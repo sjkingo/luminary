@@ -228,6 +228,7 @@ void create_task(struct task *t, char *name, int prio, void (*entry)(void))
     t->wait_pid  = -1;
     t->wait_done = false;
     t->cwd[0] = '/'; t->cwd[1] = '\0';
+    t->environ_count = 0;
 
     setup_task_stack(t);
 
@@ -324,6 +325,7 @@ void create_user_task(struct task *t, char *name, int prio,
     t->wait_pid  = -1;
     t->wait_done = false;
     t->cwd[0] = '/'; t->cwd[1] = '\0';
+    t->environ_count = 0;
 
     /* Allocate a physical frame for user code and copy it there */
     uint32_t code_frame = pmm_alloc_frame();
@@ -415,6 +417,7 @@ void create_elf_task(struct task *t, char *name, int prio,
     t->wait_pid  = -1;
     t->wait_done = false;
     t->cwd[0] = '/'; t->cwd[1] = '\0';
+    t->environ_count = 0;
 
     /* Load the ELF into the task's address space (also allocates stack) */
     uint32_t user_sp = 0;

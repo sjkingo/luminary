@@ -21,6 +21,7 @@
 #include "kernel/vfs.h"
 #include "kernel/dev.h"
 #include "kernel/sys_dev.h"
+#include "kernel/env_dev.h"
 #include "kernel/fb_dev.h"
 #include "kernel/cmdline.h"
 #include "kernel/initrd.h"
@@ -217,6 +218,7 @@ void kernel_main(struct multiboot_info *mb, uint32_t start, uint32_t stack, uint
 
         init_devfs();
         init_dev_sys();
+        init_dev_env();
         init_fb_dev();
         init_dev_x();
         init_ata();
@@ -265,6 +267,7 @@ void kernel_main(struct multiboot_info *mb, uint32_t start, uint32_t stack, uint
 
         init_devfs();
         init_dev_sys();
+        init_dev_env();
         init_fb_dev();
         init_dev_x();
         blkdev_register_all_devnodes();
