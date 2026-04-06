@@ -6,7 +6,7 @@
  * The environ table is stored inline in struct task as
  * environ[TASK_ENVIRON_MAX][TASK_ENVIRON_LEN] (32 × 128 bytes = 4KB).
  * Fork copies it automatically via *child = *running_task.
- * SYS_EXEC preserves it; SYS_EXECVE replaces it with the supplied envp.
+ * SYS_EXECVE replaces it with the supplied envp (or preserves it when envp=NULL).
  */
 
 #include <stdbool.h>

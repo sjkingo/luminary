@@ -5,42 +5,43 @@ Syscalls are invoked via `int 0x80`. Number in EAX, up to three register args in
 Userspace macros (in `userland/syscall.h`):
 - `syscall0(n)` through `syscall3(n, a, b, c)` — 0–3 register args
 
+Syscall numbers are defined in `src/kernel/syscall_numbers.h`, which is included by both the kernel (`src/kernel/syscall.h`) and userland (`userland/syscall.h`). Numbers follow the Linux i386 ABI where semantics match closely. Luminary-specific syscalls with no clean Linux equivalent are assigned numbers in the 200+ range.
+
 ## Syscall Table
 
 | # | Name | Args | Returns | Description |
 |---|------|------|---------|-------------|
 | 0 | SYS_NOP | — | 0 | No-op |
 | 1 | SYS_EXIT_TASK | EBX=exit_code | — | Kill calling task (normal process exit) |
+| 2 | SYS_FORK | — | child pid or 0 | Fork current task; child gets 0 |
 | 3 | SYS_READ | EBX=fd, ECX=buf, EDX=len | bytes read or -1 | Read from fd. Pure chardevs (VFS_CHARDEV only): always reads at offset 0, no seeking. Files and file+chardev nodes (VFS_FILE set): offset-tracked, advances fd position. Blocks on stdin when keyboard is owned by GUI. |
 | 4 | SYS_WRITE | EBX=fd, ECX=buf, EDX=len | bytes written or -1 | Write to fd. Pure chardevs write at offset 0. Files and file+chardev nodes (e.g. ext2 files) write at fd position and advance it. |
 | 5 | SYS_OPEN | EBX=path, ECX=flags | fd or -1 | Open VFS path. flags: O_RDONLY=0, O_WRONLY=1, O_RDWR=2, O_CREAT=0x40, O_TRUNC=0x200, O_APPEND=0x400 |
 | 6 | SYS_CLOSE | EBX=fd | 0 or -1 | Close fd |
-| 17 | SYS_KILL | EBX=pid | 0 or -1 | Kill task by PID |
-| 18 | SYS_YIELD | — | 0 | Yield CPU (hlt) |
+| 7 | SYS_WAITPID | EBX=pid, ECX=&status (or 0), EDX=flags | pid or -1 | Block until child exits. flags: WNOHANG=1 |
+| 10 | SYS_UNLINK | EBX=path | 0 or -1 | Remove regular file |
+| 11 | SYS_EXECVE | EBX=path, ECX=argv[], EDX=envp[] (or 0) | 0 or -1 | Replace address space with ELF at path. envp replaces the task environment; pass NULL to inherit. |
+| 12 | SYS_CHDIR | EBX=path | 0 or -1 | Change current working directory |
+| 19 | SYS_LSEEK | EBX=fd, ECX=offset, EDX=whence | new offset or -1 | Seek within fd |
 | 20 | SYS_GETPID | — | pid | Current task PID |
-| 23 | SYS_READ_NB | EBX=fd, ECX=buf, EDX=len | bytes read or 0 | Non-blocking read; returns 0 immediately if no data |
-| 24 | SYS_LSEEK | EBX=fd, ECX=offset, EDX=whence | new offset or -1 | Seek within fd |
-| 25 | SYS_READDIR | EBX=fd, ECX=dirent_ptr | 1, 0, or -1 | Read next directory entry |
-| 26 | SYS_STAT | EBX=path, ECX=stat_ptr | 0 or -1 | Stat a path |
-| 28 | SYS_EXEC | EBX=path, ECX=argv | 0 or -1 | exec in-place: replace address space with ELF at path |
-| 29 | SYS_FORK | — | child pid or 0 | Fork current task; child gets 0 |
-| 30 | SYS_WAITPID | EBX=pid, ECX=&status (or 0), EDX=flags | pid or -1 | Block until child exits. flags: WNOHANG=1 |
-| 32 | SYS_PIPE | EBX=int[2] ptr | 0 or -1 | Create pipe; fills fds[0]=read end, fds[1]=write end |
-| 33 | SYS_DUP2 | EBX=oldfd, ECX=newfd | newfd or -1 | Duplicate oldfd onto newfd |
-| 34 | SYS_TASK_DONE | EBX=pid | 1 or 0 | Non-blocking check: 1 if pid is no longer in scheduler |
-| 35 | SYS_CHDIR | EBX=path | 0 or -1 | Change current working directory |
-| 36 | SYS_GETCWD | EBX=buf, ECX=len | 0 or -1 | Copy cwd string into buf |
-| 37 | SYS_GETPPID | — | ppid | Parent PID; 0 if no parent |
-| 38 | SYS_MKDIR | EBX=path | 0 or -1 | Create directory; parent must exist |
-| 39 | SYS_UNLINK | EBX=path | 0 or -1 | Remove regular file |
-| 43 | SYS_IOCTL | EBX=fd, ECX=request, EDX=arg | int32 or -1 | Device control: dispatch to node's control_op |
-| 44 | SYS_FCNTL | EBX=fd, ECX=cmd, EDX=arg | int or -1 | File control: F_GETFL returns flags; F_SETFL sets O_APPEND/O_NONBLOCK |
-| 46 | SYS_MOUNT | EBX=fstype, ECX=path, EDX=device (or 0) | 0 or -1 | Mount registered filesystem at path. EDX is a device path (e.g. /dev/hda1) for block-backed filesystems; 0 for memory-only filesystems (tmpfs). |
-| 47 | SYS_UMOUNT | EBX=path | 0 or -1 | Unmount filesystem at path; fails if nested mounts exist underneath |
-| 48 | SYS_FSTAT | EBX=fd, ECX=stat_ptr | 0 or -1 | Stat an open file descriptor |
-| 49 | SYS_RENAME | EBX=old_path, ECX=new_path | 0 or -1 | Rename or move a file or directory |
-| 50 | SYS_BRK | EBX=new_brk | new_brk or cur_brk | Set program break; returns current break if EBX=0 or EBX≤current |
-| 51 | SYS_EXECVE | EBX=path, ECX=argv[], EDX=envp[] | 0 or -1 | exec in-place with explicit environment; replaces task environ with envp[] after successful load |
+| 21 | SYS_MOUNT | EBX=fstype, ECX=path, EDX=device (or 0) | 0 or -1 | Mount registered filesystem at path. EDX is a device path (e.g. /dev/hda1) for block-backed filesystems; 0 for memory-only filesystems (tmpfs). |
+| 22 | SYS_UMOUNT | EBX=path | 0 or -1 | Unmount filesystem at path; fails if nested mounts exist underneath |
+| 37 | SYS_KILL | EBX=pid | 0 or -1 | Kill task by PID |
+| 38 | SYS_RENAME | EBX=old_path, ECX=new_path | 0 or -1 | Rename or move a file or directory |
+| 39 | SYS_MKDIR | EBX=path | 0 or -1 | Create directory; parent must exist |
+| 42 | SYS_PIPE | EBX=int[2] ptr | 0 or -1 | Create pipe; fills fds[0]=read end, fds[1]=write end |
+| 45 | SYS_BRK | EBX=new_brk | new_brk or cur_brk | Set program break; returns current break if EBX=0 or EBX≤current |
+| 54 | SYS_IOCTL | EBX=fd, ECX=request, EDX=arg | int32 or -1 | Device control: dispatch to node's control_op |
+| 55 | SYS_FCNTL | EBX=fd, ECX=cmd, EDX=arg | int or -1 | File control: F_GETFL returns flags; F_SETFL sets O_APPEND/O_NONBLOCK |
+| 63 | SYS_DUP2 | EBX=oldfd, ECX=newfd | newfd or -1 | Duplicate oldfd onto newfd |
+| 64 | SYS_GETPPID | — | ppid | Parent PID; 0 if no parent |
+| 89 | SYS_READDIR | EBX=fd, ECX=dirent_ptr | 1, 0, or -1 | Read next directory entry |
+| 106 | SYS_STAT | EBX=path, ECX=stat_ptr | 0 or -1 | Stat a path |
+| 108 | SYS_FSTAT | EBX=fd, ECX=stat_ptr | 0 or -1 | Stat an open file descriptor |
+| 183 | SYS_GETCWD | EBX=buf, ECX=len | 0 or -1 | Copy cwd string into buf |
+| 200 | SYS_YIELD | — | 0 | Yield CPU (hlt) |
+| 201 | SYS_READ_NB | EBX=fd, ECX=buf, EDX=len | bytes read or 0 | Non-blocking read; returns 0 immediately if no data |
+| 202 | SYS_TASK_DONE | EBX=pid | 1 or 0 | Non-blocking check: 1 if pid is no longer in scheduler |
 
 ## Device Nodes
 
@@ -84,7 +85,7 @@ Request codes and argument structs are defined in `userland/sys_dev.h`.
 
 Open with `O_RDONLY`. No read/write op. All operations act on the calling task's environ table (`running_task->environ[32][128]`).
 
-The environ table is stored inline in `struct task`. Fork copies it automatically. `SYS_EXEC` preserves it; `SYS_EXECVE` replaces it with the supplied `envp[]`.
+The environ table is stored inline in `struct task`. Fork copies it automatically. `SYS_EXECVE` preserves it when envp=NULL; replaces it with the supplied envp otherwise.
 
 Request codes and argument struct are defined in `userland/env_dev.h`.
 
@@ -107,15 +108,15 @@ Request codes and the `fb_info` struct are defined in `userland/fb_dev.h`.
 
 ## Notes
 
-- **SYS_IOCTL (43)** routes `(fd, request, arg)` to the `control_op` of the node backing `fd`. Returns -1 if the node has no `control_op`.
+- **SYS_IOCTL (54)** routes `(fd, request, arg)` to the `control_op` of the node backing `fd`. Returns -1 if the node has no `control_op`.
 - **Adding new device operations** never requires a new syscall number — register a chardev under `/dev` via `vfs_register_dev()` and implement a `control_op`.
-- **SYS_READ_NB (23)** is non-blocking: returns 0 immediately if no data. Used by the shell's Ctrl+C wait loop.
-- **SYS_TASK_DONE (34)** walks the scheduler queue; returns 1 if pid is absent.
-- **SYS_FCNTL (44)** supports `F_GETFL`/`F_SETFL` with `O_APPEND` (0x400) and `O_NONBLOCK` (0x800). `O_NONBLOCK` on an fd makes `SYS_READ` behave like `SYS_READ_NB` for that fd.
-- **SYS_MOUNT (46)** calls `vfs_do_mount(path, fstype, device)` in the kernel. The filesystem driver must have been registered with `vfs_fs_register()`. EDX is an optional device path string (e.g. `"/dev/hda1"`); the kernel strips the `/dev/` prefix and resolves it via `blkdev_find`. Pass 0/NULL in EDX for memory-only filesystems. Currently registered drivers: `tmpfs`, `initrd`, `ext2`. Valid userland invocations: `mount tmpfs /tmp`; `mount initrd /foo` (initrd boot path only — requires `init_initrd` to have run); `mount ext2 /dev/hda1 /mnt` or `mount ext2 hda1 /mnt` (`/dev/` prefix is optional). `devfs` is kernel-internal only and cannot be mounted from userspace.
-- **SYS_UMOUNT (47)** calls `vfs_do_umount(path)`. The kernel calls `fs_ops->umount()` on the mounted root; all nodes in the subtree are freed. Fails if the fs driver rejects the unmount (e.g. busy fds).
+- **SYS_READ_NB (201)** is non-blocking: returns 0 immediately if no data. Used by the shell's Ctrl+C wait loop.
+- **SYS_TASK_DONE (202)** walks the scheduler queue; returns 1 if pid is absent.
+- **SYS_FCNTL (55)** supports `F_GETFL`/`F_SETFL` with `O_APPEND` (0x400) and `O_NONBLOCK` (0x800). `O_NONBLOCK` on an fd makes `SYS_READ` behave like `SYS_READ_NB` for that fd.
+- **SYS_MOUNT (21)** calls `vfs_do_mount(path, fstype, device)` in the kernel. The filesystem driver must have been registered with `vfs_fs_register()`. EDX is an optional device path string (e.g. `"/dev/hda1"`); the kernel strips the `/dev/` prefix and resolves it via `blkdev_find`. Pass 0/NULL in EDX for memory-only filesystems. Currently registered drivers: `tmpfs`, `initrd`, `ext2`. Valid userland invocations: `mount tmpfs /tmp`; `mount initrd /foo` (initrd boot path only — requires `init_initrd` to have run); `mount ext2 /dev/hda1 /mnt` or `mount ext2 hda1 /mnt` (`/dev/` prefix is optional). `devfs` is kernel-internal only and cannot be mounted from userspace.
+- **SYS_UMOUNT (22)** calls `vfs_do_umount(path)`. The kernel calls `fs_ops->umount()` on the mounted root; all nodes in the subtree are freed. Fails if the fs driver rejects the unmount (e.g. busy fds).
+- **SYS_FSTAT (108)** is the fd-based variant of SYS_STAT. Fills the same `struct vfs_stat` (size, type, inode).
+- **SYS_RENAME (38)** follows `rename(2)` semantics: atomically replaces an existing file target; replaces an empty directory target when both old and new are directories; refuses to move a directory into itself.
+- **SYS_BRK (45)** follows `brk(2)` semantics. EBX=0 or EBX≤current break returns the current break without mapping anything. EBX>current maps new pages (PTE_PRESENT|PTE_WRITE|PTE_USER) between old and new break in the current task's address space. Returns the new break on success, or the old break on failure (OOM or stack collision). The initial break is set by `elf_load` to the page-aligned end of the highest PT_LOAD segment. Userland wrappers: `brk(addr)` (raw) and `sbrk(increment)` (POSIX-style) in `userland/syscall.h`.
+- **SYS_EXECVE (11)** accepts an `envp[]` (NULL-terminated array of `"NAME=VAL"` strings) as EDX. The envp strings are copied to kernel scratch before the old address space is destroyed. On success, the task's `environ` table is replaced with the supplied entries. Pass EDX=NULL to inherit the existing environment. Userland wrappers: `execv(path, argv)` and `execve(path, argv, envp)` in `userland/syscall.h`.
 - Extra stack args convention is retired — all new operations use ioctl structs.
-- **SYS_FSTAT (48)** is the fd-based variant of SYS_STAT. Fills the same `struct vfs_stat` (size, type, inode).
-- **SYS_RENAME (49)** follows Linux `rename(2)` semantics: atomically replaces an existing file target; replaces an empty directory target when both old and new are directories; refuses to move a directory into itself.
-- **SYS_BRK (50)** follows Linux `brk(2)` semantics. EBX=0 or EBX≤current break returns the current break without mapping anything. EBX>current maps new pages (PTE_PRESENT|PTE_WRITE|PTE_USER) between old and new break in the current task's address space. Returns the new break on success, or the old break on failure (OOM or stack collision). The initial break is set by `elf_load` to the page-aligned end of the highest PT_LOAD segment. Userland wrappers: `brk(addr)` (raw) and `sbrk(increment)` (POSIX-style) in `userland/syscall.h`.
-- **SYS_EXECVE (51)** is like `SYS_EXEC` but accepts an `envp[]` (NULL-terminated array of `"NAME=VAL"` strings) as EDX. The envp strings are copied to kernel scratch before the old address space is destroyed. On success, the task's `environ` table is replaced with the supplied entries. Pass EDX=NULL to inherit the existing environment (behaves identically to `SYS_EXEC`). Userland wrapper: `execve(path, argv, envp)` in `userland/syscall.h`.

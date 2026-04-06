@@ -8,38 +8,7 @@
 #define NULL ((void *)0)
 #endif
 
-#define SYS_NOP         0
-#define SYS_EXIT_TASK   1
-#define SYS_READ        3
-#define SYS_WRITE       4
-#define SYS_OPEN        5
-#define SYS_CLOSE       6
-#define SYS_KILL        17
-#define SYS_YIELD       18
-#define SYS_GETPID      20
-#define SYS_READ_NB     23
-#define SYS_LSEEK       24
-#define SYS_READDIR     25
-#define SYS_STAT        26
-#define SYS_EXEC        28
-#define SYS_FORK        29
-#define SYS_WAITPID     30
-#define SYS_PIPE        32
-#define SYS_DUP2        33
-#define SYS_TASK_DONE   34
-#define SYS_CHDIR       35
-#define SYS_GETCWD      36
-#define SYS_GETPPID     37
-#define SYS_MKDIR       38
-#define SYS_UNLINK      39
-#define SYS_IOCTL       43
-#define SYS_FCNTL       44
-#define SYS_MOUNT       46
-#define SYS_UMOUNT      47
-#define SYS_FSTAT       48
-#define SYS_RENAME      49
-#define SYS_BRK         50
-#define SYS_EXECVE      51
+#include "../src/kernel/syscall_numbers.h"
 
 #define WNOHANG         1   /* waitpid flag: return -1 immediately if child hasn't exited */
 
@@ -166,10 +135,11 @@ static inline int fork(void)
     return syscall0(SYS_FORK);
 }
 
-/* execv: replace current process image with path; argv is NULL-terminated */
+/* execv: replace current process image with path; argv is NULL-terminated.
+ * Inherits the existing task environment (envp=NULL). */
 static inline int execv(const char *path, char *const argv[])
 {
-    return syscall2(SYS_EXEC, (unsigned int)path, (unsigned int)argv);
+    return syscall3(SYS_EXECVE, (unsigned int)path, (unsigned int)argv, 0);
 }
 
 /* execve: replace current process image; envp replaces the task environment */
