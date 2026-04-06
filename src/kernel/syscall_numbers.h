@@ -28,7 +28,6 @@
 #define SYS_PIPE        42  /* pipe(fds[2]) — create pipe */
 #define SYS_BRK         45  /* brk(addr) — set/query program break */
 #define SYS_IOCTL       54  /* ioctl(fd, request, arg) — device control */
-#define SYS_FCNTL       55  /* fcntl(fd, cmd, arg) — file descriptor control */
 #define SYS_DUP2        63  /* dup2(oldfd, newfd) — duplicate fd */
 #define SYS_GETPPID     64  /* getppid() -> parent PID */
 #define SYS_READDIR     89  /* readdir(fd, dirent*) -> 1/0/-1 */

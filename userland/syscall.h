@@ -46,9 +46,6 @@ struct vfs_stat {
 #define O_APPEND   0x400
 #define O_NONBLOCK 0x800
 
-/* fcntl() commands */
-#define F_GETFL 3
-#define F_SETFL 4
 
 static inline int syscall0(int num)
 {
@@ -111,11 +108,6 @@ static inline int getpid(void)
 static inline int ioctl(int fd, unsigned int request, void *arg)
 {
     return syscall3(SYS_IOCTL, (unsigned int)fd, request, (unsigned int)arg);
-}
-
-static inline int fcntl(int fd, int cmd, int arg)
-{
-    return syscall3(SYS_FCNTL, (unsigned int)fd, (unsigned int)cmd, (unsigned int)arg);
 }
 
 

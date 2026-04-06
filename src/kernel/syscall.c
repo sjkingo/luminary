@@ -22,7 +22,7 @@
 #include "drivers/keyboard.h"
 #include "drivers/blkdev.h"
 
-/* Linux open(2) flag bits and fcntl(2) constants */
+/* Linux open(2) flag bits */
 #define O_RDONLY   0
 #define O_WRONLY   1
 #define O_RDWR     2
@@ -30,9 +30,6 @@
 #define O_TRUNC    0x200
 #define O_APPEND   0x400
 #define O_NONBLOCK 0x800
-
-#define F_GETFL 3
-#define F_SETFL 4
 
 /* Validate that a user-supplied pointer range lies entirely within user space.
  * Pass len=0 to check only the start address (e.g. for string pointers where
@@ -142,31 +139,6 @@ static int sys_read(struct trap_frame *frame)
     return -1;
 }
 
-static int sys_fcntl(struct trap_frame *frame)
-{
-    /* EBX=fd, ECX=cmd, EDX=arg */
-    int fd  = (int)frame->ebx;
-    int cmd = (int)frame->ecx;
-    int arg = (int)frame->edx;
-
-    if (fd < 0 || fd >= VFS_FD_MAX) return -1;
-    struct vfs_fd *vfd = &running_task->fds[fd];
-    if (!vfd->open) return -1;
-
-    int flags = vfd->append ? O_APPEND : 0;
-    if (vfd->nonblock) flags |= O_NONBLOCK;
-
-    switch (cmd) {
-    case F_GETFL:
-        return flags;
-    case F_SETFL:
-        vfd->append   = (arg & O_APPEND)   != 0;
-        vfd->nonblock = (arg & O_NONBLOCK)  != 0;
-        return 0;
-    default:
-        return -1;
-    }
-}
 
 static int sys_read_nb(struct trap_frame *frame)
 {
@@ -869,9 +841,6 @@ void syscall_handler(struct trap_frame *frame)
         break;
     case SYS_IOCTL:
         ret = sys_ioctl(frame);
-        break;
-    case SYS_FCNTL:
-        ret = sys_fcntl(frame);
         break;
 
     case SYS_MOUNT:
