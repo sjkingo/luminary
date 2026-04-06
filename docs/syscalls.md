@@ -77,6 +77,17 @@ Request codes and argument structs are defined in `userland/sys_dev.h`.
 | SYS_CTL_UPTIME (3) | `uint32_t *` | Fill with uptime in milliseconds |
 | SYS_CTL_PS (4) | `struct sys_ctl_ps *` | Format process list into caller buffer |
 | SYS_CTL_MOUNTS (5) | `struct sys_ctl_mounts *` | Format mount table into caller buffer |
+| SYS_CTL_GUI_ACTIVE (6) | `uint32_t *` | Set to 1 if the GUI compositor currently owns the keyboard, 0 otherwise |
+
+### /dev/fb0 — VBE framebuffer
+
+Open with `O_RDWR`. No read op. The VBE framebuffer is identity-mapped with `PTE_USER`; userland can write pixel data directly to `fb_addr` without any mmap syscall.
+
+Request codes and the `fb_info` struct are defined in `userland/fb_dev.h`.
+
+| Request | Arg | Description |
+|---------|-----|-------------|
+| FBIOGET_INFO (1) | `struct fb_info *` | Fill with framebuffer geometry: width, height, pitch, depth (bpp), fb_addr |
 
 ## Notes
 
