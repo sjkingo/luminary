@@ -2,56 +2,31 @@
 
 Syscalls are invoked via `int 0x80`. Number in EAX, up to three register args in EBX/ECX/EDX. Return value in EAX.
 
-Userspace macros (in `userland/syscall.h`):
-- `syscall0(n)` through `syscall3(n, a, b, c)` — 0–3 register args
+Userspace macros in `userland/syscall.h`: `syscall0(n)` through `syscall3(n, a, b, c)`.
 
-Syscall numbers are defined in `src/kernel/syscall_numbers.h`, which is included by both the kernel (`src/kernel/syscall.h`) and userland (`userland/syscall.h`). Numbers follow the Linux i386 ABI where semantics match closely. Luminary-specific syscalls with no clean Linux equivalent are assigned numbers in the 200+ range.
+The full list of syscall numbers is in `src/kernel/syscall_numbers.h`, included by both the kernel and userland. Numbers follow the Linux i386 ABI where semantics match closely. Syscalls with no clean Linux equivalent are assigned numbers in the 200+ range.
 
-## Syscall Table
+## Notes on non-obvious syscalls
 
-| # | Name | Args | Returns | Description |
-|---|------|------|---------|-------------|
-| 0 | SYS_NOP | — | 0 | No-op |
-| 1 | SYS_EXIT_TASK | EBX=exit_code | — | Kill calling task (normal process exit) |
-| 2 | SYS_FORK | — | child pid or 0 | Fork current task; child gets 0 |
-| 3 | SYS_READ | EBX=fd, ECX=buf, EDX=len | bytes read or -1 | Read from fd. Pure chardevs (VFS_CHARDEV only): always reads at offset 0, no seeking. Files and file+chardev nodes (VFS_FILE set): offset-tracked, advances fd position. Blocks on stdin when keyboard is owned by GUI. |
-| 4 | SYS_WRITE | EBX=fd, ECX=buf, EDX=len | bytes written or -1 | Write to fd. Pure chardevs write at offset 0. Files and file+chardev nodes (e.g. ext2 files) write at fd position and advance it. |
-| 5 | SYS_OPEN | EBX=path, ECX=flags | fd or -1 | Open VFS path. flags: O_RDONLY=0, O_WRONLY=1, O_RDWR=2, O_CREAT=0x40, O_TRUNC=0x200, O_APPEND=0x400 |
-| 6 | SYS_CLOSE | EBX=fd | 0 or -1 | Close fd |
-| 7 | SYS_WAITPID | EBX=pid, ECX=&status (or 0), EDX=flags | pid or -1 | Block until child exits. flags: WNOHANG=1 |
-| 10 | SYS_UNLINK | EBX=path | 0 or -1 | Remove regular file |
-| 11 | SYS_EXECVE | EBX=path, ECX=argv[], EDX=envp[] (or 0) | 0 or -1 | Replace address space with ELF at path. envp replaces the task environment; pass NULL to inherit. |
-| 12 | SYS_CHDIR | EBX=path | 0 or -1 | Change current working directory |
-| 19 | SYS_LSEEK | EBX=fd, ECX=offset, EDX=whence | new offset or -1 | Seek within fd |
-| 20 | SYS_GETPID | — | pid | Current task PID |
-| 21 | SYS_MOUNT | EBX=fstype, ECX=path, EDX=device (or 0) | 0 or -1 | Mount registered filesystem at path. EDX is a device path (e.g. /dev/hda1) for block-backed filesystems; 0 for memory-only filesystems (tmpfs). |
-| 22 | SYS_UMOUNT | EBX=path | 0 or -1 | Unmount filesystem at path; fails if nested mounts exist underneath |
-| 37 | SYS_KILL | EBX=pid | 0 or -1 | Kill task by PID |
-| 38 | SYS_RENAME | EBX=old_path, ECX=new_path | 0 or -1 | Rename or move a file or directory |
-| 39 | SYS_MKDIR | EBX=path | 0 or -1 | Create directory; parent must exist |
-| 42 | SYS_PIPE | EBX=int[2] ptr | 0 or -1 | Create pipe; fills fds[0]=read end, fds[1]=write end |
-| 45 | SYS_BRK | EBX=new_brk | new_brk or cur_brk | Set program break; returns current break if EBX=0 or EBX≤current |
-| 54 | SYS_IOCTL | EBX=fd, ECX=request, EDX=arg | int32 or -1 | Device control: dispatch to node's control_op |
-| 55 | SYS_FCNTL | EBX=fd, ECX=cmd, EDX=arg | int or -1 | File control: F_GETFL returns flags; F_SETFL sets O_APPEND/O_NONBLOCK |
-| 63 | SYS_DUP2 | EBX=oldfd, ECX=newfd | newfd or -1 | Duplicate oldfd onto newfd |
-| 64 | SYS_GETPPID | — | ppid | Parent PID; 0 if no parent |
-| 89 | SYS_READDIR | EBX=fd, ECX=dirent_ptr | 1, 0, or -1 | Read next directory entry |
-| 106 | SYS_STAT | EBX=path, ECX=stat_ptr | 0 or -1 | Stat a path |
-| 108 | SYS_FSTAT | EBX=fd, ECX=stat_ptr | 0 or -1 | Stat an open file descriptor |
-| 183 | SYS_GETCWD | EBX=buf, ECX=len | 0 or -1 | Copy cwd string into buf |
-| 200 | SYS_YIELD | — | 0 | Yield CPU (hlt) |
-| 201 | SYS_READ_NB | EBX=fd, ECX=buf, EDX=len | bytes read or 0 | Non-blocking read; returns 0 immediately if no data |
-| 202 | SYS_TASK_DONE | EBX=pid | 1 or 0 | Non-blocking check: 1 if pid is no longer in scheduler |
+**SYS_READ / SYS_WRITE**: dispatch depends on node flags. Pure chardevs (`VFS_CHARDEV` only) always I/O at offset 0. Nodes with `VFS_FILE` set (regular files, pipes, ext2 nodes) track position via the fd offset. SYS_READ on stdin blocks while the GUI owns the keyboard.
+
+**SYS_EXECVE (11)**: EDX=NULL inherits the existing task environment unchanged. Pass a NULL-terminated `"NAME=VAL"` array to replace it. Userland wrappers: `execv(path, argv)` (inherits env) and `execve(path, argv, envp)`.
+
+**SYS_MOUNT (21)**: EDX is an optional device path (e.g. `/dev/hda1`); the `/dev/` prefix is stripped before resolving. Pass 0 for memory-only filesystems. Registered drivers: `tmpfs`, `initrd`, `ext2`. `devfs` is kernel-internal and cannot be mounted from userspace.
+
+**SYS_BRK (45)**: EBX=0 or EBX≤current break returns the current break without mapping anything. Initial break set by `elf_load` to the page-aligned end of the highest PT_LOAD segment. Userland wrappers: `brk(addr)` and `sbrk(increment)`.
+
+**SYS_READ_NB (201)**: returns 0 immediately if no data is available. Equivalent to `O_NONBLOCK` on the read path. Used by the shell's Ctrl+C wait loop.
+
+**SYS_TASK_DONE (202)**: non-blocking pid liveness check. Returns 1 if the pid is no longer in the scheduler queue.
 
 ## Device Nodes
 
-Rather than adding new syscalls, subsystem-specific operations are exposed as device nodes under `/dev`. Programs open the device and use `SYS_IOCTL` with request codes defined in the relevant userland header.
+Subsystem-specific operations are exposed as device nodes under `/dev`. Programs open the device and use `SYS_IOCTL` with request codes defined in the relevant userland header. Adding new device operations never requires a new syscall number.
 
 ### /dev/x — GUI / window manager
 
-Open with `O_RDWR`. Read returns `struct x_mouse_state` (12 bytes: x, y, buttons).
-
-Request codes and argument structs are defined in `userland/x.h`.
+Open with `O_RDWR`. Read returns `struct x_mouse_state` (12 bytes: x, y, buttons). Request codes and structs in `userland/x.h`.
 
 | Request | Arg struct | Description |
 |---------|------------|-------------|
@@ -62,15 +37,13 @@ Request codes and argument structs are defined in `userland/x.h`.
 | X_WIN_DRAW_TEXT (5) | `struct x_win_text` | Draw text into backbuffer |
 | X_WIN_FLIP (6) | `struct x_win_flip` | Commit backbuffer to screen |
 | X_WIN_POLL_EVENT (7) | `struct x_win_poll_event` | Non-blocking event poll; returns 1 if event filled |
-| X_WIN_GET_SIZE (8) | `struct x_win_get_size` | Get client area dimensions (filled in w, h fields) |
+| X_WIN_GET_SIZE (8) | `struct x_win_get_size` | Get client area dimensions |
 | X_SET_BG (9) | `struct x_set_bg` | Set desktop background from ARGB pixel buffer |
 | X_SET_DESKTOP_COLOR (10) | `struct x_set_desktop_color` | Set desktop fill colour (r, g, b in 0–255) |
 
 ### /dev/sys — system control and information
 
-Open with `O_RDWR`. No read op.
-
-Request codes and argument structs are defined in `userland/sys_dev.h`.
+Open with `O_RDWR`. Request codes and structs in `userland/sys_dev.h`.
 
 | Request | Arg | Description |
 |---------|-----|-------------|
@@ -79,44 +52,23 @@ Request codes and argument structs are defined in `userland/sys_dev.h`.
 | SYS_CTL_UPTIME (3) | `uint32_t *` | Fill with uptime in milliseconds |
 | SYS_CTL_PS (4) | `struct sys_ctl_ps *` | Format process list into caller buffer |
 | SYS_CTL_MOUNTS (5) | `struct sys_ctl_mounts *` | Format mount table into caller buffer |
-| SYS_CTL_GUI_ACTIVE (6) | `uint32_t *` | Set to 1 if the GUI compositor currently owns the keyboard, 0 otherwise |
+| SYS_CTL_GUI_ACTIVE (6) | `uint32_t *` | 1 if GUI compositor owns the keyboard, 0 otherwise |
 
 ### /dev/env — per-task environment variables
 
-Open with `O_RDONLY`. No read/write op. All operations act on the calling task's environ table (`running_task->environ[32][128]`).
-
-The environ table is stored inline in `struct task`. Fork copies it automatically. `SYS_EXECVE` preserves it when envp=NULL; replaces it with the supplied envp otherwise.
-
-Request codes and argument struct are defined in `userland/env_dev.h`.
+Open with `O_RDONLY`. All operations act on the calling task's environ table. Request codes and struct in `userland/env_dev.h`.
 
 | Request | Arg | Description |
 |---------|-----|-------------|
-| ENV_GET (1) | `struct env_op *` | Look up variable by `op->name`; fills `op->val` with value. Returns -1 if not found |
+| ENV_GET (1) | `struct env_op *` | Look up by `op->name`; fills `op->val`. Returns -1 if not found |
 | ENV_SET (2) | `struct env_op *` | Set `op->name=op->val`; `op->overwrite=0` skips if already set. Returns -1 if table full |
-| ENV_UNSET (3) | `struct env_op *` | Remove variable by `op->name`; no-op if not found |
-| ENV_GET_IDX (4) | `struct env_op *` | Get `NAME=VAL` string at `op->index`; fills `op->val`. Returns -1 if index out of range |
+| ENV_UNSET (3) | `struct env_op *` | Remove by `op->name`; no-op if not found |
+| ENV_GET_IDX (4) | `struct env_op *` | Get `NAME=VAL` string at `op->index`. Returns -1 if out of range |
 
 ### /dev/fb0 — VBE framebuffer
 
-Open with `O_RDWR`. No read op. The VBE framebuffer is identity-mapped with `PTE_USER`; userland can write pixel data directly to `fb_addr` without any mmap syscall.
-
-Request codes and the `fb_info` struct are defined in `userland/fb_dev.h`.
+Open with `O_RDWR`. The framebuffer is identity-mapped `PTE_USER`; write pixel data directly to `fb_addr` without mmap. Request codes and struct in `userland/fb_dev.h`.
 
 | Request | Arg | Description |
 |---------|-----|-------------|
-| FBIOGET_INFO (1) | `struct fb_info *` | Fill with framebuffer geometry: width, height, pitch, depth (bpp), fb_addr |
-
-## Notes
-
-- **SYS_IOCTL (54)** routes `(fd, request, arg)` to the `control_op` of the node backing `fd`. Returns -1 if the node has no `control_op`.
-- **Adding new device operations** never requires a new syscall number — register a chardev under `/dev` via `vfs_register_dev()` and implement a `control_op`.
-- **SYS_READ_NB (201)** is non-blocking: returns 0 immediately if no data. Used by the shell's Ctrl+C wait loop.
-- **SYS_TASK_DONE (202)** walks the scheduler queue; returns 1 if pid is absent.
-- **SYS_FCNTL (55)** supports `F_GETFL`/`F_SETFL` with `O_APPEND` (0x400) and `O_NONBLOCK` (0x800). `O_NONBLOCK` on an fd makes `SYS_READ` behave like `SYS_READ_NB` for that fd.
-- **SYS_MOUNT (21)** calls `vfs_do_mount(path, fstype, device)` in the kernel. The filesystem driver must have been registered with `vfs_fs_register()`. EDX is an optional device path string (e.g. `"/dev/hda1"`); the kernel strips the `/dev/` prefix and resolves it via `blkdev_find`. Pass 0/NULL in EDX for memory-only filesystems. Currently registered drivers: `tmpfs`, `initrd`, `ext2`. Valid userland invocations: `mount tmpfs /tmp`; `mount initrd /foo` (initrd boot path only — requires `init_initrd` to have run); `mount ext2 /dev/hda1 /mnt` or `mount ext2 hda1 /mnt` (`/dev/` prefix is optional). `devfs` is kernel-internal only and cannot be mounted from userspace.
-- **SYS_UMOUNT (22)** calls `vfs_do_umount(path)`. The kernel calls `fs_ops->umount()` on the mounted root; all nodes in the subtree are freed. Fails if the fs driver rejects the unmount (e.g. busy fds).
-- **SYS_FSTAT (108)** is the fd-based variant of SYS_STAT. Fills the same `struct vfs_stat` (size, type, inode).
-- **SYS_RENAME (38)** follows `rename(2)` semantics: atomically replaces an existing file target; replaces an empty directory target when both old and new are directories; refuses to move a directory into itself.
-- **SYS_BRK (45)** follows `brk(2)` semantics. EBX=0 or EBX≤current break returns the current break without mapping anything. EBX>current maps new pages (PTE_PRESENT|PTE_WRITE|PTE_USER) between old and new break in the current task's address space. Returns the new break on success, or the old break on failure (OOM or stack collision). The initial break is set by `elf_load` to the page-aligned end of the highest PT_LOAD segment. Userland wrappers: `brk(addr)` (raw) and `sbrk(increment)` (POSIX-style) in `userland/syscall.h`.
-- **SYS_EXECVE (11)** accepts an `envp[]` (NULL-terminated array of `"NAME=VAL"` strings) as EDX. The envp strings are copied to kernel scratch before the old address space is destroyed. On success, the task's `environ` table is replaced with the supplied entries. Pass EDX=NULL to inherit the existing environment. Userland wrappers: `execv(path, argv)` and `execve(path, argv, envp)` in `userland/syscall.h`.
-- Extra stack args convention is retired — all new operations use ioctl structs.
+| FBIOGET_INFO (1) | `struct fb_info *` | Fill with width, height, pitch, depth (bpp), fb_addr |

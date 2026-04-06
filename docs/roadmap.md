@@ -13,9 +13,8 @@
 - ELF32 loader
 - CPIO initrd, VFS layer, path-based file access
 - fork/exec/waitpid process model
-- Syscall interface (`int 0x80`, 51 syscalls including `mkdir`/`unlink`, `getppid`, `waitpid` with WNOHANG and exit-status propagation; device-specific operations via `SYS_IOCTL` on `/dev/x`, `/dev/sys`, `/dev/fb0`, `/dev/env`, and block device nodes; `SYS_FSTAT` (48), `SYS_RENAME` (49), `SYS_BRK` (50), `SYS_EXECVE` (51))
-- `SYS_FCNTL` (44): `F_GETFL`/`F_SETFL` with `O_NONBLOCK` per-fd flag; `SYS_READ` respects the fd flag without needing `SYS_READ_NB`
-- `SYS_MOUNT` (46) / `SYS_UMOUNT` (47): mount/unmount registered filesystem drivers at arbitrary VFS paths; `umount` refuses if nested mounts exist under the target path
+- Syscall interface (`int 0x80`; device-specific operations via `SYS_IOCTL` on `/dev/x`, `/dev/sys`, `/dev/fb0`, `/dev/env`, and block device nodes; see `src/kernel/syscall_numbers.h` for the full table)
+- `SYS_MOUNT` / `SYS_UMOUNT`: mount/unmount registered filesystem drivers at arbitrary VFS paths; `umount` refuses if nested mounts exist under the target path
 - VFS read-only enforcement: initrd root marked readonly after mount; `vfs_creat`/`vfs_mkdir`/`vfs_unlink`/`vfs_write` return -1 for readonly directories
 - VFS filesystem driver framework: `struct fs_ops` vtable (`mount`/`umount`), `vfs_fs_register()`, `vfs_do_mount()`/`vfs_do_umount()`; `vfs_lookup` transparently follows `mounted_root` pointers at each traversal step
 - tmpfs (`src/kernel/tmpfs.c`): registered filesystem driver; `mount` allocates a fresh writable VFS subtree, `umount` recursively frees it; mounted at `/tmp` on boot via `vfs_do_mount`
