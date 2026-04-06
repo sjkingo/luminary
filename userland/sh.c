@@ -63,8 +63,10 @@ static void resolve_path(const char *path, char *out, unsigned int outsz)
     out[i] = '\0';
 }
 
-#define PIPE_MAX 8
-#define JOB_MAX  8
+#define PIPE_MAX  8
+#define JOB_MAX   8
+#define HIST_MAX  100
+#define HIST_LEN  256
 
 struct job {
     int  used;
@@ -646,7 +648,7 @@ static void reprint_line(const char *prompt, const char *cmd, int len,
 
 int main(int argc, char **argv)
 {
-    char history[16][256];
+    char *history = (char *)malloc(HIST_MAX * HIST_LEN);
     int hist_head = 0;
     int hist_count = 0;
     int hist_idx = -1;    /* -1 = not browsing history */
@@ -701,10 +703,10 @@ int main(int argc, char **argv)
                     if (hist_idx < 0) hist_idx = hist_count;
                     if (hist_idx > 0) hist_idx--;
                     prev_len = idx;
-                    int hslot = (hist_head + hist_idx) % 16;
+                    int hslot = (hist_head + hist_idx) % HIST_MAX;
                     int newlen = 0;
-                    while (history[hslot][newlen]) newlen++;
-                    for (i = 0; i < newlen; i++) cmd[i] = history[hslot][i];
+                    while ((history + hslot * HIST_LEN)[newlen]) newlen++;
+                    for (i = 0; i < newlen; i++) cmd[i] = (history + hslot * HIST_LEN)[i];
                     idx = newlen; cursor = newlen;
                     reprint_line(prompt, cmd, idx, cursor, prev_len);
                 } else if (c == 'B') {  /* Down — next history / blank */
@@ -716,10 +718,10 @@ int main(int argc, char **argv)
                         idx = 0; cursor = 0;
                         reprint_line(prompt, cmd, 0, 0, prev_len);
                     } else {
-                        int hslot = (hist_head + hist_idx) % 16;
+                        int hslot = (hist_head + hist_idx) % HIST_MAX;
                         int newlen = 0;
-                        while (history[hslot][newlen]) newlen++;
-                        for (i = 0; i < newlen; i++) cmd[i] = history[hslot][i];
+                        while ((history + hslot * HIST_LEN)[newlen]) newlen++;
+                        for (i = 0; i < newlen; i++) cmd[i] = (history + hslot * HIST_LEN)[i];
                         idx = newlen; cursor = newlen;
                         reprint_line(prompt, cmd, idx, cursor, prev_len);
                     }
@@ -769,23 +771,23 @@ int main(int argc, char **argv)
             if (idx > 0) {
                 int is_dup = 0;
                 if (hist_count > 0) {
-                    int last = (hist_head + hist_count - 1) % 16;
+                    int last = (hist_head + hist_count - 1) % HIST_MAX;
                     int j;
                     is_dup = 1;
                     for (j = 0; j <= idx; j++) {
-                        if (history[last][j] != cmd[j]) { is_dup = 0; break; }
+                        if ((history + last * HIST_LEN)[j] != cmd[j]) { is_dup = 0; break; }
                     }
                 }
                 if (!is_dup) {
                     int slot;
-                    if (hist_count < 16) {
-                        slot = (hist_head + hist_count) % 16;
+                    if (hist_count < HIST_MAX) {
+                        slot = (hist_head + hist_count) % HIST_MAX;
                         hist_count++;
                     } else {
                         slot = hist_head;
-                        hist_head = (hist_head + 1) % 16;
+                        hist_head = (hist_head + 1) % HIST_MAX;
                     }
-                    for (i = 0; i <= idx; i++) history[slot][i] = cmd[i];
+                    for (i = 0; i <= idx; i++) (history + slot * HIST_LEN)[i] = cmd[i];
                 }
             }
             hist_idx = -1;
@@ -827,10 +829,10 @@ int main(int argc, char **argv)
                 if (hist_idx < 0) hist_idx = hist_count;
                 if (hist_idx > 0) hist_idx--;
                 prev_len = idx;
-                int hslot = (hist_head + hist_idx) % 16;
+                int hslot = (hist_head + hist_idx) % HIST_MAX;
                 int newlen = 0;
-                while (history[hslot][newlen]) newlen++;
-                for (i = 0; i < newlen; i++) cmd[i] = history[hslot][i];
+                while ((history + hslot * HIST_LEN)[newlen]) newlen++;
+                for (i = 0; i < newlen; i++) cmd[i] = (history + hslot * HIST_LEN)[i];
                 idx = newlen; cursor = newlen;
                 reprint_line(prompt, cmd, idx, cursor, prev_len);
             }
@@ -845,10 +847,10 @@ int main(int argc, char **argv)
                     idx = 0; cursor = 0;
                     reprint_line(prompt, cmd, 0, 0, prev_len);
                 } else {
-                    int hslot = (hist_head + hist_idx) % 16;
+                    int hslot = (hist_head + hist_idx) % HIST_MAX;
                     int newlen = 0;
-                    while (history[hslot][newlen]) newlen++;
-                    for (i = 0; i < newlen; i++) cmd[i] = history[hslot][i];
+                    while ((history + hslot * HIST_LEN)[newlen]) newlen++;
+                    for (i = 0; i < newlen; i++) cmd[i] = (history + hslot * HIST_LEN)[i];
                     idx = newlen; cursor = newlen;
                     reprint_line(prompt, cmd, idx, cursor, prev_len);
                 }

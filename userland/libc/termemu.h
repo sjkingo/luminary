@@ -10,10 +10,10 @@
 #define TERMEMU_MAX_SB    1024  /* max scrollback lines */
 
 struct termemu {
-    /* ring buffer: sb[SB_LINES][cols], allocated statically at max size */
-    char sb[TERMEMU_MAX_SB][TERMEMU_MAX_COLS];
-    int  sb_head;   /* index of oldest line (or next to overwrite when full) */
-    int  sb_count;  /* total lines in ring (0..sb_lines) */
+    /* ring buffer: sb_lines * cols chars, row i at sb + i*cols */
+    char *sb;
+    int   sb_head;  /* index of oldest line (or next to overwrite when full) */
+    int   sb_count; /* total lines in ring (0..sb_lines) */
 
     /* configured dimensions */
     int  cols;
@@ -27,8 +27,8 @@ struct termemu {
     /* scrollback view: 0 = live bottom, N = scrolled back N rows */
     int  scroll_offset;
 
-    /* dirty flags for incremental rendering */
-    char dirty[TERMEMU_MAX_ROWS];
+    /* dirty flags for incremental rendering, rows entries */
+    char *dirty;
 };
 
 void termemu_init(struct termemu *t, int cols, int rows, int sb_lines);

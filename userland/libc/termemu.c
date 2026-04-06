@@ -8,11 +8,11 @@
  */
 
 #include "libc/termemu.h"
+#include "libc/stdlib.h"
 #include "libc/string.h"
 
 void termemu_init(struct termemu *t, int cols, int rows, int sb_lines)
 {
-    int c;
     int r;
 
     if (cols > TERMEMU_MAX_COLS) cols = TERMEMU_MAX_COLS;
@@ -28,12 +28,13 @@ void termemu_init(struct termemu *t, int cols, int rows, int sb_lines)
     t->cur_row   = 0;
     t->scroll_offset = 0;
 
-    for (r = 0; r < TERMEMU_MAX_ROWS; r++)
-        t->dirty[r] = 0;
+    t->sb    = (char *)malloc((unsigned int)(sb_lines * cols));
+    t->dirty = (char *)malloc((unsigned int)rows);
 
-    for (r = 0; r < TERMEMU_MAX_SB; r++)
-        for (c = 0; c < TERMEMU_MAX_COLS; c++)
-            t->sb[r][c] = ' ';
+    for (r = 0; r < sb_lines; r++)
+        memset(t->sb + r * cols, ' ', (unsigned int)cols);
+    for (r = 0; r < rows; r++)
+        t->dirty[r] = 0;
 
     /* Start with one blank live line */
     t->sb_count = 1;
@@ -49,7 +50,7 @@ static void sb_new_line(struct termemu *t)
         idx       = t->sb_head;
         t->sb_head = (t->sb_head + 1) % t->sb_lines;
     }
-    memset(t->sb[idx], ' ', (unsigned int)t->cols);
+    memset(t->sb + idx * t->cols, ' ', (unsigned int)t->cols);
 }
 
 static void advance_row(struct termemu *t)
@@ -149,7 +150,7 @@ char *termemu_get_live_row(struct termemu *t, int r)
     int live = t->sb_count < t->rows ? t->sb_count : t->rows;
     int base = t->sb_count - live;
     int idx  = (t->sb_head + base + r) % t->sb_lines;
-    return t->sb[idx];
+    return t->sb + idx * t->cols;
 }
 
 char *termemu_get_visible_row(struct termemu *t, int r)
@@ -173,7 +174,7 @@ char *termemu_get_visible_row(struct termemu *t, int r)
     }
 
     idx = (t->sb_head + vtop + r) % t->sb_lines;
-    return t->sb[idx];
+    return t->sb + idx * t->cols;
 }
 
 int termemu_is_dirty(struct termemu *t, int row)
