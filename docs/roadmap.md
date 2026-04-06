@@ -26,7 +26,7 @@
 - PS/2 keyboard driver with ring buffer
 - PS/2 mouse driver (IRQ12, absolute position tracking)
 - GUI compositor: three-buffer rendering, window management, drag, resize, close, statusbar/taskbar, focus-follows-mouse, resize cursor sprites, console window
-- Interactive shell (`sh`) with VFS commands, path-based exec, pipelines, I/O redirection, background jobs (`&`), `fg`/`jobs` builtins, and Ctrl+C handling that only kills foreground children
+- Interactive shell (`sh`) with VFS commands, path-based exec, pipelines, I/O redirection, background jobs (`&`), `fg`/`jobs` builtins, Ctrl+C handling that only kills foreground children, glob expansion (`*` in any token, expanded before exec/pipe, no-match pass-through), and a readline line editor with history (100-entry ring, consecutive-duplicate suppression), insert mode, left/right/home/end/delete cursor movement, and up/down history navigation
 - `vmm_alloc_pages`: maps non-contiguous physical frames to contiguous kernel virtual range at `0xC0000000+`, with free-list reclaim
 - PMM zones: ZONE_LOW for contiguous/DMA allocations, ZONE_ANY for general use
 - `pmm_alloc_contiguous(n)`: allocates n physically contiguous frames from ZONE_LOW
@@ -41,7 +41,7 @@
 - `/dev/console`: kernel pipe whose write end is driven by `stdout_write_op`; fbcon reads the read end to display early-boot printk output alongside shell output; non-blocking writes (bytes dropped if pipe full) preserve kernel correctness
 - `/dev/fb0`: ioctl chardev exposing VBE framebuffer geometry (`FBIOGET_INFO` returns width/height/pitch/depth/fb_addr); VBE framebuffer identity-mapped with `PTE_USER` so userland can write to it directly
 - Shared `termemu` library (`userland/libc/termemu.c`): ring-buffer terminal emulator (scrollback, cursor tracking, dirty rows) shared by fbcon and term; `struct termemu` with `termemu_putchar`, `termemu_scroll_up/down`, `termemu_get_visible_row`, dirty row API
-- Arrow key sentinel bytes (`KEY_UP`–`KEY_DEL`, 0x10–0x16) decoded in keyboard driver and translated to ANSI escape sequences by `term`; passed through raw to fbcon's shell pipe and consumed by `sh`'s line editor
+- Arrow key sentinel bytes (`KEY_UP`–`KEY_DEL`, 0x10–0x16) decoded in keyboard driver and translated to ANSI escape sequences by `term`; passed through raw to fbcon's shell pipe and consumed by `sh`'s readline line editor (`userland/libc/readline.c`); `stdin_read_op` passes all sentinels 0x10–0x16 through to userland, discarding only `KEY_ALT_F4` (0x17)
 - Ctrl+C signal interrupts: keyboard driver emits `\x03`; shell uses interruptible wait (`task_done()` + `read_nb()` + `yield()`) to detect and kill children
 - `task_death_hook`: registered callback fired by `task_kill()` for per-task resource cleanup; GUI uses it to destroy orphaned windows
 - Kernel stack guard pages: each task's 16KB kernel stack has an unmapped guard page immediately below it; overflow triggers a page fault rather than silent corruption

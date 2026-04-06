@@ -170,9 +170,6 @@ int keyboard_read(char *buf, unsigned int len)
         buf[count++] = kb.data[kb.tail];
         kb.tail = (kb.tail + 1) % KB_BUFFER_SIZE;
     }
-    if (count > 0)
-        DBGK("keyboard_read: %d bytes, first=0x%02x\n",
-             (int)count, (unsigned int)(unsigned char)buf[0]);
     return (int)count;
 }
 

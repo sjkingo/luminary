@@ -537,7 +537,6 @@ void task_kill(struct task *t)
 
     /* Wake any task waiting for this pid before killing children,
      * so waiters are notified even if a child kill doesn't return. */
-    DBGK("task_kill: waking waiters for pid %d\n", dead_pid);
     struct task *waiter = sched_queue;
     while (waiter) {
         if (waiter->wait_pid == (int)dead_pid) {
@@ -560,7 +559,6 @@ void task_kill(struct task *t)
             children[nchildren++] = c;
         c = c->next;
     }
-    DBGK("task_kill: pid %d has %d children\n", dead_pid, nchildren);
     struct task *self_child = NULL;
     for (int i = 0; i < nchildren; i++) {
         if (children[i] == running_task)
@@ -575,7 +573,6 @@ void task_kill(struct task *t)
      * We pick a new task and jump directly to its saved state,
      * bypassing the normal scheduler path since the current
      * trap frame belongs to the dead task. */
-    DBGK("task_kill: pid %d done, t==running_task: %d\n", dead_pid, t == running_task);
     if (t == running_task) {
         /* pick the first schedulable task */
         struct task *next = sched_queue;

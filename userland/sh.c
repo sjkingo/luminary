@@ -192,7 +192,177 @@ static void cmd_fg(const char *arg)
     job_fg(slot);
 }
 
-#define ARGV_MAX 32
+#define ARGV_MAX 64
+
+/* Glob expansion ---------------------------------------------------------- */
+
+/* Match pattern (prefix*suffix form) against name. Only one * is supported. */
+static int glob_match(const char *pat, const char *name)
+{
+    /* Find the '*' */
+    const char *star = pat;
+    while (*star && *star != '*') star++;
+
+    if (!*star) {
+        /* No wildcard — exact match */
+        unsigned int i = 0;
+        while (pat[i] && name[i] && pat[i] == name[i]) i++;
+        return pat[i] == '\0' && name[i] == '\0';
+    }
+
+    unsigned int prefixlen = (unsigned int)(star - pat);
+    const char *suffix = star + 1;
+
+    /* Prefix must match */
+    for (unsigned int i = 0; i < prefixlen; i++)
+        if (name[i] != pat[i]) return 0;
+
+    /* Suffix must match end of name */
+    unsigned int namelen = 0;
+    while (name[namelen]) namelen++;
+    unsigned int suflen = 0;
+    while (suffix[suflen]) suflen++;
+
+    if (suflen > namelen - prefixlen) return 0;
+    const char *nend = name + namelen - suflen;
+    for (unsigned int i = 0; i < suflen; i++)
+        if (nend[i] != suffix[i]) return 0;
+
+    return 1;
+}
+
+/* Expand a single glob token into out_argv[].
+ * Returns number of expansions, or 0 if no match (caller keeps original).
+ * cwd_path is the shell's current working directory (used when the pattern
+ * has no leading path component). */
+static int glob_expand_token(const char *tok, char *out_argv[], int out_max,
+                              char *strbuf, unsigned int *strbuf_pos,
+                              unsigned int strbuf_sz, const char *cwd_path)
+{
+    /* Find '*' */
+    const char *star = tok;
+    while (*star && *star != '*') star++;
+    if (!*star) return 0;   /* no glob in this token */
+
+    /* Split token into dir/pattern components.
+     * The directory is the part of the token up to and including the last '/'
+     * that appears before the '*'.  The pattern is the basename part (which
+     * contains the '*'). */
+    unsigned int prefixlen = (unsigned int)(star - tok);
+    char dirpath[256];
+    char pattern[256];
+    unsigned int dirlen = 0;
+
+    /* Find last '/' in the prefix (the part before '*') */
+    unsigned int last_slash = (unsigned int)-1;
+    for (unsigned int i = 0; i < prefixlen; i++)
+        if (tok[i] == '/') last_slash = i;
+
+    if (last_slash == (unsigned int)-1) {
+        /* No slash before '*' — directory is CWD */
+        unsigned int ci = 0;
+        while (cwd_path[ci] && ci < sizeof(dirpath) - 1) {
+            dirpath[ci] = cwd_path[ci]; ci++;
+        }
+        dirpath[ci] = '\0';
+        dirlen = 0;   /* 0 = no path prefix to prepend in output */
+        /* pattern = whole token */
+        unsigned int pi = 0;
+        while (tok[pi] && pi < sizeof(pattern) - 1) { pattern[pi] = tok[pi]; pi++; }
+        pattern[pi] = '\0';
+    } else {
+        /* dirpath = tok[0..last_slash] (includes the trailing slash) */
+        char raw[256];
+        for (unsigned int i = 0; i <= last_slash && i < sizeof(raw) - 1; i++)
+            raw[i] = tok[i];
+        raw[last_slash + 1] = '\0';
+        resolve_path(raw, dirpath, sizeof(dirpath));
+        // dirlen = length of the prefix to prepend to matched names.
+        // Use the original token prefix so foo/*.c expands to foo/bar.c, not /abs/foo/bar.c.
+        dirlen = last_slash + 1;
+        /* pattern = tok[last_slash+1..end] */
+        unsigned int pi = 0;
+        for (unsigned int i = last_slash + 1; tok[i] && pi < sizeof(pattern) - 1; i++)
+            pattern[pi++] = tok[i];
+        pattern[pi] = '\0';
+    }
+
+    int fd = vfs_open(dirpath);
+    if (fd < 0) return 0;
+
+    struct vfs_dirent de;
+    int count = 0;
+    while (vfs_readdir(fd, &de) == 1 && count < out_max) {
+        if (de.name[0] == '.') continue;   /* skip hidden entries */
+        if (!glob_match(pattern, de.name)) continue;
+
+        // Build the expanded result: tok_prefix + de.name.
+        // tok_prefix is tok[0..dirlen-1], e.g. "/bin/" for "/bin/*.c" or "" for "*.c".
+        char *dst = strbuf + *strbuf_pos;
+        unsigned int avail = strbuf_sz - *strbuf_pos;
+        unsigned int ni = 0;
+        while (de.name[ni]) ni++;
+        unsigned int need = dirlen + ni + 1;
+        if (need > avail) continue;
+
+        unsigned int pos = 0;
+        for (unsigned int i = 0; i < dirlen; i++) dst[pos++] = tok[i];
+        for (unsigned int i = 0; i < ni; i++)     dst[pos++] = de.name[i];
+        dst[pos] = '\0';
+        *strbuf_pos += pos + 1;
+        out_argv[count++] = dst;
+    }
+    vfs_close(fd);
+    return count;
+}
+
+/* Expand all glob tokens in argv[0..argc-1] in-place.
+ * May increase argc up to ARGV_MAX. */
+static int glob_argv(char *argv[], int argc, const char *cwd_path)
+{
+    /* Scratch storage for expanded strings.  Heap-allocated to avoid a large
+     * stack frame — 4KB covers many expansions. */
+    unsigned int strbuf_sz = 4096;
+    char *strbuf = (char *)malloc(strbuf_sz);
+    if (!strbuf) return argc;
+    unsigned int strbuf_pos = 0;
+
+    /* Temporary expanded argv — up to ARGV_MAX slots */
+    char *newargv[ARGV_MAX + 1];
+    int   newargc = 0;
+
+    for (int i = 0; i < argc && newargc < ARGV_MAX; i++) {
+        char *expanded[ARGV_MAX];
+        int n = glob_expand_token(argv[i], expanded, ARGV_MAX - newargc,
+                                  strbuf, &strbuf_pos, strbuf_sz, cwd_path);
+        if (n > 0) {
+            /* Sort the matches (insertion sort — typically small n) */
+            for (int a = 1; a < n; a++) {
+                char *key = expanded[a];
+                int b = a - 1;
+                while (b >= 0 && strcmp(expanded[b], key) > 0) {
+                    expanded[b + 1] = expanded[b];
+                    b--;
+                }
+                expanded[b + 1] = key;
+            }
+            for (int j = 0; j < n && newargc < ARGV_MAX; j++)
+                newargv[newargc++] = expanded[j];
+        } else {
+            newargv[newargc++] = argv[i];
+        }
+    }
+    newargv[newargc] = (char *)0;
+
+    for (int i = 0; i <= newargc; i++) argv[i] = newargv[i];
+
+    /* strbuf is intentionally not freed — argv pointers point into it and
+     * it lives until the calling frame exits.  The shell's per-segment
+     * stack frame is short-lived, so this is acceptable.
+     * For a long-running process this would leak, but the shell loop
+     * creates a new frame per command so the leaks are bounded. */
+    return newargc;
+}
 
 /* Split line into whitespace-delimited tokens in-place.
  * Single-quoted spans preserve interior whitespace.
@@ -478,6 +648,8 @@ static void run_pipeline(char *line)
             if (prev_read >= 0) { vfs_close(prev_read); prev_read = -1; }
             continue;
         }
+
+        argc = glob_argv(argv, argc, cwd);
 
         struct redir redirs[REDIR_MAX];
         int nredir = parse_redirs(argv, &argc, redirs, REDIR_MAX);

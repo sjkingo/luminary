@@ -76,12 +76,8 @@ static uint32_t stdin_read_op(uint32_t offset, uint32_t len, void *buf)
             cbuf[out++] = cbuf[i];
         }
 
-        if (out > 0) {
-            DBGK("stdin_read_op: pid=%ld returning %d bytes nb=%d\n",
-                 running_task ? (long)running_task->pid : 0L,
-                 out, running_task && running_task->read_nonblock ? 1 : 0);
+        if (out > 0)
             return (uint32_t)out;
-        }
 
         /* Non-blocking mode: return immediately with 0 bytes */
         if (running_task && running_task->read_nonblock)
