@@ -160,24 +160,35 @@ static void run_session(int console_fd)
         if (got_output)
             render_dirty();
 
-        /* Read keyboard from our stdin and relay to shell */
-        n = read_nb(0, kbd, sizeof(kbd));
-        if (n > 0) {
+        /* Read keyboard from our stdin and relay to shell.
+         * Drain all available input before rendering so that a burst of
+         * Page Up/Down sentinels (e.g. from holding the key) results in a
+         * single render pass rather than one per keypress. */
+        {
             int out = 0;
-            for (i = 0; i < n; i++) {
-                unsigned char c = (unsigned char)kbd[i];
-                if (c == 0x01) {         /* KEY_PGUP — scroll back */
-                    termemu_scroll_up(&temu);
-                    render_all();
-                } else if (c == 0x02) {  /* KEY_PGDN — scroll forward */
-                    termemu_scroll_down(&temu);
-                    render_all();
-                } else {
-                    kbd[out++] = kbd[i];
+            int scrolled = 0;
+            n = read_nb(0, kbd, sizeof(kbd));
+            while (n > 0) {
+                for (i = 0; i < n; i++) {
+                    unsigned char c = (unsigned char)kbd[i];
+                    if (c == 0x01) {
+                        termemu_scroll_up(&temu);
+                        scrolled = 1;
+                    } else if (c == 0x02) {
+                        termemu_scroll_down(&temu);
+                        scrolled = 1;
+                    } else {
+                        kbd[out++] = kbd[i];
+                    }
                 }
+                if (out > 0) {
+                    write(shell_in[1], kbd, (unsigned int)out);
+                    out = 0;
+                }
+                n = read_nb(0, kbd, sizeof(kbd));
             }
-            if (out > 0)
-                write(shell_in[1], kbd, (unsigned int)out);
+            if (scrolled)
+                render_all();
         }
 
         if (task_done(child))

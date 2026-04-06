@@ -139,7 +139,8 @@ int main(int argc, char **argv)
             render_dirty(wid);
         }
 
-        /* Handle GUI events */
+        /* Handle GUI events — drain all pending events before rendering */
+        int scrolled = 0;
         while (win_poll_event(xfd, wid, &ev)) {
             if (ev.type == GUI_EVENT_CLOSE) {
                 running = 0;
@@ -150,10 +151,10 @@ int main(int argc, char **argv)
 
                 if (ch == 0x01) {           /* KEY_PGUP — scroll back */
                     termemu_scroll_up(&temu);
-                    render_all(wid);
+                    scrolled = 1;
                 } else if (ch == 0x02) {    /* KEY_PGDN — scroll forward */
                     termemu_scroll_down(&temu);
-                    render_all(wid);
+                    scrolled = 1;
                 } else if (ch == 0x10) {    /* KEY_UP */
                     write(stdin_wr, "\x1b[A", 3);
                 } else if (ch == 0x11) {    /* KEY_DOWN */
@@ -174,6 +175,8 @@ int main(int argc, char **argv)
                 }
             }
         }
+        if (scrolled)
+            render_all(wid);
 
         if (n == 0) {
             if (task_done(child))
