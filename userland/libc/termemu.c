@@ -27,6 +27,8 @@ void termemu_init(struct termemu *t, int cols, int rows, int sb_lines)
     t->cur_col   = 0;
     t->cur_row   = 0;
     t->scroll_offset = 0;
+    t->esc       = 0;
+    t->csi_param = 0;
 
     t->sb    = (char *)malloc((unsigned int)(sb_lines * cols));
     t->dirty = (char *)malloc((unsigned int)rows);
@@ -67,9 +69,97 @@ static void advance_row(struct termemu *t)
     }
 }
 
+static void csi_dispatch(struct termemu *t, char final)
+{
+    int n = t->csi_param > 0 ? t->csi_param : 1;
+    int c;
+    char *row;
+
+    switch (final) {
+    case 'D':   /* cursor left n */
+        c = t->cur_col - n;
+        t->cur_col = c < 0 ? 0 : c;
+        t->dirty[t->cur_row] = 1;
+        break;
+    case 'C':   /* cursor right n */
+        c = t->cur_col + n;
+        t->cur_col = c >= t->cols ? t->cols - 1 : c;
+        t->dirty[t->cur_row] = 1;
+        break;
+    case 'A':   /* cursor up n */
+        c = t->cur_row - n;
+        t->cur_row = c < 0 ? 0 : c;
+        t->dirty[t->cur_row] = 1;
+        break;
+    case 'B':   /* cursor down n */
+        c = t->cur_row + n;
+        t->cur_row = c >= t->rows ? t->rows - 1 : c;
+        t->dirty[t->cur_row] = 1;
+        break;
+    case 'K':   /* erase in line: 0=to end, 1=to start, 2=whole */
+        row = termemu_get_live_row(t, t->cur_row);
+        if (t->csi_param == 1) {
+            int i;
+            for (i = 0; i <= t->cur_col && i < t->cols; i++)
+                row[i] = ' ';
+        } else if (t->csi_param == 2) {
+            memset(row, ' ', (unsigned int)t->cols);
+        } else {
+            int i;
+            for (i = t->cur_col; i < t->cols; i++)
+                row[i] = ' ';
+        }
+        t->dirty[t->cur_row] = 1;
+        break;
+    case 'G':   /* cursor to column n (1-based) */
+        c = (t->csi_param > 0 ? t->csi_param : 1) - 1;
+        t->cur_col = c < 0 ? 0 : (c >= t->cols ? t->cols - 1 : c);
+        t->dirty[t->cur_row] = 1;
+        break;
+    case 'P': { /* delete n chars at cursor (shift left) */
+        int i;
+        row = termemu_get_live_row(t, t->cur_row);
+        for (i = t->cur_col; i < t->cols - n; i++)
+            row[i] = row[i + n];
+        for (i = t->cols - n; i < t->cols; i++)
+            row[i] = ' ';
+        t->dirty[t->cur_row] = 1;
+        break;
+    }
+    default:
+        break;
+    }
+}
+
 void termemu_putchar(struct termemu *t, char ch)
 {
     char *row;
+
+    /* CSI escape state machine */
+    if (t->esc == 1) {
+        if (ch == '[') { t->esc = 2; t->csi_param = 0; return; }
+        t->esc = 0;
+        return; /* unrecognised ESC sequence — discard */
+    }
+    if (t->esc == 2) {
+        if (ch >= '0' && ch <= '9') {
+            t->csi_param = t->csi_param * 10 + (ch - '0');
+            return;
+        }
+        t->esc = 0;
+        if (ch >= 0x40 && ch <= 0x7E)
+            csi_dispatch(t, ch);
+        return;
+    }
+    if (ch == '\x1b') {
+        /* Any new escape snaps back to live view */
+        if (t->scroll_offset != 0) {
+            t->scroll_offset = 0;
+            termemu_mark_all_dirty(t);
+        }
+        t->esc = 1;
+        return;
+    }
 
     /* Any new output snaps back to live view */
     if (t->scroll_offset != 0) {
@@ -95,7 +185,6 @@ void termemu_putchar(struct termemu *t, char ch)
     if (ch == '\b') {
         if (t->cur_col > 0) {
             t->cur_col--;
-            termemu_get_live_row(t, t->cur_row)[t->cur_col] = ' ';
             t->dirty[t->cur_row] = 1;
         }
         return;

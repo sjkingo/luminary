@@ -29,6 +29,10 @@ struct termemu {
 
     /* dirty flags for incremental rendering, rows entries */
     char *dirty;
+
+    /* CSI escape sequence parser state */
+    int  esc;           /* 0=normal, 1=got ESC, 2=in CSI */
+    int  csi_param;     /* accumulated numeric parameter (default 0) */
 };
 
 void termemu_init(struct termemu *t, int cols, int rows, int sb_lines);

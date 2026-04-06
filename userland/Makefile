@@ -6,7 +6,7 @@ LDFLAGS=    -m32 -nostdlib -static -lgcc
 
 CRT0=       crt0.o
 LIBC=       libc/libc.a
-LIBC_SRCS=  libc/string.c libc/stdio.c libc/stdlib.c libc/termemu.c
+LIBC_SRCS=  libc/string.c libc/stdio.c libc/stdlib.c libc/termemu.c libc/readline.c
 LIBC_OBJS=  $(LIBC_SRCS:.c=.o)
 
 # BIN_DIR is set by the root Makefile to _build/rootfs/bin

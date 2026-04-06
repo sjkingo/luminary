@@ -42,9 +42,10 @@ static struct pipe *console_pipe = NULL;
 
 /* Blocking keyboard read.
  * Yields while the keyboard is owned by the GUI compositor.
- * Discards navigation sentinel bytes (KEY_UP..KEY_DEL) — fbcon handles
- * these via its own stdin relay; the raw shell on the fbdev console has
- * no cursor movement and should never receive them. */
+ * KEY_ALT_F4 (0x17) is a GUI-only key — discard it here so it never
+ * leaks to userland as a stray byte.  All other bytes (including
+ * navigation sentinels 0x10–0x16) are passed through so that fbcon can
+ * relay them to the shell and readline can act on them. */
 static uint32_t stdin_read_op(uint32_t offset, uint32_t len, void *buf)
 {
     (void)offset;
@@ -70,11 +71,7 @@ static uint32_t stdin_read_op(uint32_t offset, uint32_t len, void *buf)
         int out = 0;
         for (int i = 0; i < n; i++) {
             unsigned char c = (unsigned char)cbuf[i];
-            /* Discard navigation sentinels — fbcon handles these via its own
-             * stdin relay loop; they have no meaning on the raw fbdev console */
-            if (c == KEY_UP    || c == KEY_DOWN  || c == KEY_LEFT   ||
-                c == KEY_RIGHT  || c == KEY_HOME  || c == KEY_END    ||
-                c == KEY_DEL    || c == KEY_ALT_F4)
+            if (c == KEY_ALT_F4)
                 continue;
             cbuf[out++] = cbuf[i];
         }

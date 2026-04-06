@@ -8,8 +8,8 @@
  *   4. Runs an event loop:
  *        - Read keyboard from stdin (fd 0), relay bytes to shell stdin pipe.
  *          Page Up/Down sentinels (0x01/0x02) are handled locally for scrollback.
- *          All other sentinel bytes (0x10-0x16) were discarded by the kernel's
- *          stdin_read_op; they do not reach fbcon's stdin.
+ *          Navigation sentinels (0x10-0x16) are passed through to the shell so
+ *          readline can act on them (cursor movement, history, etc.).
  *        - Read shell output (non-blocking) -> termemu_putchar -> render dirty rows.
  *        - Read kernel console pipe (/dev/console) (non-blocking) -> same render path.
  *        - On shell exit, respawn.
