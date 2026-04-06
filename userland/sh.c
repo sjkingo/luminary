@@ -665,7 +665,20 @@ static void run_builtin(char *argv[], int argc)
     } else if (strcmp(cmd, "echo") == 0) {
         for (int i = 1; argv[i]; i++) {
             if (i > 1) putchar(' ');
-            printf("%s", argv[i]);
+            for (const char *p = argv[i]; *p; p++) {
+                if (*p == '\\' && *(p + 1)) {
+                    p++;
+                    switch (*p) {
+                    case 'n':  putchar('\n'); break;
+                    case 't':  putchar('\t'); break;
+                    case 'r':  putchar('\r'); break;
+                    case '\\': putchar('\\'); break;
+                    default:   putchar('\\'); putchar(*p); break;
+                    }
+                } else {
+                    putchar(*p);
+                }
+            }
         }
         putchar('\n');
     } else if (strcmp(cmd, "getpid") == 0) {

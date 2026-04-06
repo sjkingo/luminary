@@ -13,7 +13,7 @@
 - ELF32 loader
 - CPIO initrd, VFS layer, path-based file access
 - fork/exec/waitpid process model
-- Syscall interface (`int 0x80`, 50 syscalls including `mkdir`/`unlink`, `getppid`, `waitpid` with WNOHANG and exit-status propagation; device-specific operations via `SYS_IOCTL` on `/dev/x`, `/dev/sys`, `/dev/fb0`, and block device nodes; `SYS_FSTAT` (48), `SYS_RENAME` (49), `SYS_BRK` (50))
+- Syscall interface (`int 0x80`, 51 syscalls including `mkdir`/`unlink`, `getppid`, `waitpid` with WNOHANG and exit-status propagation; device-specific operations via `SYS_IOCTL` on `/dev/x`, `/dev/sys`, `/dev/fb0`, `/dev/env`, and block device nodes; `SYS_FSTAT` (48), `SYS_RENAME` (49), `SYS_BRK` (50), `SYS_EXECVE` (51))
 - `SYS_FCNTL` (44): `F_GETFL`/`F_SETFL` with `O_NONBLOCK` per-fd flag; `SYS_READ` respects the fd flag without needing `SYS_READ_NB`
 - `SYS_MOUNT` (46) / `SYS_UMOUNT` (47): mount/unmount registered filesystem drivers at arbitrary VFS paths; `umount` refuses if nested mounts exist under the target path
 - VFS read-only enforcement: initrd root marked readonly after mount; `vfs_creat`/`vfs_mkdir`/`vfs_unlink`/`vfs_write` return -1 for readonly directories
@@ -26,7 +26,7 @@
 - PS/2 keyboard driver with ring buffer
 - PS/2 mouse driver (IRQ12, absolute position tracking)
 - GUI compositor: three-buffer rendering, window management, drag, resize, close, statusbar/taskbar, focus-follows-mouse, resize cursor sprites, console window
-- Interactive shell (`sh`) with VFS commands, path-based exec, pipelines, I/O redirection, background jobs (`&`), `fg`/`jobs` builtins, Ctrl+C handling that only kills foreground children, glob expansion (`*` in any token, expanded before exec/pipe, no-match pass-through), and a readline line editor with history (100-entry ring, consecutive-duplicate suppression), insert mode, left/right/home/end/delete cursor movement, and up/down history navigation
+- Interactive shell (`sh`) with VFS commands, path-based exec, pipelines, I/O redirection, background jobs (`&`), `fg`/`jobs` builtins, Ctrl+C handling that only kills foreground children, glob expansion (`*` in any token, expanded before exec/pipe, no-match pass-through), a readline line editor with history (100-entry ring, consecutive-duplicate suppression), insert mode, left/right/home/end/delete cursor movement, up/down history navigation, `export`/`unset` builtins, `$VAR`/`${VAR}`/`$?` variable expansion, `PATH`-based command search (no implicit CWD), and `echo` with `\n`/`\t`/`\r`/`\\` escape interpretation
 - `vmm_alloc_pages`: maps non-contiguous physical frames to contiguous kernel virtual range at `0xC0000000+`, with free-list reclaim
 - PMM zones: ZONE_LOW for contiguous/DMA allocations, ZONE_ANY for general use
 - `pmm_alloc_contiguous(n)`: allocates n physically contiguous frames from ZONE_LOW
@@ -52,14 +52,14 @@
 - ATA PIO driver (`drivers/ata.c`): probes primary and secondary IDE channels; IDENTIFY-based detection; LBA28 read/write; drive interrupts masked (nIEN); drives registered as `/dev/hda`–`/dev/hdd`
 - VFS improvements: `vfs_alloc_node` falls back to `kmalloc` when the 512-node static pool is exhausted (heap-allocated nodes freed via `kfree`); inode numbers populated from cpio headers for initrd nodes and auto-assigned for runtime-created nodes; `struct vfs_stat` exposes inode; `vfs_rename` with Linux semantics; `mv` userland program
 - `stat` shows inode number; `fstat(fd, &st)` via `SYS_FSTAT (48)`
-- ext2 filesystem driver (`src/fs/ext2.c`): registered as `"ext2"`; `ext2_mount` reads the superblock and block group descriptors, eagerly walks the directory tree from inode 2, and populates the VFS tree; file data read/written on demand via per-slot op functions (same pattern as blkdev/pipe); write support for already-allocated blocks (no block allocation or bitmap updates); `ext2_umount` frees the VFS subtree and clears the slot table; boot with `root=/dev/hda1` in the GRUB entry or `mount ext2 /dev/hda1 /mnt` from userland
+- ext2 filesystem driver (`src/fs/ext2.c`): registered as `"ext2"`; `ext2_mount` reads the superblock and block group descriptors, eagerly walks the directory tree from inode 2, and populates the VFS tree; file data read/written on demand via per-slot op functions (same pattern as blkdev/pipe); full read-write support including on-demand block allocation (direct, single-indirect, double-indirect), bitmap and BGD updates, `O_TRUNC` truncation of existing files (frees all blocks, resets inode size); `ext2_umount` frees the VFS subtree and clears the slot table; boot with `root=/dev/hda1` in the GRUB entry or `mount ext2 /dev/hda1 /mnt` from userland
+- Per-task environment variables: inline `environ[32][128]` table in `struct task`; inherited across `fork()`, preserved by `SYS_EXEC`, replaced by `SYS_EXECVE (51)`; `/dev/env` ioctl chardev (`ENV_GET`/`ENV_SET`/`ENV_UNSET`/`ENV_GET_IDX`); userland wrappers in `userland/env_dev.h`; `getenv()` in libc; shell `export`/`unset` builtins; `$VAR`/`${VAR}`/`$?` expansion; `env` program; `PATH=/bin` set by init and inherited by all processes
 
 ## What Luminary Needs
 
 1. **Network stack** — build on RTL8139 driver (has init but no packet I/O or IRQ handler yet)
 2. **i3-style keybinding system** — planned, not yet started
-3. **ext2 block allocation** — write support currently only handles already-allocated blocks; growing files or creating new ones requires bitmap updates and block allocation in the ext2 driver
-4. **ATA LBA48** — current ATA driver is LBA28 only (max 128GB). LBA48 support requires using commands `0x24`/`0x34` and writing the high sector count and LBA bytes via the HOB register sequence.
+3. **ATA LBA48** — current ATA driver is LBA28 only (max 128GB). LBA48 support requires commands `0x24`/`0x34` and the HOB register sequence for high sector count and LBA bytes — current ATA driver is LBA28 only (max 128GB). LBA48 support requires using commands `0x24`/`0x34` and writing the high sector count and LBA bytes via the HOB register sequence.
 5. **ANSI colour output in fbcon/termemu** — `termemu` has no CSI parser; colour prompts and ls colour output are not rendered; CSI SGR sequences should set per-cell fg/bg colour attributes
 6. **sh history persistence** — history ring is in-memory only; not persisted across shell sessions
 7. **Early-boot printk lost if pipe full** — bytes written to `/dev/console` pipe before fbcon starts are dropped if the pipe's 4KB ring fills; serial output captures everything but framebuffer does not show early boot messages
