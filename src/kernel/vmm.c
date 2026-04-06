@@ -393,9 +393,6 @@ int vmm_cow_fault(uint32_t dir_phys, uint32_t fault_addr)
     uint32_t old_frame = pt[pti] & 0xFFFFF000;
     uint32_t flags     = pt[pti] & 0xFFF;
 
-    DBGK("cow_fault: virt=0x%lx old_frame=0x%lx refcount=%lu dir_phys=0x%lx\n",
-         fault_addr, old_frame, pmm_refcount_get(old_frame), dir_phys);
-
     if (pmm_refcount_get(old_frame) == 1) {
         /* Sole owner: just make it writable, no copy needed */
         pt[pti] = old_frame | ((flags & ~PTE_COW) | PTE_WRITE);
@@ -403,7 +400,6 @@ int vmm_cow_fault(uint32_t dir_phys, uint32_t fault_addr)
         /* Shared (refcount > 1): allocate new frame, copy content, remap.
          * Release our reference to the old frame. */
         uint32_t new_frame = pmm_alloc_frame();
-        DBGK("cow_fault: new_frame=0x%lx\n", new_frame);
         void *old_kp = vmm_kmap(old_frame);
         void *new_kp = vmm_kmap(new_frame);
         memcpy(new_kp, old_kp, PAGE_SIZE);
@@ -507,8 +503,9 @@ void init_vmm(void)
                 fb_size = 4 * 1024 * 1024; /* fallback: 4MB */
             printk(MODULE "mapping VBE framebuffer 0x%lx - 0x%lx (%ld KB)\n",
                    fb_start, fb_start + fb_size, fb_size / 1024);
+            /* PTE_USER allows userland (fbcon) to write to the framebuffer directly */
             identity_map_range(fb_start, fb_start + fb_size,
-                               PTE_PRESENT | PTE_WRITE);
+                               PTE_PRESENT | PTE_WRITE | PTE_USER);
         }
     }
 

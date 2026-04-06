@@ -32,3 +32,12 @@ void pipe_notify_close(struct vfs_node *node);
  * Increments write_refs or read_refs to account for the inherited fd. */
 void pipe_fork_fd(struct vfs_node *node);
 
+/* Write up to len bytes to a pipe without blocking.
+ * Returns the number of bytes written; may be less than len if the buffer
+ * is full.  Safe to call from kernel context (no hlt, no scheduling). */
+uint32_t pipe_write_nb(struct pipe *p, const char *buf, uint32_t len);
+
+/* Return the struct pipe * for the given pipe node (read or write end).
+ * Returns NULL if the node is not a pipe node. */
+struct pipe *pipe_get_struct(struct vfs_node *node);
+

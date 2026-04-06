@@ -38,7 +38,8 @@ static uint32_t resolve_uva(uint32_t dir_phys, uint32_t vaddr,
 }
 
 uint32_t elf_load(const void *elf_data, uint32_t elf_size, uint32_t page_dir,
-                  int argc, const char *const *argv, uint32_t *out_sp)
+                  int argc, const char *const *argv, uint32_t *out_sp,
+                  uint32_t *out_brk)
 {
     const struct elf32_header *ehdr = (const struct elf32_header *)elf_data;
 
@@ -76,6 +77,7 @@ uint32_t elf_load(const void *elf_data, uint32_t elf_size, uint32_t page_dir,
     }
 
     const uint8_t *base = (const uint8_t *)elf_data;
+    uint32_t brk = 0;
 
     /* Load each PT_LOAD segment */
     for (int i = 0; i < ehdr->e_phnum; i++) {
@@ -103,6 +105,7 @@ uint32_t elf_load(const void *elf_data, uint32_t elf_size, uint32_t page_dir,
 
         uint32_t seg_start = phdr->p_vaddr & 0xFFFFF000;
         uint32_t seg_end = (phdr->p_vaddr + phdr->p_memsz + PAGE_SIZE - 1) & 0xFFFFF000;
+        if (seg_end > brk) brk = seg_end;
 
         for (uint32_t vaddr = seg_start; vaddr < seg_end; vaddr += PAGE_SIZE) {
             uint32_t frame = pmm_alloc_frame();
@@ -231,6 +234,7 @@ uint32_t elf_load(const void *elf_data, uint32_t elf_size, uint32_t page_dir,
 
 #undef WRITE_USER32
 
-    *out_sp = retaddr_vaddr;
+    *out_sp  = retaddr_vaddr;
+    *out_brk = brk;
     return ehdr->e_entry;
 }

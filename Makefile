@@ -73,6 +73,10 @@ qemu-debug: all
 	$(EMULATOR) -s -S $(QEMU_ARGS)
 	cat /tmp/luminary.log
 
+.PHONY: qemumon
+qemumon: all
+	python3 tools/qmon.py
+
 .PHONY: gdb
 gdb:
 	gdb -x tools/gdbinitrc

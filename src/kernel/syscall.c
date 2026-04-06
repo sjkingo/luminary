@@ -14,6 +14,7 @@
 #include "kernel/sched.h"
 #include "kernel/heap.h"
 #include "kernel/vmm.h"
+#include "kernel/pmm.h"
 #include "kernel/vfs.h"
 #include "boot/multiboot.h"
 #include "cpu/traps.h"
@@ -354,13 +355,25 @@ static int sys_exec(struct trap_frame *frame)
 
 static int sys_fork(struct trap_frame *frame)
 {
-    struct task *child = task_fork(frame);
-    if (!child) return -1;
-
-    /* Bump pipe refcounts for every inherited pipe fd */
+    /* Bump pipe refcounts for the child's inherited fds BEFORE forking.
+     * task_fork re-enables interrupts after inserting the child into the
+     * scheduler queue, creating a window where the child runs and closes
+     * pipe fds before the parent can increment refcounts.  Doing the
+     * increments first (on the current task's fd table, which is identical
+     * to what the child will inherit) eliminates the race entirely. */
     for (int i = 0; i < VFS_FD_MAX; i++) {
-        if (child->fds[i].open && child->fds[i].node)
-            pipe_fork_fd(child->fds[i].node);
+        if (running_task->fds[i].open && running_task->fds[i].node)
+            pipe_fork_fd(running_task->fds[i].node);
+    }
+
+    struct task *child = task_fork(frame);
+    if (!child) {
+        /* Fork failed — undo the refcount increments */
+        for (int i = 0; i < VFS_FD_MAX; i++) {
+            if (running_task->fds[i].open && running_task->fds[i].node)
+                pipe_notify_close(running_task->fds[i].node);
+        }
+        return -1;
     }
 
     return (int)child->pid;
@@ -427,9 +440,13 @@ static int sys_task_done(struct trap_frame *frame)
     unsigned int target_pid = frame->ebx;
     struct task *t = sched_queue;
     while (t) {
-        if (t->pid == target_pid) return 0;
+        if (t->pid == target_pid)
+            return 0;
         t = t->next;
     }
+    DBGK("task_done: pid=%ld not found (dead), caller pid=%ld\n",
+         (long)target_pid,
+         running_task ? (long)running_task->pid : -1L);
     return 1;
 }
 
@@ -501,8 +518,10 @@ static int sys_open(struct trap_frame *frame)
     }
 
     int fd = fd_alloc(node, do_append);
-    if (fd >= 0 && do_append)
+    if (fd < 0) return -1;
+    if (do_append)
         running_task->fds[fd].offset = node->size;
+    pipe_fork_fd(node);
     return fd;
 }
 
@@ -842,6 +861,25 @@ void syscall_handler(struct trap_frame *frame)
     case SYS_RENAME:
         ret = sys_rename(frame);
         break;
+    case SYS_BRK: {
+        uint32_t new_brk = (uint32_t)frame->ebx;
+        uint32_t cur_brk = running_task->brk;
+        if (new_brk == 0 || new_brk <= cur_brk) {
+            ret = (int)cur_brk;
+        } else if (new_brk >= USER_STACK_TOP - PAGE_SIZE) {
+            ret = (int)cur_brk;  /* refuse — too close to stack */
+        } else {
+            for (uint32_t v = cur_brk; v < new_brk; v += PAGE_SIZE) {
+                uint32_t f = pmm_alloc_frame();
+                if (!f) { new_brk = v; break; }
+                vmm_map_page_in(running_task->page_dir_phys, v, f,
+                                PTE_PRESENT | PTE_WRITE | PTE_USER);
+            }
+            running_task->brk = new_brk;
+            ret = (int)new_brk;
+        }
+        break;
+    }
     default:
         printk("unknown syscall %d from pid %d\n",
                frame->eax, running_task->pid);

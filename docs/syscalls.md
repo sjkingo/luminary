@@ -39,6 +39,7 @@ Userspace macros (in `userland/syscall.h`):
 | 47 | SYS_UMOUNT | EBX=path | 0 or -1 | Unmount filesystem at path; fails if nested mounts exist underneath |
 | 48 | SYS_FSTAT | EBX=fd, ECX=stat_ptr | 0 or -1 | Stat an open file descriptor |
 | 49 | SYS_RENAME | EBX=old_path, ECX=new_path | 0 or -1 | Rename or move a file or directory |
+| 50 | SYS_BRK | EBX=new_brk | new_brk or cur_brk | Set program break; returns current break if EBX=0 or EBX≤current |
 
 ## Device Nodes
 
@@ -89,3 +90,4 @@ Request codes and argument structs are defined in `userland/sys_dev.h`.
 - Extra stack args convention is retired — all new operations use ioctl structs.
 - **SYS_FSTAT (48)** is the fd-based variant of SYS_STAT. Fills the same `struct vfs_stat` (size, type, inode).
 - **SYS_RENAME (49)** follows Linux `rename(2)` semantics: atomically replaces an existing file target; replaces an empty directory target when both old and new are directories; refuses to move a directory into itself.
+- **SYS_BRK (50)** follows Linux `brk(2)` semantics. EBX=0 or EBX≤current break returns the current break without mapping anything. EBX>current maps new pages (PTE_PRESENT|PTE_WRITE|PTE_USER) between old and new break in the current task's address space. Returns the new break on success, or the old break on failure (OOM or stack collision). The initial break is set by `elf_load` to the page-aligned end of the highest PT_LOAD segment. Userland wrappers: `brk(addr)` (raw) and `sbrk(increment)` (POSIX-style) in `userland/syscall.h`.

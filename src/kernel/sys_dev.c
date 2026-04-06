@@ -14,6 +14,7 @@
 #include "kernel/sched.h"
 #include "kernel/task.h"
 #include "kernel/sys_dev.h"
+#include "drivers/keyboard.h"
 
 static inline bool user_access_ok(const void *ptr, uint32_t len)
 {
@@ -134,6 +135,13 @@ static int32_t sys_control_op(struct vfs_node *node, uint32_t request, void *arg
 
         buf[pos] = '\0';
         r->written = pos;
+        return 0;
+    }
+
+    case SYS_CTL_GUI_ACTIVE: {
+        uint32_t *out = (uint32_t *)arg;
+        if (!user_access_ok(out, sizeof(uint32_t))) return -1;
+        *out = kbd_is_owned() ? 1u : 0u;
         return 0;
     }
 

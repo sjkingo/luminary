@@ -36,7 +36,12 @@
 - `fork()`/`exec()` with copy-on-write address space cloning (`vmm_clone_page_dir`): writable pages marked CoW, read-only pages shared; refcounts track sharing
 - Character device abstraction (`VFS_CHARDEV`): `/dev/stdin`, `/dev/stdout`, `/dev/stderr` as VFS nodes; `read(fd,buf,len)`/`write(fd,buf,len)` dispatch through fd table; fds 0/1/2 pre-opened on every task
 - Anonymous pipes (`pipe()`/`dup2()`): 4KB ring buffer, up to 16 concurrent pipes, blocking read/write with EOF and broken-pipe semantics; enables shell I/O redirection; `write_refs`/`read_refs` refcounts allow correct sharing across `fork()` and `dup2()`
-- GUI terminal emulator (`/bin/term`): userland process that creates a window, forks `/bin/sh`, connects it via pipes, and renders output; multiple term instances can run simultaneously
+- GUI terminal emulator (`/bin/term`): userland process that creates a window, forks `/bin/sh`, connects it via pipes, and renders output using the shared `termemu` library; multiple term instances can run simultaneously; arrow keys decoded to ANSI escape sequences by `term`
+- Framebuffer console daemon (`/bin/fbcon`): userland console daemon that reads framebuffer geometry from `/dev/fb0`, forks `/bin/sh`, relays keyboard input, renders output via the shared `termemu` + `fbrender` libraries; init execs fbcon instead of sh directly; Page Up/Down handled locally for scrollback
+- `/dev/console`: kernel pipe whose write end is driven by `stdout_write_op`; fbcon reads the read end to display early-boot printk output alongside shell output; non-blocking writes (bytes dropped if pipe full) preserve kernel correctness
+- `/dev/fb0`: ioctl chardev exposing VBE framebuffer geometry (`FBIOGET_INFO` returns width/height/pitch/depth/fb_addr); VBE framebuffer identity-mapped with `PTE_USER` so userland can write to it directly
+- Shared `termemu` library (`userland/libc/termemu.c`): ring-buffer terminal emulator (scrollback, cursor tracking, dirty rows) shared by fbcon and term; `struct termemu` with `termemu_putchar`, `termemu_scroll_up/down`, `termemu_get_visible_row`, dirty row API
+- Arrow key sentinel bytes (`KEY_UP`–`KEY_DEL`, 0x10–0x16) decoded in keyboard driver and translated to ANSI escape sequences by `term`; passed through raw to fbcon's shell pipe and consumed by `sh`'s line editor
 - Ctrl+C signal interrupts: keyboard driver emits `\x03`; shell uses interruptible wait (`task_done()` + `read_nb()` + `yield()`) to detect and kill children
 - `task_death_hook`: registered callback fired by `task_kill()` for per-task resource cleanup; GUI uses it to destroy orphaned windows
 - Kernel stack guard pages: each task's 16KB kernel stack has an unmapped guard page immediately below it; overflow triggers a page fault rather than silent corruption
@@ -55,6 +60,9 @@
 2. **i3-style keybinding system** — planned, not yet started
 3. **ext2 block allocation** — write support currently only handles already-allocated blocks; growing files or creating new ones requires bitmap updates and block allocation in the ext2 driver
 4. **ATA LBA48** — current ATA driver is LBA28 only (max 128GB). LBA48 support requires using commands `0x24`/`0x34` and writing the high sector count and LBA bytes via the HOB register sequence.
+5. **ANSI colour output in fbcon/termemu** — `termemu` has no CSI parser; colour prompts and ls colour output are not rendered; CSI SGR sequences should set per-cell fg/bg colour attributes
+6. **sh history persistence** — history ring is in-memory only; not persisted across shell sessions
+7. **Early-boot printk lost if pipe full** — bytes written to `/dev/console` pipe before fbcon starts are dropped if the pipe's 4KB ring fills; serial output captures everything but framebuffer does not show early boot messages
 
 ## Known Bugs
 

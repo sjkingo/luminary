@@ -1152,6 +1152,13 @@ static void process_keyboard(void)
 
     char c;
     while (keyboard_read(&c, 1) == 1) {
+        DBGK("process_keyboard: consumed 0x%02x win=%d\n",
+             (unsigned)c, win_list ? win_list->id : 0);
+        if ((unsigned char)c == KEY_ALT_F4) {
+            /* Close the focused window */
+            gui_window_destroy(win_list->id);
+            return;
+        }
         struct gui_event ev;
         ev.type    = GUI_EVENT_KEYPRESS;
         ev.key     = c;
@@ -1173,11 +1180,7 @@ void compositor_task(void)
         process_keyboard();
 
         if (compositor_quit) {
-            /* Restore the framebuffer console: blank the screen first so the
-             * GUI is gone, then repaint the text console from its ring buffer. */
-            if (fb_hw)
-                memset(fb_hw, 0, (uint32_t)fb_h * fb_pitch);
-            fbdev_redraw();
+            DBGK("compositor_task: quit, win_list=%s\n", win_list ? "non-null" : "null");
             compositor_quit  = false;
             compositor_dirty = false;
             scene_dirty      = true;
@@ -1313,7 +1316,7 @@ int gui_window_create(int32_t x, int32_t y, uint32_t w, uint32_t h,
     slot->bb_h       = ch;
     slot->bb_nframes = nframes;
     slot->owner_pid = running_task ? running_task->pid : 0;
-    slot->visible   = true;
+    slot->visible   = false;  /* hidden until first flip */
     slot->focused   = false;
     slot->dirty     = true;
     slot->ev_head   = 0;
@@ -1336,7 +1339,6 @@ int gui_window_create(int32_t x, int32_t y, uint32_t w, uint32_t h,
     if (!win_list->next)
         kbd_set_owner(1);
 
-    gui_wake_scene();
     return slot->id;
 }
 
@@ -1358,6 +1360,7 @@ void gui_window_destroy(int id)
         gui_wake_scene();
     } else {
         /* Release keyboard ownership when last window closes */
+        DBGK("gui_window_destroy: last window gone, kbd released, compositor_quit=1\n");
         kbd_set_owner(0);
         compositor_quit = true;
         compositor_dirty = true;
@@ -1400,6 +1403,10 @@ void gui_window_flip(int id)
 {
     struct window *win = find_window(id);
     if (!win) return;
+    if (!win->visible) {
+        win->visible = true;
+        gui_wake_scene();
+    }
     win->dirty = true;
     gui_wake();
 }
@@ -1451,10 +1458,13 @@ static void gui_start_compositor(void)
     DBGK("gui_start_compositor: back=0x%lx fb_h=%ld fb_pitch=%ld\n",
          (uint32_t)back, (uint32_t)fb_h, (uint32_t)fb_pitch);
 
-    /* back buffer was pre-allocated in init_gui(); just activate it */
+    /* back buffer was pre-allocated in init_gui(); just activate it.
+     * Seed back with the current fb_hw content so the first composite
+     * doesn't blit black over whatever fbcon had rendered. */
     if (back) {
         uint32_t back_size = (uint32_t)fb_h * fb_pitch;
-        memset(back, 0, back_size);
+        if (fb_hw)
+            memcpy(back, fb_hw, back_size);
         fb = back;
         DBGK("back buffer at 0x%lx (%ld KB)\n",
              (uint32_t)back, back_size / 1024);

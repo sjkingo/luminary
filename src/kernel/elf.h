@@ -54,4 +54,5 @@ struct elf32_phdr {
  * Returns the initial stack pointer (with argc/argv set up) via *out_sp,
  * and the entry point as the return value. Returns 0 on failure. */
 uint32_t elf_load(const void *elf_data, uint32_t elf_size, uint32_t page_dir,
-                  int argc, const char *const *argv, uint32_t *out_sp);
+                  int argc, const char *const *argv, uint32_t *out_sp,
+                  uint32_t *out_brk);

@@ -5,3 +5,7 @@ typedef unsigned int size_t;
 int          atoi(const char *s);
 unsigned int atou(const char *s);
 int          abs(int n);
+
+void *malloc(size_t size);
+void  free(void *ptr);
+void *realloc(void *ptr, size_t size);

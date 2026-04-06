@@ -51,8 +51,12 @@ struct task {
     char cwd[256];              /* current working directory (absolute path) */
     char cmdline[128];          /* full argv[0..n] joined by spaces, for ps */
 
+    uint32_t brk;               /* current program break (top of heap); 0 for kernel tasks */
+
     struct task *prev, *next;
 };
+
+#define SYS_BRK                 50
 
 #define PID_IDLE                0
 #define PID_INIT                1

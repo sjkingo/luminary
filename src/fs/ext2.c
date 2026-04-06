@@ -332,10 +332,8 @@ static uint32_t ext2_do_read(int slot, uint32_t off, uint32_t len, void *buf)
         uint32_t phys0 = ext2_blk_lookup(&s->inode, &c, blk_idx);
         t_lookup += timekeeper.uptime_ms - tl0;
 
-        if (!phys0) {
-            DBGK("ext2_do_read: blk_idx=%lu phys=0, stopping\n", blk_idx);
+        if (!phys0)
             break;
-        }
 
         /* Scan forward for consecutive physical blocks. */
         uint32_t run = 1;
@@ -366,8 +364,6 @@ static uint32_t ext2_do_read(int slot, uint32_t off, uint32_t len, void *buf)
     }
 
     uint32_t total = timekeeper.uptime_ms - t0;
-    DBGK("ext2_do_read: %lu bytes in %lu ms (lookup=%lu ata=%lu memcpy=%lu) batches=%lu sectors=%lu\n",
-         done, total, t_lookup, t_ata, t_memcpy, n_batches, n_sectors);
 
     if (c.ind1_buf)   kfree(c.ind1_buf);
     if (c.ind2l1_buf) kfree(c.ind2l1_buf);

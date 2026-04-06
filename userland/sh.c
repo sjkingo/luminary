@@ -619,8 +619,46 @@ static void run_script(const char *path)
     }
 }
 
+/* CR-reprint: emit \r, prompt, cmd[0..len-1], spaces to erase old tail,
+ * then backspaces to place cursor at position 'cursor'.
+ * All output is assembled into a single buffer and written in one syscall. */
+static void reprint_line(const char *prompt, const char *cmd, int len,
+                         int cursor, int prev_len)
+{
+    char buf[768];
+    int pos = 0;
+    int i;
+    int tail_spaces = prev_len - len;
+    int backs = (tail_spaces > 0 ? tail_spaces : 0) + (len - cursor);
+    int plen = (int)strlen(prompt);
+
+    buf[pos++] = '\r';
+    for (i = 0; i < plen && pos < (int)sizeof(buf) - 1; i++)
+        buf[pos++] = prompt[i];
+    for (i = 0; i < len && pos < (int)sizeof(buf) - 1; i++)
+        buf[pos++] = cmd[i];
+    for (i = 0; i < tail_spaces && pos < (int)sizeof(buf) - 1; i++)
+        buf[pos++] = ' ';
+    for (i = 0; i < backs && pos < (int)sizeof(buf) - 1; i++)
+        buf[pos++] = '\b';
+    write(1, buf, (unsigned int)pos);
+}
+
 int main(int argc, char **argv)
 {
+    char history[16][256];
+    int hist_head = 0;
+    int hist_count = 0;
+    int hist_idx = -1;    /* -1 = not browsing history */
+    char cmd[256];
+    int idx = 0;          /* length of current line */
+    int cursor = 0;       /* insertion point within cmd */
+    char prompt[320];
+    /* ANSI escape state machine */
+    int esc = 0;          /* 0=normal, 1=got ESC, 2=got ESC [ */
+    char csi_buf[8];
+    int csi_len = 0;
+
     getcwd(cwd, sizeof(cwd));
 
     if (argc >= 2) {
@@ -630,40 +668,233 @@ int main(int argc, char **argv)
         return 0;
     }
 
-    static char cmd[256];
-    int idx = 0;
-    char c;
-
     printf("Luminary shell\nType 'help' for commands.\n\n");
     job_reap();
-    printf("%s $ ", cwd);
+    snprintf(prompt, sizeof(prompt), "%s $ ", cwd);
+    printf("%s", prompt);
 
     for (;;) {
+        char c;
+        int prev_len;
+        int i;
+
         if (read(0, &c, 1) == 0)
             continue;
 
-        if (c == '\x03') {
+        /* ANSI escape state machine */
+        if (esc == 1) {
+            if (c == '[') { esc = 2; csi_len = 0; continue; }
+            esc = 0;
+            /* unrecognised ESC sequence — ignore */
+            continue;
+        }
+        if (esc == 2) {
+            if (csi_len < (int)(sizeof(csi_buf) - 1))
+                csi_buf[csi_len++] = c;
+            /* Final byte is in range 0x40-0x7E */
+            if (c >= 0x40 && c <= 0x7E) {
+                csi_buf[csi_len] = '\0';
+                esc = 0;
+
+                if (c == 'A') {         /* Up — prev history */
+                    if (hist_count == 0) continue;
+                    if (hist_idx < 0) hist_idx = hist_count;
+                    if (hist_idx > 0) hist_idx--;
+                    prev_len = idx;
+                    int hslot = (hist_head + hist_idx) % 16;
+                    int newlen = 0;
+                    while (history[hslot][newlen]) newlen++;
+                    for (i = 0; i < newlen; i++) cmd[i] = history[hslot][i];
+                    idx = newlen; cursor = newlen;
+                    reprint_line(prompt, cmd, idx, cursor, prev_len);
+                } else if (c == 'B') {  /* Down — next history / blank */
+                    if (hist_idx < 0) continue;
+                    hist_idx++;
+                    prev_len = idx;
+                    if (hist_idx >= hist_count) {
+                        hist_idx = -1;
+                        idx = 0; cursor = 0;
+                        reprint_line(prompt, cmd, 0, 0, prev_len);
+                    } else {
+                        int hslot = (hist_head + hist_idx) % 16;
+                        int newlen = 0;
+                        while (history[hslot][newlen]) newlen++;
+                        for (i = 0; i < newlen; i++) cmd[i] = history[hslot][i];
+                        idx = newlen; cursor = newlen;
+                        reprint_line(prompt, cmd, idx, cursor, prev_len);
+                    }
+                } else if (c == 'D') {  /* Left */
+                    if (cursor > 0) { cursor--; putchar('\b'); }
+                } else if (c == 'C') {  /* Right */
+                    if (cursor < idx) { putchar(cmd[cursor]); cursor++; }
+                } else if (c == 'H') {  /* Home */
+                    while (cursor > 0) { putchar('\b'); cursor--; }
+                } else if (c == 'F') {  /* End */
+                    while (cursor < idx) { putchar(cmd[cursor]); cursor++; }
+                } else if (csi_len >= 2 && csi_buf[0] == '3' && c == '~') { /* Delete */
+                    if (cursor < idx) {
+                        prev_len = idx;
+                        for (i = cursor; i < idx - 1; i++) cmd[i] = cmd[i + 1];
+                        idx--;
+                        /* reprint from cursor to end, erase last char, reposition */
+                        for (i = cursor; i < idx; i++) putchar(cmd[i]);
+                        putchar(' ');
+                        for (i = cursor; i < idx + 1; i++) putchar('\b');
+                        (void)prev_len;
+                    }
+                }
+            }
+            continue;
+        }
+
+        /* Normal character processing */
+        if (c == '\x1b') {
+            esc = 1;
+            continue;
+        }
+
+        if (c == '\x03') {              /* Ctrl+C */
             printf("^C\n");
+            idx = 0; cursor = 0; hist_idx = -1;
             job_reap();
-            printf("%s $ ", cwd);
-            idx = 0;
-        } else if (c == '\n') {
+            snprintf(prompt, sizeof(prompt), "%s $ ", cwd);
+            printf("%s", prompt);
+            continue;
+        }
+
+        if (c == '\n') {
             putchar('\n');
             cmd[idx] = '\0';
-            dispatch(cmd);
-            idx = 0;
-            job_reap();
-            printf("%s $ ", cwd);
-        } else if (c == '\b') {
+            /* Push to history if non-empty and not duplicate of last */
             if (idx > 0) {
+                int is_dup = 0;
+                if (hist_count > 0) {
+                    int last = (hist_head + hist_count - 1) % 16;
+                    int j;
+                    is_dup = 1;
+                    for (j = 0; j <= idx; j++) {
+                        if (history[last][j] != cmd[j]) { is_dup = 0; break; }
+                    }
+                }
+                if (!is_dup) {
+                    int slot;
+                    if (hist_count < 16) {
+                        slot = (hist_head + hist_count) % 16;
+                        hist_count++;
+                    } else {
+                        slot = hist_head;
+                        hist_head = (hist_head + 1) % 16;
+                    }
+                    for (i = 0; i <= idx; i++) history[slot][i] = cmd[i];
+                }
+            }
+            hist_idx = -1;
+            dispatch(cmd);
+            idx = 0; cursor = 0;
+            job_reap();
+            snprintf(prompt, sizeof(prompt), "%s $ ", cwd);
+            printf("%s", prompt);
+            continue;
+        }
+
+        if (c == '\b' || c == '\x7f') { /* Backspace */
+            if (cursor > 0) {
+                prev_len = idx;
+                cursor--;
+                for (i = cursor; i < idx - 1; i++) cmd[i] = cmd[i + 1];
                 idx--;
-                printf("\b \b");
+                putchar('\b');
+                for (i = cursor; i < idx; i++) putchar(cmd[i]);
+                putchar(' ');
+                for (i = cursor; i < idx + 1; i++) putchar('\b');
             }
-        } else {
-            if (idx < (int)(sizeof(cmd) - 1)) {
-                cmd[idx++] = c;
-                printf("%c", c);
+            continue;
+        }
+
+        /* Sentinel bytes from fbdev console (non-ANSI path) */
+        if ((unsigned char)c == 0x10) { /* KEY_UP sentinel */
+            /* treat as ANSI up — synthesise */
+            char fake[] = "\x1b[A";
+            int fi;
+            for (fi = 0; fake[fi]; fi++) {
+                char fc = fake[fi];
+                /* re-inject by pushing directly: recurse via goto would be
+                 * messy, so just duplicate the history-up logic */
+                (void)fc;
             }
+            /* Simpler: just inline the up-history logic */
+            if (hist_count > 0) {
+                if (hist_idx < 0) hist_idx = hist_count;
+                if (hist_idx > 0) hist_idx--;
+                prev_len = idx;
+                int hslot = (hist_head + hist_idx) % 16;
+                int newlen = 0;
+                while (history[hslot][newlen]) newlen++;
+                for (i = 0; i < newlen; i++) cmd[i] = history[hslot][i];
+                idx = newlen; cursor = newlen;
+                reprint_line(prompt, cmd, idx, cursor, prev_len);
+            }
+            continue;
+        }
+        if ((unsigned char)c == 0x11) { /* KEY_DOWN sentinel */
+            if (hist_idx >= 0) {
+                hist_idx++;
+                prev_len = idx;
+                if (hist_idx >= hist_count) {
+                    hist_idx = -1;
+                    idx = 0; cursor = 0;
+                    reprint_line(prompt, cmd, 0, 0, prev_len);
+                } else {
+                    int hslot = (hist_head + hist_idx) % 16;
+                    int newlen = 0;
+                    while (history[hslot][newlen]) newlen++;
+                    for (i = 0; i < newlen; i++) cmd[i] = history[hslot][i];
+                    idx = newlen; cursor = newlen;
+                    reprint_line(prompt, cmd, idx, cursor, prev_len);
+                }
+            }
+            continue;
+        }
+        if ((unsigned char)c == 0x12) { /* KEY_LEFT sentinel */
+            if (cursor > 0) { cursor--; putchar('\b'); }
+            continue;
+        }
+        if ((unsigned char)c == 0x13) { /* KEY_RIGHT sentinel */
+            if (cursor < idx) { putchar(cmd[cursor]); cursor++; }
+            continue;
+        }
+        if ((unsigned char)c == 0x14) { /* KEY_HOME sentinel */
+            while (cursor > 0) { putchar('\b'); cursor--; }
+            continue;
+        }
+        if ((unsigned char)c == 0x15) { /* KEY_END sentinel */
+            while (cursor < idx) { putchar(cmd[cursor]); cursor++; }
+            continue;
+        }
+        if ((unsigned char)c == 0x16) { /* KEY_DEL sentinel */
+            if (cursor < idx) {
+                for (i = cursor; i < idx - 1; i++) cmd[i] = cmd[i + 1];
+                idx--;
+                for (i = cursor; i < idx; i++) putchar(cmd[i]);
+                putchar(' ');
+                for (i = cursor; i < idx + 1; i++) putchar('\b');
+            }
+            continue;
+        }
+
+        /* Ignore other control bytes */
+        if ((unsigned char)c < 32)
+            continue;
+
+        /* Insert printable character at cursor */
+        if (idx < (int)(sizeof(cmd) - 1)) {
+            for (i = idx; i > cursor; i--) cmd[i] = cmd[i - 1];
+            cmd[cursor] = c;
+            idx++;
+            /* Print char + suffix, then reposition */
+            for (i = cursor; i < idx; i++) putchar(cmd[i]);
+            cursor++;
+            for (i = cursor; i < idx; i++) putchar('\b');
         }
     }
 }

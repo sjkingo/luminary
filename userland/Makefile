@@ -1,18 +1,18 @@
 CROSS=      i686-elf-
 CC=         $(CROSS)gcc
 AR=         $(CROSS)ar
-CFLAGS=     -m32 -ffreestanding -std=gnu99 -Wall -Wextra -Wno-unused-function -g -I .
+CFLAGS=     -m32 -ffreestanding -std=gnu99 -Wall -Wextra -Wno-unused-function -g -I . -MMD -MP
 LDFLAGS=    -m32 -nostdlib -static -lgcc
 
 CRT0=       crt0.o
 LIBC=       libc/libc.a
-LIBC_SRCS=  libc/string.c libc/stdio.c libc/stdlib.c
+LIBC_SRCS=  libc/string.c libc/stdio.c libc/stdlib.c libc/termemu.c
 LIBC_OBJS=  $(LIBC_SRCS:.c=.o)
 
 # BIN_DIR is set by the root Makefile to _build/rootfs/bin
 BIN_DIR    ?= .
 
-PROGS=      init sh gui term uptime ps kill ls cat stat mkdir mount umount halt reboot wallpaper busy mv
+PROGS=      init sh gui term fbcon uptime ps kill ls cat stat mkdir mount umount halt reboot wallpaper busy mv
 TARGETS=    $(addprefix $(BIN_DIR)/,$(PROGS))
 
 .PHONY: all clean
@@ -22,7 +22,7 @@ all: $(TARGETS)
 $(LIBC): $(LIBC_OBJS)
 	$(AR) rcs $@ $^
 
-libc/%.o: libc/%.c libc/string.h libc/stdio.h libc/stdlib.h
+libc/%.o: libc/%.c
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(BIN_DIR)/%: $(CRT0) %.o $(LIBC)
@@ -32,9 +32,11 @@ $(BIN_DIR)/%: $(CRT0) %.o $(LIBC)
 %: %.c
 
 # Compile rules
-%.o: %.c syscall.h
+%.o: %.c
 	$(CC) $(CFLAGS) -c $< -o $@
 
+DEPFILES = $(wildcard *.d libc/*.d)
+-include $(DEPFILES)
 
 clean:
-	rm -f *.o $(LIBC_OBJS) $(LIBC)
+	rm -f *.o *.d $(LIBC_OBJS) $(patsubst %.o,%.d,$(LIBC_OBJS)) $(LIBC)

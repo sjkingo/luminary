@@ -38,6 +38,7 @@
 #define SYS_UMOUNT      47
 #define SYS_FSTAT       48
 #define SYS_RENAME      49
+#define SYS_BRK         50
 
 #define WNOHANG         1   /* waitpid flag: return -1 immediately if child hasn't exited */
 
@@ -296,5 +297,22 @@ static inline int fstat(int fd, struct vfs_stat *st)
 static inline int rename(const char *old_path, const char *new_path)
 {
     return syscall2(SYS_RENAME, (unsigned int)old_path, (unsigned int)new_path);
+}
+
+/* brk: set program break to addr; returns new break, or current break if addr==0 */
+static inline unsigned int brk(unsigned int addr)
+{
+    return (unsigned int)syscall1(SYS_BRK, addr);
+}
+
+/* sbrk: increment program break by increment bytes; returns old break or (void*)-1 on failure */
+static inline void *sbrk(int increment)
+{
+    unsigned int cur = (unsigned int)syscall1(SYS_BRK, 0);
+    if (increment == 0)
+        return (void *)cur;
+    unsigned int newbrk = cur + (unsigned int)increment;
+    unsigned int got = (unsigned int)syscall1(SYS_BRK, newbrk);
+    return (got == newbrk) ? (void *)cur : (void *)-1;
 }
 

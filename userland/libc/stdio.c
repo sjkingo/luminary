@@ -184,11 +184,13 @@ int sprintf(char *buf, const char *fmt, ...)
 
 int printf(const char *fmt, ...)
 {
+    char buf[1024];
     va_list args;
     va_start(args, fmt);
-    _out_t o = { 0, 0, 0 };  /* buf=NULL → write directly to stdout */
-    int r = _vsnprintf_core(&o, fmt, args);
+    int r = vsnprintf(buf, sizeof(buf), fmt, args);
     va_end(args);
+    if (r > 0)
+        _write(buf, (unsigned int)r);
     return r;
 }
 
@@ -196,7 +198,7 @@ int puts(const char *s)
 {
     unsigned int len = (unsigned int)strlen(s);
     _write(s, len);
-    _write("\n", 1);
+    _write("\n", 1);  /* two writes — acceptable for puts */
     return 0;
 }
 

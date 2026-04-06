@@ -4,11 +4,12 @@
 #include "syscall.h"
 
 /* ── request codes ───────────────────────────────────────────────────────── */
-#define SYS_CTL_HALT    1
-#define SYS_CTL_REBOOT  2
-#define SYS_CTL_UPTIME  3
-#define SYS_CTL_PS      4
-#define SYS_CTL_MOUNTS  5
+#define SYS_CTL_HALT       1
+#define SYS_CTL_REBOOT     2
+#define SYS_CTL_UPTIME     3
+#define SYS_CTL_PS         4
+#define SYS_CTL_MOUNTS     5
+#define SYS_CTL_GUI_ACTIVE 6
 
 /* ── argument structs ────────────────────────────────────────────────────── */
 

@@ -84,7 +84,12 @@ static uint32_t pipe_write_##i(uint32_t off, uint32_t len, const void *buf)    \
     (void)off;                                                                  \
     struct pipe *p = pipe_table[i].p;                                           \
     const char *cbuf = (const char *)buf;                                       \
-    if (p->read_refs == 0) return (uint32_t)-1; /* broken pipe */              \
+    if (p->read_refs == 0) {                                                    \
+        DBGK("pipe_write_%d: broken pipe (read_refs=0) len=%ld pid=%ld\n",     \
+             i, (long)(uint32_t)len,                                            \
+             running_task ? (long)running_task->pid : 0L);                     \
+        return (uint32_t)-1; /* broken pipe */                                  \
+    }                                                                           \
     uint32_t written = 0;                                                       \
     while (written < len) {                                                     \
         if (pipe_free(p) == 0) {                                                \
@@ -137,6 +142,10 @@ void pipe_notify_close(struct vfs_node *node)
         if (node == pipe_table[i].read_node) {
             if (pipe_table[i].p->read_refs > 0)
                 pipe_table[i].p->read_refs--;
+            DBGK("pipe_notify_close: slot=%d READ closed, read_refs=%ld write_refs=%ld caller=%ld\n",
+                 i, (long)pipe_table[i].p->read_refs,
+                 (long)pipe_table[i].p->write_refs,
+                 running_task ? (long)running_task->pid : -1L);
             if (pipe_table[i].p->read_refs == 0 &&
                 pipe_table[i].p->write_refs == 0) {
                 kfree(pipe_table[i].p);
@@ -151,6 +160,10 @@ void pipe_notify_close(struct vfs_node *node)
         if (node == pipe_table[i].write_node) {
             if (pipe_table[i].p->write_refs > 0)
                 pipe_table[i].p->write_refs--;
+            DBGK("pipe_notify_close: slot=%d WRITE closed, read_refs=%ld write_refs=%ld caller=%ld\n",
+                 i, (long)pipe_table[i].p->read_refs,
+                 (long)pipe_table[i].p->write_refs,
+                 running_task ? (long)running_task->pid : -1L);
             if (pipe_table[i].p->read_refs == 0 &&
                 pipe_table[i].p->write_refs == 0) {
                 kfree(pipe_table[i].p);
@@ -171,13 +184,45 @@ void pipe_fork_fd(struct vfs_node *node)
         if (!pipe_table[i].p) continue;
         if (node == pipe_table[i].read_node) {
             pipe_table[i].p->read_refs++;
+            DBGK("pipe_fork_fd: slot=%d READ read_refs=%ld caller=%ld\n",
+                 i, (long)pipe_table[i].p->read_refs,
+                 running_task ? (long)running_task->pid : -1L);
             return;
         }
         if (node == pipe_table[i].write_node) {
             pipe_table[i].p->write_refs++;
+            DBGK("pipe_fork_fd: slot=%d WRITE write_refs=%ld caller=%ld\n",
+                 i, (long)pipe_table[i].p->write_refs,
+                 running_task ? (long)running_task->pid : -1L);
             return;
         }
     }
+}
+
+/* ── pipe_write_nb ───────────────────────────────────────────────────────── */
+/* Non-blocking write into a pipe's ring buffer.  Drops bytes if the buffer
+ * is full.  Safe to call from kernel context (no yielding, no blocking). */
+
+uint32_t pipe_write_nb(struct pipe *p, const char *buf, uint32_t len)
+{
+    uint32_t written = 0;
+    while (written < len && pipe_free(p) > 0) {
+        p->buf[p->head & PIPE_MASK] = buf[written++];
+        p->head++;
+    }
+    return written;
+}
+
+/* ── pipe_get_struct ─────────────────────────────────────────────────────── */
+
+struct pipe *pipe_get_struct(struct vfs_node *node)
+{
+    for (int i = 0; i < PIPE_MAX; i++) {
+        if (!pipe_table[i].p) continue;
+        if (node == pipe_table[i].read_node || node == pipe_table[i].write_node)
+            return pipe_table[i].p;
+    }
+    return NULL;
 }
 
 /* ── pipe_create ─────────────────────────────────────────��───────────────── */
@@ -190,6 +235,8 @@ int pipe_create(struct vfs_node **read_out, struct vfs_node **write_out)
         if (!pipe_table[i].p) { slot = i; break; }
     }
     if (slot < 0) return -1;
+    DBGK("pipe_create: slot=%d caller_pid=%ld\n",
+         slot, running_task ? (long)running_task->pid : -1L);
 
     struct pipe *p = (struct pipe *)kmalloc(sizeof(struct pipe));
     if (!p) return -1;

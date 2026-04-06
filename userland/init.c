@@ -4,7 +4,7 @@
 #include "syscall.h"
 #include "libc/stdio.h"
 
-#define INIT_CHILD "/bin/sh"
+#define INIT_CHILD "/bin/fbcon"
 
 int main(int argc, char **argv)
 {

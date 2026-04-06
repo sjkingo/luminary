@@ -4,6 +4,7 @@
 #include "kernel/kernel.h"
 #include "kernel/dev.h"
 #include "kernel/elf.h"
+#include "kernel/pipe.h"
 #include "kernel/heap.h"
 #include "kernel/pmm.h"
 #include "kernel/sched.h"
@@ -418,7 +419,7 @@ void create_elf_task(struct task *t, char *name, int prio,
     /* Load the ELF into the task's address space (also allocates stack) */
     uint32_t user_sp = 0;
     uint32_t entry_point = elf_load(elf_data, elf_size, t->page_dir_phys,
-                                    0, NULL, &user_sp);
+                                    0, NULL, &user_sp, &t->brk);
     if (entry_point == 0)
         panic("create_elf_task: ELF load failed");
 
@@ -481,6 +482,17 @@ void task_kill(struct task *t)
     DBGK("task_kill: killing pid %d (%s), running_task=%d\n", t->pid, t->name, running_task->pid);
     if (t->pid == PID_IDLE)
         panic("task_kill: cannot kill idle task");
+
+    /* Close all open file descriptors so pipe refcounts are decremented.
+     * Must happen before the task is unlinked from the scheduler queue. */
+    for (int _i = 0; _i < VFS_FD_MAX; _i++) {
+        if (t->fds[_i].open) {
+            struct vfs_node *_n = t->fds[_i].node;
+            t->fds[_i].open = false;
+            t->fds[_i].node = NULL;
+            if (_n) pipe_notify_close(_n);
+        }
+    }
 
     /* Disable interrupts while manipulating the scheduler queue.
      * Callers that already have interrupts disabled (e.g. sys_kill, the
@@ -753,7 +765,8 @@ int task_exec(const void *elf_data, uint32_t elf_size, struct trap_frame *frame,
     uint32_t new_dir = vmm_create_page_dir();
 
     uint32_t new_sp = 0;
-    uint32_t entry = elf_load(elf_data, elf_size, new_dir, argc, argv, &new_sp);
+    uint32_t new_brk = 0;
+    uint32_t entry = elf_load(elf_data, elf_size, new_dir, argc, argv, &new_sp, &new_brk);
     if (entry == 0) {
         vmm_destroy_page_dir(new_dir);
         return -1;
@@ -764,6 +777,7 @@ int task_exec(const void *elf_data, uint32_t elf_size, struct trap_frame *frame,
 
     /* Switch to new address space before destroying the old one */
     running_task->page_dir_phys = new_dir;
+    running_task->brk           = new_brk;
     vmm_switch_page_dir(new_dir);
 
     vmm_destroy_page_dir(old_dir);

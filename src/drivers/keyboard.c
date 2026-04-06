@@ -4,6 +4,7 @@
 
 #include "cpu/x86.h"
 #include "drivers/keyboard.h"
+#include "kernel/kernel.h"
 
 #define KB_DATA_PORT 0x60
 
@@ -44,6 +45,7 @@ static struct {
     unsigned int tail; /* read index */
     int shift;
     int ctrl;
+    int alt;
     int caps;
     int extended; /* set when 0xE0 prefix received */
 } kb;
@@ -54,6 +56,7 @@ void init_keyboard(void)
     kb.tail = 0;
     kb.shift = 0;
     kb.ctrl  = 0;
+    kb.alt   = 0;
     kb.caps = 0;
     kb.extended = 0;
 }
@@ -80,8 +83,16 @@ void keyboard_irq_handler(void)
     if (kb.extended) {
         kb.extended = 0;
         /* Page Up (0xE0 0x49) and Page Down (0xE0 0x51) - make codes only */
-        if (scancode == 0x49) { kb_buf_put(KEY_PGUP); return; }
-        if (scancode == 0x51) { kb_buf_put(KEY_PGDN); return; }
+        if (scancode == 0x49) { kb_buf_put(KEY_PGUP);  return; }
+        if (scancode == 0x51) { kb_buf_put(KEY_PGDN);  return; }
+        /* Navigation keys - make codes only */
+        if (scancode == 0x48) { kb_buf_put(KEY_UP);    return; }
+        if (scancode == 0x50) { kb_buf_put(KEY_DOWN);  return; }
+        if (scancode == 0x4B) { kb_buf_put(KEY_LEFT);  return; }
+        if (scancode == 0x4D) { kb_buf_put(KEY_RIGHT); return; }
+        if (scancode == 0x47) { kb_buf_put(KEY_HOME);  return; }
+        if (scancode == 0x4F) { kb_buf_put(KEY_END);   return; }
+        if (scancode == 0x53) { kb_buf_put(KEY_DEL);   return; }
         /* Right Ctrl make/break (0xE0 0x1D / 0xE0 0x9D) */
         if (scancode == 0x1D) { kb.ctrl = 1; return; }
         if (scancode == 0x9D) { kb.ctrl = 0; return; }
@@ -103,6 +114,14 @@ void keyboard_irq_handler(void)
      * Must be checked BEFORE the generic break-code filter below. */
     if (scancode == 0x1D) { kb.ctrl = 1; return; }
     if (scancode == 0x9D) { kb.ctrl = 0; return; }
+
+    /* Alt make/break (LAlt = 0x38 make, 0xB8 break).
+     * Must be checked BEFORE the generic break-code filter below. */
+    if (scancode == 0x38) { kb.alt = 1; return; }
+    if (scancode == 0xB8) { kb.alt = 0; return; }
+
+    /* Alt+F4: emit KEY_ALT_F4 sentinel */
+    if (kb.alt && scancode == 0x3E) { kb_buf_put(KEY_ALT_F4); return; }
 
     /* Caps lock toggle (make only) */
     if (scancode == 0x3A) {
@@ -151,6 +170,9 @@ int keyboard_read(char *buf, unsigned int len)
         buf[count++] = kb.data[kb.tail];
         kb.tail = (kb.tail + 1) % KB_BUFFER_SIZE;
     }
+    if (count > 0)
+        DBGK("keyboard_read: %d bytes, first=0x%02x\n",
+             (int)count, (unsigned int)(unsigned char)buf[0]);
     return (int)count;
 }
 

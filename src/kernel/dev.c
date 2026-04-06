@@ -1,7 +1,15 @@
-/* dev.c — character device nodes for /dev/stdin, /dev/stdout, /dev/stderr.
+/* dev.c — character device nodes for /dev/stdin, /dev/stdout, /dev/stderr,
+ *          and /dev/console.
  *
- * init_devfs() creates a /dev directory in the VFS tree and populates it
- * with three chardev nodes backed by the keyboard and framebuffer console.
+ * init_devfs() creates a /dev directory in the VFS tree, registers the
+ * standard stream chardevs, and creates the console pipe.
+ *
+ * Console pipe: stdout_write_op writes to a kernel-managed pipe (non-blocking,
+ * drops bytes if full — never stalls the kernel).  fbcon opens /dev/console
+ * to read from the pipe read end and renders output to the framebuffer.
+ * writechar_fb is kept as a fallback for the early-boot window before fbcon
+ * starts consuming the pipe.
+ *
  * After init_devfs() runs, task_open_std_fds() pre-opens fds 0/1/2 on
  * every new task so that sys_read/sys_write can dispatch through the VFS.
  */
@@ -11,6 +19,7 @@
 
 #include "kernel/dev.h"
 #include "kernel/kernel.h"
+#include "kernel/pipe.h"
 #include "kernel/sched.h"
 #include "kernel/vfs.h"
 #include "kernel/task.h"
@@ -24,11 +33,18 @@ struct vfs_node *dev_stdin  = NULL;
 struct vfs_node *dev_stdout = NULL;
 struct vfs_node *dev_stderr = NULL;
 
+/* ── console pipe ────────────────────────────────────────────────────────── */
+/* console_pipe: write end used by stdout_write_op; read end exposed as
+ * /dev/console for fbcon to read.  NULL until init_devfs creates it. */
+static struct pipe *console_pipe = NULL;
+
 /* ── chardev ops ─────────────────────────────────────────────────────────── */
 
-/* Blocking keyboard read — exact semantics as the old sys_read inner loop.
+/* Blocking keyboard read.
  * Yields while the keyboard is owned by the GUI compositor.
- * Filters Page Up/Down sentinels for in-kernel scrollback. */
+ * Discards navigation sentinel bytes (KEY_UP..KEY_DEL) — fbcon handles
+ * these via its own stdin relay; the raw shell on the fbdev console has
+ * no cursor movement and should never receive them. */
 static uint32_t stdin_read_op(uint32_t offset, uint32_t len, void *buf)
 {
     (void)offset;
@@ -36,8 +52,11 @@ static uint32_t stdin_read_op(uint32_t offset, uint32_t len, void *buf)
 
     for (;;) {
         /* While the GUI compositor owns the keyboard, block without consuming
-         * any input so keystrokes route to the compositor. */
+         * any input so keystrokes route to the compositor.
+         * Non-blocking callers (read_nb) must not block here — return 0. */
         if (kbd_is_owned()) {
+            if (running_task && running_task->read_nonblock)
+                return 0;
             enable_interrupts();
             if (running_task) running_task->blocking = true;
             asm volatile("hlt");
@@ -48,19 +67,24 @@ static uint32_t stdin_read_op(uint32_t offset, uint32_t len, void *buf)
 
         int n = keyboard_read(cbuf, len);
 
-        /* Filter scroll sentinels and handle them in-kernel */
         int out = 0;
         for (int i = 0; i < n; i++) {
-            if (cbuf[i] == KEY_PGUP)
-                fbdev_scroll_up();
-            else if (cbuf[i] == KEY_PGDN)
-                fbdev_scroll_down();
-            else
-                cbuf[out++] = cbuf[i];
+            unsigned char c = (unsigned char)cbuf[i];
+            /* Discard navigation sentinels — fbcon handles these via its own
+             * stdin relay loop; they have no meaning on the raw fbdev console */
+            if (c == KEY_UP    || c == KEY_DOWN  || c == KEY_LEFT   ||
+                c == KEY_RIGHT  || c == KEY_HOME  || c == KEY_END    ||
+                c == KEY_DEL    || c == KEY_ALT_F4)
+                continue;
+            cbuf[out++] = cbuf[i];
         }
 
-        if (out > 0)
+        if (out > 0) {
+            DBGK("stdin_read_op: pid=%ld returning %d bytes nb=%d\n",
+                 running_task ? (long)running_task->pid : 0L,
+                 out, running_task && running_task->read_nonblock ? 1 : 0);
             return (uint32_t)out;
+        }
 
         /* Non-blocking mode: return immediately with 0 bytes */
         if (running_task && running_task->read_nonblock)
@@ -79,19 +103,28 @@ static uint32_t stdout_write_op(uint32_t offset, uint32_t len, const void *buf)
     (void)offset;
     static const char hex[] = "0123456789abcdef";
     const unsigned char *cbuf = (const unsigned char *)buf;
+
     for (uint32_t i = 0; i < len; i++) {
         unsigned char c = cbuf[i];
+
         if (c == '\n' || c == '\r' || c == '\t' || c == '\b' ||
             (c >= 0x20 && c <= 0x7E)) {
-            writechar_fb((char)c);
+            if (console_pipe)
+                pipe_write_nb(console_pipe, (const char *)&c, 1);
+            else
+                writechar_fb((char)c);
             write_serial((char)c);
         } else {
             /* non-printable: render as \xNN */
             char esc[4] = { '\\', 'x', hex[c >> 4], hex[c & 0xF] };
-            for (int j = 0; j < 4; j++) {
-                writechar_fb(esc[j]);
-                write_serial(esc[j]);
+            if (console_pipe)
+                pipe_write_nb(console_pipe, esc, 4);
+            else {
+                for (int j = 0; j < 4; j++)
+                    writechar_fb(esc[j]);
             }
+            for (int j = 0; j < 4; j++)
+                write_serial(esc[j]);
         }
     }
     return len;
@@ -101,12 +134,15 @@ static uint32_t stdout_write_op(uint32_t offset, uint32_t len, const void *buf)
 
 void init_devfs(void)
 {
+    struct vfs_node *read_node;
+    struct vfs_node *write_node;
+    struct vfs_node *dev_dir;
     struct vfs_node *root = vfs_get_root();
     if (!root)
         panic("init_devfs: VFS root not mounted");
 
     /* Create /dev directory */
-    struct vfs_node *dev_dir = vfs_alloc_node();
+    dev_dir = vfs_alloc_node();
     if (!dev_dir)
         panic("init_devfs: node pool exhausted");
     strncpy(dev_dir->name, "dev", VFS_NAME_MAX - 1);
@@ -125,7 +161,7 @@ void init_devfs(void)
     dev_stdin->write_op = NULL;
     vfs_add_child(dev_dir, dev_stdin);
 
-    /* /dev/stdout — writable chardev backed by framebuffer console */
+    /* /dev/stdout — writable chardev routed through the console pipe */
     dev_stdout = vfs_alloc_node();
     if (!dev_stdout) panic("init_devfs: node pool exhausted");
     strncpy(dev_stdout->name, "stdout", VFS_NAME_MAX - 1);
@@ -144,6 +180,17 @@ void init_devfs(void)
     dev_stderr->read_op  = NULL;
     dev_stderr->write_op = stdout_write_op;
     vfs_add_child(dev_dir, dev_stderr);
+
+    /* Create the console pipe.  stdout_write_op writes to the write end;
+     * /dev/console exposes the read end for fbcon to drain.
+     * The write_node is kept internal (kernel-only); read_node is published
+     * under /dev/console so fbcon can open it with full pipe semantics. */
+    if (pipe_create(&read_node, &write_node) == 0) {
+        console_pipe = pipe_get_struct(write_node);
+        strncpy(read_node->name, "console", VFS_NAME_MAX - 1);
+        read_node->inode = 103;
+        vfs_add_child(dev_dir, read_node);
+    }
 
     printk("devfs: devfs mounted at /dev\n");
 }

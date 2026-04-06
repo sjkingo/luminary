@@ -2,16 +2,34 @@
 
 void memset(void *dest, int c, int len)
 {
-    char *p = dest;
-    while (len--)
-        *p++ = c;
+    unsigned char b = (unsigned char)c;
+    unsigned int w = ((unsigned int)b)       |
+                     ((unsigned int)b << 8)  |
+                     ((unsigned int)b << 16) |
+                     ((unsigned int)b << 24);
+    unsigned int *d32 = (unsigned int *)dest;
+    int words = len >> 2;
+    while (words--)
+        *d32++ = w;
+    char *p = (char *)d32;
+    int tail = len & 3;
+    while (tail--)
+        *p++ = (char)b;
 }
 
 void *memcpy(void *dest, const void *src, int n)
 {
-    char *d = (char *)dest;
-    char *s = (char *)src;
-    while (n--)
+    /* Use 32-bit stores for the bulk — ~4x faster than byte loop for large
+     * MMIO blits (back→fb_hw).  Tail handles any non-dword remainder. */
+    unsigned int *d32 = (unsigned int *)dest;
+    const unsigned int *s32 = (const unsigned int *)src;
+    int words = n >> 2;
+    while (words--)
+        *d32++ = *s32++;
+    char *d = (char *)d32;
+    const char *s = (const char *)s32;
+    int tail = n & 3;
+    while (tail--)
         *d++ = *s++;
     return dest;
 }
